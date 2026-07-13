@@ -62,7 +62,12 @@ def format_func(number):
 
 
 def test_major1_infinite_loop_timeout():
-    """MAJOR 1 FIX: Infinite loop candidates fail within timeout."""
+    """Robustness: an infinite-loop candidate is killed within the hard timeout.
+
+    The checker runs candidates in a separate subprocess; subprocess.run kills
+    the child on timeout, so runaway code is actually terminated (no leaked
+    thread, no hang).
+    """
     infinite_loop = """
 def sort_func(records):
     while True:
@@ -81,30 +86,33 @@ def sort_func(records):
     assert elapsed < 10, f"Timeout took too long: {elapsed:.1f}s (expected <10s)"
 
 
-def test_major1_import_os_blocked():
-    """MAJOR 1 FIX: Candidates importing os/socket are blocked."""
-    import_os = """
-def sort_func(records):
-    import os
-    return os.listdir('.')
-"""
-    
-    checker = CHECKERS["sort_asc_stable"]
-    result = checker.check(import_os)
-    assert not result.passed, f"import os should be blocked, but got: {result.details}"
-
-
-def test_major1_import_socket_blocked():
-    """MAJOR 1 FIX: Candidates importing socket are blocked."""
-    import_socket = """
+def test_count_rejects_boolean_predicate():
+    """Science bug: a boolean 'contains?' predicate must NOT be labeled as a
+    count checker. Python's True==1/False==0 would otherwise let
+    `return substring in text` masquerade as count==0/1. The runner rejects a
+    bool result where an int is expected, and a discriminating count>=2 case
+    guards it further.
+    """
+    boolean_predicate = """
 def count_func(text, substring):
-    import socket
-    return 0
+    return substring in text
 """
-    
-    checker = CHECKERS["count_case_nonoverlap"]
-    result = checker.check(import_socket)
-    assert not result.passed, f"import socket should be blocked, but got: {result.details}"
+    for check_id in ("count_case_nonoverlap", "count_nocase_nonoverlap", "count_case_overlap"):
+        result = CHECKERS[check_id].check(boolean_predicate)
+        assert not result.passed, \
+            f"{check_id} must reject a boolean predicate, got: {result.details}"
+
+
+def test_candidate_exception_fails_gracefully():
+    """Isolation: a candidate that raises fails its checker (passed=False) and
+    never crashes validation."""
+    raising = """
+def sort_func(records):
+    raise RuntimeError("boom")
+"""
+    result = CHECKERS["sort_asc_stable"].check(raising)
+    assert not result.passed
+    assert "boom" in result.details or "raised" in result.details.lower() or "error" in result.details.lower()
 
 
 def test_major2_naive_fstring_rejected_by_halfup():

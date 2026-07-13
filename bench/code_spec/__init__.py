@@ -8,8 +8,6 @@ realized by an actual reference implementation with executable gold checkers.
 
 from typing import Any, Dict, List, Tuple
 import textwrap
-import threading
-import queue
 
 from bench.build import (
     FullSpec,
@@ -23,132 +21,108 @@ from common.schema import Task
 
 
 # ============================================================================
-# GOLD CHECKERS - Execute candidate code to verify behavior
+# GOLD CHECKERS - Execute candidate code in an ISOLATED subprocess
 # ============================================================================
 
-import threading
-import queue
+import json
+import os
+import subprocess
+import sys
+
+_RUNNER_PATH = os.path.join(os.path.dirname(__file__), "_runner.py")
+_TIMEOUT_SECONDS = 5.0
+
+# Deterministic execution => results are cacheable. Keyed by (checker id,
+# candidate source) to avoid re-spawning a subprocess for repeated
+# (checker, candidate) pairs during n×n validation across k-variants.
+_RESULT_CACHE: Dict[Tuple[str, str], Tuple[bool, str]] = {}
 
 
 class CodeChecker(GoldChecker):
-    """Base checker that executes Python code safely with timeout and sandboxing."""
-    
+    """Executes a candidate in a separate, killable subprocess.
+
+    Correctness/robustness guarantees (see bench/code_spec/_runner.py for the
+    threat model):
+    - HARD timeout: a runaway/infinite-loop candidate is killed, never hangs
+      validation and leaves no live thread behind.
+    - Isolation: each candidate runs in its own process.
+    - Deterministic labeling: a bool result is never accepted where an int is
+      expected (guards against `True == 1` masquerading as a count).
+    NOTE: this is isolation + timeout, NOT a security sandbox — candidates are
+    assumed to be non-adversarial model outputs.
+    """
+
     def __init__(self, test_cases: List[Tuple[Any, Any]], entrypoint: str, description: str = ""):
         """
         Args:
-            test_cases: List of (input, expected_output) pairs
-            entrypoint: The explicit function name to call (e.g., 'sort_func', 'filter_func')
-            description: Human-readable description for diagnostics
+            test_cases: List of (input, expected_output) pairs. A tuple input is
+                treated as multiple positional args; any other input is a single arg.
+            entrypoint: The explicit function name to call (e.g., 'sort_func').
+            description: Human-readable id for diagnostics.
         """
         self.test_cases = test_cases
         self.entrypoint = entrypoint
         self.description = description
-    
+
+    def _serialize_cases(self) -> List[Dict[str, Any]]:
+        cases = []
+        for inp, expected in self.test_cases:
+            multi = isinstance(inp, tuple)
+            cases.append({
+                "multi": multi,
+                "input": list(inp) if multi else inp,
+                "expected": expected,
+            })
+        return cases
+
     def check(self, candidate: Any) -> CheckResult:
-        """Execute candidate code against test cases with timeout and sandboxing."""
         if not isinstance(candidate, str):
-            return CheckResult(passed=False, details=f"Candidate must be Python code string, got {type(candidate)}")
-        
-        # MAJOR 1 FIX: Run with timeout using threading (Windows-compatible, simpler than multiprocessing)
-        result_queue = queue.Queue()
-        
-        def _run_candidate():
-            """Worker function that runs in thread."""
-            try:
-                # Restricted builtins - allow safe modules only
-                safe_modules = {'decimal', 'math', 're', 'itertools', 'functools'}
-                
-                # Get the real __import__ before we override
-                import builtins as real_builtins
-                original_import = real_builtins.__import__
-                
-                def safe_import(name, globals_dict=None, locals_dict=None, fromlist=(), level=0):
-                    if name.split('.')[0] not in safe_modules:
-                        raise ImportError(f"Module '{name}' is not allowed for security")
-                    return original_import(name, globals_dict, locals_dict, fromlist, level)
-                
-                # Create globals dict with safe builtins dictionary
-                safe_builtins_dict = {
-                    'None': None, 'True': True, 'False': False,
-                    'bool': bool, 'int': int, 'float': float, 'str': str,
-                    'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
-                    'len': len, 'range': range, 'enumerate': enumerate,
-                    'zip': zip, 'map': map, 'filter': filter, 'sorted': sorted,
-                    'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round,
-                    'all': all, 'any': any, 'isinstance': isinstance,
-                    'ValueError': ValueError, 'TypeError': TypeError,
-                    'KeyError': KeyError, 'IndexError': IndexError,
-                    'RuntimeError': RuntimeError, 'Exception': Exception,
-                    '__import__': safe_import,
-                }
-                
-                namespace = {
-                    '__builtins__': safe_builtins_dict,
-                    '__name__': '__main__',
-                }
-                
-                # Execute candidate code
-                exec(candidate, namespace)
-                
-                # BLOCKER 1 FIX: Resolve entrypoint by NAME first, fallback to single user function
-                if self.entrypoint in namespace and callable(namespace[self.entrypoint]):
-                    func = namespace[self.entrypoint]
-                else:
-                    # Fallback: single user-defined function (not imported, not a class)
-                    user_funcs = []
-                    for k, v in namespace.items():
-                        if (callable(v) 
-                            and not k.startswith('__')
-                            and not isinstance(v, type)  # exclude classes
-                            and hasattr(v, '__module__')
-                            and getattr(v, '__module__', None) in (None, '__main__', namespace.get('__name__', '__main__'))):
-                            user_funcs.append(v)
-                    
-                    if len(user_funcs) == 1:
-                        func = user_funcs[0]
-                    else:
-                        result_queue.put(("error", f"Could not resolve entrypoint '{self.entrypoint}'. Found {len(user_funcs)} user-defined functions."))
-                        return
-                
-                # Run test cases
-                for i, (inp, expected) in enumerate(self.test_cases):
-                    if isinstance(inp, tuple):
-                        result = func(*inp)
-                    else:
-                        result = func(inp)
-                    
-                    # Handle floating point comparison
-                    if isinstance(expected, float) and isinstance(result, float):
-                        if abs(result - expected) > 1e-9:
-                            result_queue.put(("fail", f"Test {i+1} failed: input={inp}, expected={expected}, got={result}"))
-                            return
-                    elif result != expected:
-                        result_queue.put(("fail", f"Test {i+1} failed: input={inp}, expected={expected}, got={result}"))
-                        return
-                
-                result_queue.put(("pass", f"All {len(self.test_cases)} tests passed"))
-                
-            except Exception as e:
-                result_queue.put(("error", f"Execution error: {e}"))
-        
-        thread = threading.Thread(target=_run_candidate, daemon=True)
-        thread.start()
-        thread.join(timeout=5.0)  # 5 second timeout
-        
-        if thread.is_alive():
-            # Timeout - thread still running (infinite loop)
-            # Note: Cannot forcibly kill thread in Python, but daemon thread will die with process
-            return CheckResult(passed=False, details=f"{self.description} - Execution timeout (infinite loop or too slow)")
-        
-        # Get result
+            return CheckResult(passed=False,
+                               details=f"Candidate must be Python code string, got {type(candidate)}")
+
+        cache_key = (self.description, candidate)
+        cached = _RESULT_CACHE.get(cache_key)
+        if cached is not None:
+            passed, msg = cached
+            return CheckResult(passed=passed, details=f"{self.description} - {msg}")
+
+        payload = json.dumps({
+            "candidate": candidate,
+            "entrypoint": self.entrypoint,
+            "test_cases": self._serialize_cases(),
+        })
+
         try:
-            status, message = result_queue.get(timeout=0.1)
-            if status == "pass":
-                return CheckResult(passed=True, details=f"{self.description} - {message}")
-            else:
-                return CheckResult(passed=False, details=f"{self.description} - {message}")
-        except queue.Empty:
-            return CheckResult(passed=False, details=f"{self.description} - No result from execution")
+            proc = subprocess.run(
+                [sys.executable, _RUNNER_PATH],
+                input=payload,
+                text=True,
+                capture_output=True,
+                timeout=_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            # subprocess.run kills the child on timeout -> runaway code is
+            # actually terminated.
+            result = (False, "Execution timeout (infinite loop or too slow)")
+            _RESULT_CACHE[cache_key] = result
+            return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
+
+        if proc.returncode != 0:
+            msg = f"Runner exited {proc.returncode}: {proc.stderr.strip()[:200]}"
+            _RESULT_CACHE[cache_key] = (False, msg)
+            return CheckResult(passed=False, details=f"{self.description} - {msg}")
+
+        try:
+            verdict = json.loads(proc.stdout.strip().splitlines()[-1])
+        except Exception as exc:  # noqa: BLE001
+            msg = f"Bad runner output: {exc} :: {proc.stdout[:200]}"
+            _RESULT_CACHE[cache_key] = (False, msg)
+            return CheckResult(passed=False, details=f"{self.description} - {msg}")
+
+        passed = verdict.get("status") == "pass"
+        msg = verdict.get("message", "")
+        _RESULT_CACHE[cache_key] = (passed, msg)
+        return CheckResult(passed=passed, details=f"{self.description} - {msg}")
 
 
 # ============================================================================
@@ -592,18 +566,24 @@ TEST_CASES = {
         ('x,,z', ['x', None, 'z']),
     ],
     
-    # Count occurrences - show case-sensitive vs overlapping differences
+    # Count occurrences - show case-sensitive vs overlapping differences.
+    # NOTE: every checker includes a case whose expected count is >= 2, so a
+    # boolean predicate (`substring in text` -> True==1/False==0) cannot pass
+    # by coincidence (the runner also rejects bool-for-int type mismatches).
     "count_case_nonoverlap": [
-        (('HELLO', 'l'), 0),  # Case-sensitive: 'l' not in 'HELLO'
-        (('aaa', 'aa'), 1),  # Non-overlapping: count('aa') = 1
+        (('HELLO', 'l'), 0),      # Case-sensitive: 'l' not in 'HELLO'
+        (('aaa', 'aa'), 1),       # Non-overlapping: count('aa') = 1
+        (('banana', 'a'), 3),     # Discriminating: count = 3 (a bool would give 1)
     ],
     "count_nocase_nonoverlap": [
-        (('HELLO', 'l'), 2),  # Case-insensitive: finds 'l' in 'HELLO'
-        (('aaa', 'aa'), 1),  # Non-overlapping: count('aa') = 1
+        (('HELLO', 'l'), 2),      # Case-insensitive: finds 'l' in 'HELLO'
+        (('aaa', 'aa'), 1),       # Non-overlapping: count('aa') = 1
+        (('BaNaNa', 'a'), 3),     # Discriminating: case-insensitive count = 3
     ],
     "count_case_overlap": [
-        (('aaa', 'aa'), 2),  # Overlapping: finds 2
-        (('HELLO', 'l'), 0),  # Case-sensitive: 'l' not in 'HELLO'
+        (('aaa', 'aa'), 2),       # Overlapping: finds 2
+        (('HELLO', 'l'), 0),      # Case-sensitive: 'l' not in 'HELLO'
+        (('aaaa', 'aa'), 3),      # Discriminating: overlapping count = 3
     ],
     
     # Format number - MAJOR 2 FIX: tie-breaking cases where half-up != Python default

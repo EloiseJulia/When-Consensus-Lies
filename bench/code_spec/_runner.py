@@ -1,0 +1,131 @@
+"""Isolated candidate-execution runner for the code_spec domain.
+
+Reads a JSON job from stdin, executes the candidate code in THIS separate
+process, runs the test cases, and writes a JSON verdict to stdout. Because it
+runs as a child process, the parent (`CodeChecker`) can enforce a HARD timeout
+by killing the whole process — an infinite-loop candidate is actually
+terminated, not merely abandoned on a daemon thread.
+
+THREAT MODEL (important, and deliberately scoped): candidates are ordinary
+model-generated solutions to coding prompts, NOT adversaries trying to escape a
+sandbox. This runner therefore provides *isolation + a hard timeout* (so a bad
+candidate cannot hang or corrupt the parent harness), NOT a security sandbox.
+We do not attempt to defeat Python introspection escapes; that is out of scope
+for a benchmark of non-adversarial code. The scientific guarantee we need is
+deterministic, correct labeling of realistic candidates plus robustness against
+crashes/hangs — both of which this provides.
+
+Job schema (stdin, one JSON object):
+    {
+      "candidate": "<python source string>",
+      "entrypoint": "sort_func",
+      "test_cases": [
+        {"multi": false, "input": <json>, "expected": <json>},
+        {"multi": true,  "input": [<arg1>, <arg2>], "expected": <json>}
+      ]
+    }
+
+Verdict (stdout, one JSON object): {"status": "pass"|"fail"|"error", "message": "..."}
+"""
+
+import json
+import sys
+
+
+FLOAT_TOL = 1e-9
+
+
+def _compare(result, expected):
+    """Deterministic equality with two guards that matter scientifically.
+
+    1. A bool result where a non-bool is expected is a TYPE MISMATCH (Python's
+       ``True == 1`` / ``False == 0`` would otherwise let a boolean predicate
+       masquerade as an integer count).
+    2. Floats compare within a tolerance.
+    """
+    if isinstance(expected, bool):
+        return isinstance(result, bool) and result == expected
+    if isinstance(result, bool):
+        return False
+    if isinstance(expected, float):
+        try:
+            return abs(result - expected) < FLOAT_TOL
+        except Exception:
+            return False
+    return result == expected
+
+
+def _resolve_entrypoint(namespace, entrypoint):
+    """Resolve the entrypoint by NAME; fall back to a single user-defined
+    function, ignoring imported callables and classes."""
+    fn = namespace.get(entrypoint)
+    if callable(fn) and not isinstance(fn, type):
+        return fn, None
+
+    user_funcs = []
+    for name, value in namespace.items():
+        if name.startswith("__"):
+            continue
+        if not callable(value) or isinstance(value, type):
+            continue
+        # Only functions actually defined by the candidate (module __main__),
+        # not imported callables.
+        if getattr(value, "__module__", None) in (None, "__main__"):
+            user_funcs.append(value)
+
+    if len(user_funcs) == 1:
+        return user_funcs[0], None
+    return None, (
+        f"Could not resolve entrypoint '{entrypoint}'. "
+        f"Found {len(user_funcs)} user-defined functions."
+    )
+
+
+def main():
+    try:
+        job = json.loads(sys.stdin.read())
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({"status": "error", "message": f"bad job: {exc}"}))
+        return
+
+    candidate = job["candidate"]
+    entrypoint = job["entrypoint"]
+    test_cases = job["test_cases"]
+
+    namespace = {"__name__": "__main__"}
+    try:
+        exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
+        return
+
+    func, err = _resolve_entrypoint(namespace, entrypoint)
+    if func is None:
+        print(json.dumps({"status": "error", "message": err}))
+        return
+
+    for i, tc in enumerate(test_cases):
+        inp = tc["input"]
+        expected = tc["expected"]
+        try:
+            if tc["multi"]:
+                result = func(*inp)
+            else:
+                result = func(inp)
+        except Exception as exc:  # noqa: BLE001
+            print(json.dumps({"status": "fail",
+                              "message": f"Test {i + 1} raised: {exc}"}))
+            return
+
+        if not _compare(result, expected):
+            print(json.dumps({"status": "fail",
+                              "message": f"Test {i + 1} failed: input={inp!r}, "
+                                         f"expected={expected!r}, got={result!r}"}))
+            return
+
+    print(json.dumps({"status": "pass",
+                      "message": f"All {len(test_cases)} tests passed"}))
+
+
+if __name__ == "__main__":
+    main()
