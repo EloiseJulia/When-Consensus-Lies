@@ -28,6 +28,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 _RUNNER_PATH = os.path.join(os.path.dirname(__file__), "_runner.py")
 _TIMEOUT_SECONDS = 5.0
@@ -44,8 +45,12 @@ class CodeChecker(GoldChecker):
     Correctness/robustness guarantees (see bench/code_spec/_runner.py for the
     threat model):
     - HARD timeout: a runaway/infinite-loop candidate is killed, never hangs
-      validation and leaves no live thread behind.
-    - Isolation: each candidate runs in its own process.
+      validation and leaves no live thread behind. The verdict travels over a
+      dedicated temp file and the child's stdout/stderr are sent to DEVNULL, so
+      the parent never blocks on a pipe that a candidate-spawned grandchild
+      process might keep open.
+    - Isolation: each candidate runs in its own process; candidate stdout/stderr
+      is discarded and can never corrupt the verdict channel.
     - Deterministic labeling: a bool result is never accepted where an int is
       expected (guards against `True == 1` masquerading as a count).
     NOTE: this is isolation + timeout, NOT a security sandbox — candidates are
@@ -92,32 +97,43 @@ class CodeChecker(GoldChecker):
             "test_cases": self._serialize_cases(),
         })
 
+        # The verdict is written to this dedicated file (not stdout), so benign
+        # candidate output can never corrupt it.
+        fd, verdict_path = tempfile.mkstemp(prefix="codespec_verdict_", suffix=".json")
+        os.close(fd)
         try:
-            proc = subprocess.run(
-                [sys.executable, _RUNNER_PATH],
-                input=payload,
-                text=True,
-                capture_output=True,
-                timeout=_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            # subprocess.run kills the child on timeout -> runaway code is
-            # actually terminated.
-            result = (False, "Execution timeout (infinite loop or too slow)")
-            _RESULT_CACHE[cache_key] = result
-            return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
+            try:
+                subprocess.run(
+                    [sys.executable, _RUNNER_PATH, verdict_path],
+                    input=payload,
+                    text=True,
+                    # DEVNULL (not PIPE): a candidate-spawned grandchild that
+                    # inherits these handles cannot keep the parent blocked past
+                    # the timeout.
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                # subprocess.run kills the child on timeout -> runaway code is
+                # actually terminated.
+                result = (False, "Execution timeout (infinite loop or too slow)")
+                _RESULT_CACHE[cache_key] = result
+                return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
 
-        if proc.returncode != 0:
-            msg = f"Runner exited {proc.returncode}: {proc.stderr.strip()[:200]}"
-            _RESULT_CACHE[cache_key] = (False, msg)
-            return CheckResult(passed=False, details=f"{self.description} - {msg}")
-
-        try:
-            verdict = json.loads(proc.stdout.strip().splitlines()[-1])
-        except Exception as exc:  # noqa: BLE001
-            msg = f"Bad runner output: {exc} :: {proc.stdout[:200]}"
-            _RESULT_CACHE[cache_key] = (False, msg)
-            return CheckResult(passed=False, details=f"{self.description} - {msg}")
+            try:
+                with open(verdict_path, "r", encoding="utf-8") as vf:
+                    raw = vf.read().strip()
+                verdict = json.loads(raw)
+            except Exception as exc:  # noqa: BLE001
+                msg = f"No/invalid runner verdict: {exc}"
+                _RESULT_CACHE[cache_key] = (False, msg)
+                return CheckResult(passed=False, details=f"{self.description} - {msg}")
+        finally:
+            try:
+                os.unlink(verdict_path)
+            except OSError:
+                pass
 
         passed = verdict.get("status") == "pass"
         msg = verdict.get("message", "")

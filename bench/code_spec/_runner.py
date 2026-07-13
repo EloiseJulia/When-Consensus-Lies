@@ -1,10 +1,14 @@
 """Isolated candidate-execution runner for the code_spec domain.
 
 Reads a JSON job from stdin, executes the candidate code in THIS separate
-process, runs the test cases, and writes a JSON verdict to stdout. Because it
-runs as a child process, the parent (`CodeChecker`) can enforce a HARD timeout
-by killing the whole process — an infinite-loop candidate is actually
-terminated, not merely abandoned on a daemon thread.
+process, runs the test cases, and writes a JSON verdict to the file named by
+``sys.argv[1]``. The verdict does NOT travel over stdout: the parent
+(`CodeChecker`) discards this process's stdout/stderr (DEVNULL), so (a) benign
+candidate print()s can never corrupt the verdict, and (b) a candidate that
+spawns a grandchild process cannot keep the parent blocked past the timeout by
+inheriting an open stdout pipe. Because it runs as a child process, the parent
+can enforce a HARD timeout by killing it — an infinite-loop candidate is
+actually terminated, not merely abandoned on a daemon thread.
 
 THREAT MODEL (important, and deliberately scoped): candidates are ordinary
 model-generated solutions to coding prompts, NOT adversaries trying to escape a
@@ -25,7 +29,8 @@ Job schema (stdin, one JSON object):
       ]
     }
 
-Verdict (stdout, one JSON object): {"status": "pass"|"fail"|"error", "message": "..."}
+Verdict (written to argv[1], one JSON object):
+    {"status": "pass"|"fail"|"error", "message": "..."}
 """
 
 import json
@@ -33,6 +38,15 @@ import sys
 
 
 FLOAT_TOL = 1e-9
+
+
+def _emit(path, status, message):
+    """Write the single JSON verdict to the dedicated verdict file."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"status": status, "message": message}))
+    except OSError:
+        pass
 
 
 def _compare(result, expected):
@@ -82,10 +96,16 @@ def _resolve_entrypoint(namespace, entrypoint):
 
 
 def main():
+    if len(sys.argv) < 2:
+        # No verdict path -> nothing we can report back through; fail loudly.
+        sys.stderr.write("runner: missing verdict path argument\n")
+        return
+    verdict_path = sys.argv[1]
+
     try:
         job = json.loads(sys.stdin.read())
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"status": "error", "message": f"bad job: {exc}"}))
+        _emit(verdict_path, "error", f"bad job: {exc}")
         return
 
     candidate = job["candidate"]
@@ -96,12 +116,12 @@ def main():
     try:
         exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
+        _emit(verdict_path, "error", f"Execution error: {exc}")
         return
 
     func, err = _resolve_entrypoint(namespace, entrypoint)
     if func is None:
-        print(json.dumps({"status": "error", "message": err}))
+        _emit(verdict_path, "error", err)
         return
 
     for i, tc in enumerate(test_cases):
@@ -113,18 +133,16 @@ def main():
             else:
                 result = func(inp)
         except Exception as exc:  # noqa: BLE001
-            print(json.dumps({"status": "fail",
-                              "message": f"Test {i + 1} raised: {exc}"}))
+            _emit(verdict_path, "fail", f"Test {i + 1} raised: {exc}")
             return
 
         if not _compare(result, expected):
-            print(json.dumps({"status": "fail",
-                              "message": f"Test {i + 1} failed: input={inp!r}, "
-                                         f"expected={expected!r}, got={result!r}"}))
+            _emit(verdict_path, "fail",
+                  f"Test {i + 1} failed: input={inp!r}, "
+                  f"expected={expected!r}, got={result!r}")
             return
 
-    print(json.dumps({"status": "pass",
-                      "message": f"All {len(test_cases)} tests passed"}))
+    _emit(verdict_path, "pass", f"All {len(test_cases)} tests passed")
 
 
 if __name__ == "__main__":
