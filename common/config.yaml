@@ -1,0 +1,46 @@
+# Role-based model routing with provenance separation (HARD LAW 6)
+# constructor ≠ tested ≠ judge ≠ code_reviewer must be different model families
+
+roles:
+  constructor:
+    # Builds benchmark / latent spec / deletion-based ambiguity
+    family: google
+    model: gemini-1.5-pro
+
+  tested_agents:
+    # The agents being studied (core experimental subjects)
+    homogeneous:
+      - family: anthropic
+        model: claude-3-5-sonnet-20241022
+    heterogeneous:
+      - family: openai
+        model: gpt-4-turbo
+      - family: anthropic
+        model: claude-3-5-sonnet-20241022
+      - family: qwen
+        model: qwen-plus
+      - family: deepseek
+        model: deepseek-chat
+    reasoning:
+      - family: openai
+        model: o3-mini
+      - family: deepseek
+        model: deepseek-reasoner
+
+  judge:
+    # Only when executable gold unavailable; must differ from constructor
+    family: openai
+    model: gpt-4-turbo
+
+  code_reviewer:
+    # Reviews AI-written code; MUST differ from the code author's family and from
+    # the homogeneous shared-prior baseline (anthropic). Default routing only —
+    # the Manager picks the actual auditor family per slice so it never equals
+    # that slice's implementer family (Phase 0 was written by anthropic, audited
+    # by openai). deepseek is distinct from constructor/judge and from the
+    # homogeneous baseline.
+    family: deepseek
+    model: deepseek-chat
+
+seeds:
+  global: 20260713

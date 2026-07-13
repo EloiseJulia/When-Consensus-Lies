@@ -1,0 +1,5 @@
+{"timestamp": 1783951136.8369532, "role": "tested_agents", "model": "claude-3-5-sonnet-20241022", "tokens_in": 8, "tokens_out": 3, "cost_usd": 0.0, "prompt_len": 43}
+{"timestamp": 1783951136.8389516, "role": "tested_agents", "model": "claude-3-5-sonnet-20241022", "tokens_in": 8, "tokens_out": 3, "cost_usd": 0.0, "prompt_len": 43}
+{"timestamp": 1783951136.8419514, "role": "tested_agents", "model": "claude-3-5-sonnet-20241022", "tokens_in": 8, "tokens_out": 3, "cost_usd": 0.0, "prompt_len": 43}
+{"timestamp": 1783951136.8429503, "role": "tested_agents", "model": "claude-3-5-sonnet-20241022", "tokens_in": 8, "tokens_out": 3, "cost_usd": 0.0, "prompt_len": 43}
+{"timestamp": 1783951136.8449519, "role": "tested_agents", "model": "claude-3-5-sonnet-20241022", "tokens_in": 8, "tokens_out": 3, "cost_usd": 0.0, "prompt_len": 43}
