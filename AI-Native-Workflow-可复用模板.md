@@ -1,54 +1,59 @@
-# AI-Native 工作流 · 可复用模板
+# AI-Native 工作流 · When Consensus Lies 项目版
 
-> **用途**：把这份文件放进任意 repo 根目录（建议命名 `AI-Native-Workflow.md` 或并入 `AGENTS.md`），即可套用一套 **Spec-Driven Development + Agent Execution + 独立审计 Gate** 的 AI 协作工作流。
-> **使用前**：先做一次 §0 的「一次性适配」，把占位符 `<...>` 替换成你自己项目的值。之后所有 issue 都照 §12 的 checklist 跑一遍即可，质量可复现。
+> **用途**：这是 **When Consensus Lies**（欠定规格下多 Agent 冗余的沉默失效）项目的 AI 协作执行工作流。它把通用的 **Spec-Driven Development + Agent Execution + 独立审计 Gate** 方法论，和本项目 [`AI-Execution-Plan.md`](AI-Execution-Plan.md) 里的 **provenance separation（跨家族模型路由）+ executable gold（可执行金标）+ 指标金标单测 + 预注册** 绑定在一起。
+> **核心对偶**：你在用会 sycophancy、会犯相关性错误、会 silent failure 的 AI，去造一个**研究这些失败**的系统——所以论文里的每一个失败模式都会出现在你的施工队里。解药就写在论文里（executable gold + provenance separation），这套工作流把它们**同时用作科学设计和质检手段**。
+> **使用前**：先确认 §0 的项目常量；之后所有 issue 都照 §12 的 checklist 跑一遍，质量可复现。若要把本工作流迁到别的项目，把 §0 常量换回占位符即可复用。
 
 ---
 
-## 0. 一次性适配（换项目时改这里）
+## 0. 项目常量（本项目已适配）
 
-把下表占位符替换成你项目的实际值，全文其它地方引用同名占位符即可。
+全文引用同名符号；换项目时把这些值换成你自己的。
 
-| 占位符 | 含义 | 示例 |
+| 符号 | 含义 | 本项目值 |
 |---|---|---|
-| `<REPO>` | 仓库名 | `MyProject` |
-| `<REPO_PATH>` | 主 checkout 的绝对路径 | `~/MyProject` / `C:\code\MyProject` |
-| `<OWNER>` | GitHub owner / org | `your-org` |
+| `<REPO>` | 仓库名 | `When-Consensus-Lies` |
+| `<REPO_PATH>` | 主 checkout 的绝对路径 | `C:\Users\v-elzhang\Desktop\MyFolder\When Consensus Lies` |
+| `<OWNER>` | GitHub owner | `EloiseJulia` |
 | `<DEFAULT_BRANCH>` | 主干分支 | `main` |
 | `<WORKTREE_ROOT>` | worktree 存放目录 | `<REPO_PATH>/.worktrees` |
-| `<AGENT_CLI>` | 你用的 agent CLI 命令 | `copilot` / `claude` / 自定义 |
-| `<MODEL>` | 复杂任务默认模型 | 你可用的最强长上下文模型 |
-| `<TMUX_SESSION>` | 长驻 agent 的 tmux session 名 | `proj-t` |
-| `<COMPUTE>` | 执行 GPU/重任务的机器描述 | `4× GPU 服务器` / `本地` / `CI runner` |
-| `<PROJECT_BOARD>` | 项目看板标识（可选） | GitHub Project number / 无 |
-| `<SPEC_DIR>` | spec 存放目录 | `docs/specs/` |
-| `<PLAN_DIR>` | plan 存放目录 | `docs/plans/` |
-| `<RESEARCH_DIR>` | 调研报告目录 | `docs/research/` |
-| `<REPORT_STORE>` | 重型交付物（图/大文件）存放处（git 外） | `~/reports/<REPO>/` |
-| `<COMMIT_TRAILER>` | 每个 commit 的署名 trailer | `Co-authored-by: <agent> <email>` |
-| `<BUILD_CMD>` | 构建/产物验证命令 | `make build` / `npm run build` / `nix build` |
-| `<RUN_CMD>` | 跑真实产物的命令 | `./bin/app --help` |
-| `<TEST_CMD>` | 全量测试命令 | `pytest` / `npm test` / `go test ./...` |
+| `<AGENT_CLI>` | agent CLI（Copilot Premium，多模型无限 token） | `copilot` |
+| `<MODEL>` | 复杂任务默认模型 | 最强长上下文模型（见 §2 角色路由） |
+| `<TMUX_SESSION>` | 长驻 agent session 名 | `consensus-t` |
+| `<COMPUTE>` | 执行机器 | 本地纯 API 主线；表征分析 §4 用 1× 云 GPU（可推 v2） |
+| `<PROJECT_BOARD>` | 项目看板（可选） | 无 |
+| `<SPEC_DIR>` | spec 存放目录 | `paper/specs/` |
+| `<PLAN_DIR>` | plan 存放目录 | `paper/plans/` |
+| `<RESEARCH_DIR>` | 调研报告目录 | `paper/research/` |
+| `<REPORT_STORE>` | 重型交付物（图/大文件，git 外） | `~/reports/consensus-lies/` |
+| `<COMMIT_TRAILER>` | commit 署名 trailer | `Co-authored-by: copilot <copilot@users.noreply.github.com>` |
+| `<BUILD_CMD>` | 环境/包可导入验证 | `pip install -e . && python -c "import common"` |
+| `<RUN_CMD>` | 跑真实产物（端到端一条 mock Task） | `python -m harness.run --config sc --smoke` |
+| `<TEST_CMD>` | 全量测试（含指标金标单测） | `pytest` |
 
-> 如果你的项目没有服务器 / tmux / GPU，把「长驻 agent」相关内容当作「本地终端里跑 agent」即可，方法论不变。
+> 本项目主线是纯 API，无需服务器/GPU；把「长驻 agent」当作「本地终端里跑 agent」即可。唯一需要真金白银的是表征分析（§8.5 / Phase 4）的那张 GPU，可推 v2。
 
 ---
 
-## 1. 一句话定位与五条铁律
+## 1. 一句话定位与铁律
 
-**Spec-Driven Development + Agent Execution + 独立审计 Gate。**
+**Spec-Driven Development + Agent Execution + 独立审计 Gate + Provenance Separation。**
 
-质量不是靠「用了多少 agent」堆出来的，而是靠**验证机制**守出来的。五条铁律（每条都是踩坑换来的）：
+质量不是靠「用了多少 agent」堆出来的，而是靠**验证机制**守出来的。本项目尤其致命：**造沉默失效检测器的过程本身可能沉默失效**——你的施工队（多编码 agent）会像论文里的被测系统一样，共享先验、互相背书、高置信地一致犯错。所以通用五条铁律之上，本项目再加两条**来自论文本身的**铁律：
 
-| # | 铁律 | 教训 |
+| # | 铁律 | 教训 / 出处 |
 |---|---|---|
-| 1 | **验证真实产物，不只看测试绿** | 关键配置被误删、整条命令失效，却通过了几十个测试——只有 build + 运行真产物才抓得到 |
-| 2 | **独立敌对审计 > 自审** | 自审容易判「都是 pre-existing / PASS」，独立新 agent 常挖出真 bug |
+| 1 | **验证真实产物，不只看测试绿** | 关键配置被误删、整条命令失效却通过几十个测试——只有 build + 跑真产物才抓得到 |
+| 2 | **独立敌对审计 > 自审** | 自审容易判「都是 pre-existing / PASS」；独立新 agent 常挖出真 bug。**绝不让写代码的模型自己批准自己的代码**——那正是论文里的 verifier-accomplice 失效 |
 | 3 | **并行只对「独立切片」，依赖链必须串行** | 硬并行依赖链 = 冲突 + 跨切片一致性 bug 更隐蔽 |
-| 4 | **共享基础设施改动标注交 owner，永不自 merge** | env/build/infra 是 owner 地盘；agent 只测明白、标注醒目，merge 是人的判断 |
-| 5 | **知道何时停手** | 一道彻底审计 0 新问题后继续审 = 边际收益趋零的焦虑循环；验到合理程度就交 |
+| 4 | **共享基础设施改动标注交 owner，永不自 merge** | env/build/infra/`schema.py` 是 owner 地盘；agent 只测明白、标注醒目，merge 是人的判断 |
+| 5 | **知道何时停手** | 一道彻底审计 0 新问题后继续审 = 边际收益趋零的焦虑循环 |
+| 6 | **Provenance separation（论文级铁律）** | `constructor ≠ tested ≠ judge ≠ code_reviewer` 必须跨模型家族（§2）。任何「AI 写的代码 / AI 打的标签 / AI 得的结论」都要有**不依赖同一个 AI 的独立验证**：确定性测试 > 跨家族模型复核 > 人工抽检 |
+| 7 | **Executable gold + 预注册（论文级铁律）** | 能用可执行 gold（单测/确定数值）就绝不用 LLM-judge；主指标（convergent-delusion）先写**金标单测**、H1/H2 先 git commit 预注册，**之后不许改指标定义**——挡住 AI 迎合式「找效应」 |
 
-外加一条贯穿铁律：**「标注边界 ≠ 修 bug」**——低风险且真超范围的可文档化为「已知边界」；但**会静默丢数据 / 破坏正确性**的（如身份维度缺失、窗口截断丢帧）**必须修**。
+外加一条贯穿铁律：**「标注边界 ≠ 修 bug」**——低风险且真超范围的可文档化为「已知边界」；但**会静默丢数据 / 破坏正确性**的（如 interpretation 标签维度缺失、把「各错各的」误算成 convergent-delusion）**必须修**。
+
+> **元层警告**：本项目里「独立敌对审计」和「指标金标单测」不只是工程质检——它们**就是论文的核心方法**（provenance separation + executable gold）。做对了工作流 = 验证了论文主张；做砸了 = 你的检测器自己沉默失效。
 
 ---
 
@@ -67,6 +72,34 @@
 
 ---
 
+## 2.5 模型路由：把「无限多模型」变成方法论资产（provenance separation）
+
+Copilot Premium 跨家族无限 token —— 这恰好**免费满足论文的 provenance separation**。按角色固定不同家族，让「造 benchmark 的」「被测的」「打分的」「复核代码的」永不同源。**这不是可选优化，而是铁律 6**。
+
+```yaml
+# common/config.yaml —— 角色 × 模型家族，跨家族是默认，不是可选
+roles:
+  constructor:   # 造 benchmark / latent spec / 删除式歧义
+    family: openai
+  tested_agents: # 被测的多 agent / 多 session（核心实验对象）
+    homogeneous: [anthropic]                        # 同家族 ×5 测 shared-prior ρ baseline
+    heterogeneous: [openai, anthropic, google, qwen, deepseek]
+    reasoning: [o3-mini, deepseek-r1]               # 一等条件（测两区制 H1/H2）
+  judge:         # 仅在无法用可执行 gold 时才用；且跨家族
+    family: google
+  code_reviewer: # 复核 AI 写的代码 —— 必须 ≠ 写代码的家族
+    family: anthropic
+seeds: {global: 20260713}
+```
+
+**双重用途**：
+- **科学设计**：若 cross-family 构造下 `convergent-delusion` 依然显著，就当场堵死「你的 ρ 是构造模型伪影」这一最强质疑。
+- **质检手段**：每个 slice 的 **Audit Agent（§4）用 `code_reviewer` 家族**，且 ≠ 写该 slice 代码的家族——把「独立敌对审计」落到模型家族层面。
+
+> 详细分工表 / 仓库结构 / schema / 分阶段计划见本项目 [`AI-Execution-Plan.md`](AI-Execution-Plan.md)。本工作流负责「怎么执行 + 怎么把关」，执行计划负责「做什么 + 做成什么样」。
+
+---
+
 ## 3. 全生命周期总览
 
 ```
@@ -82,6 +115,21 @@
 - 全部 slice 完 → ⑥整体 PR-Audit（build 真产物 + 全量测试 + diff 卫生）
 - 交付前 → ⑦先发你，不 ready、不 merge
 
+**本项目把 `AI-Execution-Plan.md` 的 Phase 映射成一串 issue/slice：**
+
+| 执行计划 Phase | 对应 issue/slice | 本工作流的关键 gate |
+|---|---|---|
+| Phase 0 脚手架 `common/` + `tests/` | 阻塞其余，最先做 | 你亲手锁 `schema.py`（冻结接口）；mock Task 端到端跑通 |
+| Phase 1 Benchmark（code⟂data⟂policy） | 3 个**独立切片 → 并行** | 先 50 题 MVP，**你抽检 10 题**（歧义真吗 / gold 对吗）；constructor 家族 ≠ tested |
+| Phase 2 Harness + 指标 | 依赖 Phase 0，**串行**接真数据 | **指标金标单测你签字**；确认主指标是 convergent-delusion 而非 binary ρ |
+| Phase 3 检测器（Hypothesis Surfacing） | schema 定后起 | 无歧义控制集上的 false-surfacing rate；定报警阈值 |
+| Phase 4 表征分析（需 GPU） | 独立，可推 v2 | 只在同一开源模型内做 patching；ML 细节你判断可信度 |
+| Phase 5 模拟用户 | 依赖 Phase 2 | framing 红线：只写「模拟决策者」，绝不写人类心理结论 |
+| Phase 6 统计 & 图 | 有数据后 | **预注册 H1/H2 + 锁指标 → 再跑全量**（防迎合式找效应） |
+| Phase 7 写作 | 持续 | claim / 叙事 / venue 归你 |
+
+> 依赖链（Phase 0→2→5→6）**串行**；独立切片（Phase 1 三域、Phase 4）**并行**——严格执行铁律 3。
+
 ---
 
 ## 4. 角色总表
@@ -91,8 +139,8 @@
 | **你（人）** | 全程 | 本地 / 浏览器 | 唯一强制触发点；判断题的最终裁决者；merge 决定 |
 | **Research Agent**（可选） | 技术路线/选型不明 | 独立 session，doc-only | 输出 research md，直接 commit `<DEFAULT_BRANCH>`；不写代码 |
 | **Manager Agent** | 多 slice / 多 issue | 长驻 session（`<COMPUTE>`） | **先画依赖图**；只有它碰 git/topic；永不碰主 checkout、永不 merge 进主干 |
-| **Sub-Agent（执行）** | 每个 slice | 独立 worktree + session | 只在自己 worktree；spec→plan→执行；自检 gate |
-| **Audit Agent（独立敌对）** | 每 slice 完 + 整体 | **全新 session、无上下文** | 目标是挑毛病；不信任何既有结论；只报不修 |
+| **Sub-Agent（执行）** | 每个 slice | 独立 worktree + session | 只在自己 worktree；spec→plan→执行；自检 gate；**用某一固定家族写代码，记录在 PR body** |
+| **Audit Agent（独立敌对）** | 每 slice 完 + 整体 | **全新 session、无上下文** | 目标是挑毛病；不信任何既有结论；只报不修；**必须用 ≠ 写代码家族的 `code_reviewer` 模型**（provenance separation） |
 
 **两种规模：**
 - **单 issue（日常默认）**：不需要 Manager。你在 worktree 里起一个交互 session，讨论 → spec → plan → 执行 → review。
@@ -179,10 +227,11 @@ git push -u origin feature/<N>-<name>
 
 ### 3.3 自检 gate（agent mark ready 之前必须自答）
 - 目标产物真的能跑（不只是 import / 单测）？
-- 幂等？重跑收敛？
-- **身份维度完整**（主键/标识没漏维度 → 避免不同配置静默撞车）？
+- 幂等？重跑收敛（全局 seed + API 缓存，同输入不重复烧 token）？
+- **身份维度完整**（`AgentRun` 主键含 task_id × config × model_role × model_id × seed → 避免不同配置静默撞车）？
+- **指标定义没被偷改**（convergent-delusion 仍是「共识在同一个错误 I_k 上」，不是 binary ρ）？
 - 无依赖 / 空输入优雅降级？
-- diff 只动该动的，无残留 debug / 无误删？
+- diff 只动该动的，无残留 debug / 无误删 / 没碰冻结的 `schema.py`？
 
 ---
 
@@ -191,16 +240,22 @@ git push -u origin feature/<N>-<name>
 **必须是全新 session、无上下文、抱着「我一定要挑出毛病」的心态**——写代码的 agent 审自己有偏见。
 
 审计 prompt（§使用方法 D）核心：
-- 「你没写这份代码，把 PR 描述和一切既有结论当**不可信**，从源码重新验证」
+- 「你没写这份代码，把 PR 描述和一切既有结论当**不可信**，从源码重新验证」；**审计模型家族 ≠ 写代码家族**
 - **先读代码找逻辑 bug**（身份维度缺失 / 静默丢行 / 坐标/数值缩放 / 注入 / 多步写原子性 / 旁路校验），再跑验证
+- **本项目专属逻辑 bug 类**（务必逐条查）：
+  - `label.py` 把「各错各的 I1/I2/I3」误算成 convergent-delusion（应低，却报高）？
+  - 用了 LLM-judge 打 interpretation 标签，而非可执行 gold 信号？
+  - `metrics.py` 主指标偷偷退化成 binary ρ？
+  - constructor 与 tested 家族串了（provenance 泄漏 → ρ 变构造伪影）？
+  - `gold/` checker 其实不确定（依赖模型输出而非单测/确定数值）？
 - **验证真实产物**（build + run，不只单测）
 - **独立归因测试失败**（clean `<DEFAULT_BRANCH>` 对比复现，禁止「猜 pre-existing」）
 - 输出 **ranked findings**（BLOCKER/MAJOR/MINOR/UNVERIFIED）+ 明确 verdict；**只报不修**
 
 **审计回来后分诊：**
 - 我们代码 + 修法清楚 → 修
-- 共享 infra / owner 说过别动 → **不擅改，文档 + follow-up issue，交 owner**
-- 会静默丢数据 / 破坏正确性 → **必须修**（哪怕它自称「边界」）
+- 共享 infra / `schema.py` / owner 说过别动 → **不擅改，文档 + follow-up issue，交 owner**
+- 会静默丢数据 / 破坏正确性（含指标误算、provenance 泄漏）→ **必须修**（哪怕它自称「边界」）
 
 ---
 
@@ -215,6 +270,9 @@ git push -u origin feature/<N>-<name>
 | **E 全量回归** | 跑**整个**测试套（不只子集）；每个失败 clean-main 独立归因 |
 | **F diff 卫生** | 逐行看配置/依赖文件，防「误删」；无 throwaway/debug 残留；worktree 干净 |
 | **G review 闭环** | 所有 review thread 回复 + 真修（不只回复）；lint |
+| **H 指标金标** | `tests/test_metrics_golden.py` 绿：全错在同一 I1 → convergent-delusion=1.0；各错各的 → <0.5（即使 binary ρ 高）|
+| **I provenance** | `config.yaml` 里 constructor / tested / judge / code_reviewer 家族两两不同；gold 全可执行 |
+| **J 预注册** | 若本次要 scale 全量：H1/H2 + 主指标 + 相图预期已 git commit 冻结，且事后未改指标定义 |
 
 **产出**：PASS/FAIL 表 + ranked findings。确认的 bug 修，判断题标注交你/owner。
 
@@ -246,6 +304,9 @@ git push -u origin feature/<N>-<name>
 | **别猜 pre-existing** | 任何「预先存在的失败」结论必须 clean-main 复现坐实 |
 | **何时停** | 一道彻底审计 0 新问题 → 交付；别无限自证 |
 | **squash 进 topic 的隐患** | slice squash-merge 进 topic 会压平历史，topic→main 可能报 dirty；优先 `--merge` 或 squash 后立即 `git merge --no-ff origin/<DEFAULT_BRANCH>` 补桥 |
+| **provenance 泄漏（本项目）** | constructor/tested/judge/code_reviewer 一旦同家族 → ρ 与结论都可能是伪影；`config.yaml` 是接口契约，改动交 owner |
+| **迎合式找效应（本项目）** | 无预注册、指标事后可改 → AI「帮你」找出不存在的效应；scale 前 git commit 冻结 H1/H2 + 指标 |
+| **judge 循环（本项目）** | 用 LLM-judge 打 interpretation 标签 = 与被测共享盲区；能用可执行 gold 就绝不用 judge |
 
 ---
 
@@ -322,6 +383,9 @@ Scope/guardrails: <要做什么 + 明确 NOT touch>.
 Constraints: 在 worktree <WORKTREE_ROOT>/<name>；确认 pwd 后再改；DO NOT touch
 main checkout；commit trailer <COMMIT_TRAILER>；push 到 draft PR，测试绿前不 mark
 ready；NEVER merge。判断题上报我，不要猜。
+Project rules: 用可执行 gold（单测/确定数值）打标签，不用 LLM-judge；主指标是
+convergent-delusion（共识在同一错误 I_k）而非 binary ρ；不改冻结的 schema.py /
+config.yaml（改动上报）；写代码固定一个模型家族并写入 PR body（供跨家族审计）。
 ```
 
 ### B. Manager spawn（多 slice，依赖感知）
@@ -366,17 +430,25 @@ PHASE 3 run the FULL suite; attribute EVERY failure by reproducing it on a
 throwaway origin/<DEFAULT_BRANCH> worktree (no assuming "pre-existing").
 PHASE 4 scrutinize any shared-view/infra change's blast radius.
 PHASE 5 diff hygiene (no accidental deletions, no debug residue).
+PHASE 6 (this project) verify the SCIENCE-critical logic: does metrics.py score
+"all wrong on the same I_k" as high convergent-delusion and "each wrong
+differently" as low (even when binary ρ is high)? Are labels assigned by executable
+gold, not an LLM judge? Are constructor/tested/judge/code_reviewer families
+mutually distinct in config.yaml? Confirm YOUR family ≠ the code author's family.
 OUTPUT ranked findings (BLOCKER/MAJOR/MINOR/UNVERIFIED) with file:line + proof +
 minimal fix, then an explicit verdict.
 ```
 
 ### E. 精度评估 prompt（可选，交付报告用）
 ```
-Add an "accuracy vs ground truth" section using an open dataset with GT. Prefer a
-single-download, well-known benchmark — verify accessibility first. CRITICAL:
-normalize/rescale predictions to the GT scale/resolution before comparing. Report
-the standard metrics for this task. Be HONEST: benchmark accuracy ≠ accuracy on
-our real content (domain gap). Outputs stay local (git-out), no commits, no merge.
+Add an "accuracy vs ground truth" section. For this project, GT = the executable
+gold checkers (unit-test pass / deterministic numeric result), NOT an LLM judge.
+Report convergent-delusion / false-consensus rate, marginal ρ(phi) as a secondary
+theory bridge only, A_maj, ECE. Be HONEST: for policy_qa with no executable GT,
+say clearly it is a rubric-based / consistency check, not error-vs-truth; simulated
+decision-maker results are stated as effects on a SIMULATED user, never as human
+psychology (cite Lost in Simulation caveat). Pre-register H1/H2 + metrics (git
+commit) BEFORE full-scale runs. Outputs stay local (git-out), no commits, no merge.
 ```
 
 ### F. Agent CLI 常用 flag（按你的 CLI 对应替换）
@@ -408,21 +480,24 @@ Issue 准备
 
 独立敌对审计(每 slice)
   □ 新 session 无上下文  □ 先读代码找逻辑 bug  □ 验真产物  □ 失败 clean-main 归因
-  □ ranked findings + verdict
+  □ 审计家族 ≠ 写代码家族  □ ranked findings + verdict
 
 整体 PR-Audit
   □ A 真产物 build+run  □ B 幂等/共存  □ C 结构/接口  □ D 正确性
   □ E 全量测试+归因  □ F diff 卫生  □ G review 闭环
+  □ H 指标金标单测绿  □ I provenance 四角色跨家族  □ J (scale 前)预注册已冻结
 
 交付
-  □ 先发你(不 merge)  □ 共享 infra 标注 sign-off  □ (可选)图文+精度报告
+  □ 先发你(不 merge)  □ 共享 infra/schema/config 标注 sign-off  □ (可选)图文+精度报告
   □ 你确认 → mark ready → 交 owner merge
 
 铁律自检
   □ 验证了真实产物(不只测试)  □ 上了独立敌对审计  □ 并行只对独立切片
   □ 共享 infra 交 owner  □ 该修的修了(没拿"边界"糊弄)  □ 知道何时停
+  □ provenance separation(四角色跨家族)  □ executable gold 而非 LLM-judge
+  □ 主指标是 convergent-delusion 非 binary ρ  □ scale 前预注册 H1/H2 + 锁指标
 ```
 
 ---
 
-> **一句话收尾**：这套流程的价值不在「用了多少 agent」，而在**每个交付物都过了「独立敌对审计 + 验证真实产物」两道 gate，且每一处未验证/有意为之的边界都写清楚了**。换新项目时先做一次 §0 适配，之后照 §12 checklist 跑，任何 issue 的质量都可复现。
+> **一句话收尾**：这套流程的价值不在「用了多少 agent」，而在**每个交付物都过了「独立敌对审计 + 验证真实产物 + 跨家族 provenance」三道 gate，且每一处未验证/有意为之的边界都写清楚了**。对 **When Consensus Lies** 这个项目而言，这套工作流不只是质检手段——它就是论文主张的实践验证：**你能否当好那个「不被 AI 共识带偏」的首席怀疑者，本身就是诺验。** 若要把本工作流迁到别的项目，把 §0 常量换回占位符 + 去掉 §2.5/铁律 6-7 的项目专属部分即可复用。
