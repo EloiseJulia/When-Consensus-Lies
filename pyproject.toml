@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "consensus-lies"
+version = "0.1.0"
+description = "When Consensus Lies: Multi-agent redundancy under underdetermined specs"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["common*", "bench*", "harness*", "detector*", "sim_users*", "analysis*"]
