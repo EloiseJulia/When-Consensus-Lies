@@ -891,29 +891,14 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
     # Extract base task ID (before _k0, _k1, etc.)
     task_id_base = task.id.split('_k')[0] if '_k' in task.id else task.id
     foils = get_task_specific_foils(task_id_base)
-    
-    # MAJOR 1 FIX test cases: Add foils that test timeout and import blocking
-    foils.extend([
-        # Test timeout: infinite loop
-        """
-def func(*args):
-    while True:
-        pass
-""",
-        # Test import blocking: try to import os
-        """
-def func(*args):
-    import os
-    return os.getcwd()
-""",
-        # Test import blocking: try to import socket
-        """
-def func(*args):
-    import socket
-    return "bad"
-""",
-    ])
-    
+
+    # NOTE: sandbox/timeout behavior (infinite-loop and blocked-import candidates)
+    # is exercised by dedicated unit tests in tests/test_code_spec.py, NOT shipped
+    # as per-task foils. Running an infinite-loop foil through validate_domain
+    # would cost one full timeout (5s) per checker per task and adds no
+    # disjointness signal (it matches nothing). Per-task foils are genuine
+    # near-misses of the interpretations only.
+
     return checkers, candidates, foils
 
 

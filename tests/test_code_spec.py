@@ -136,17 +136,37 @@ def format_func(number):
 
 
 def test_major3_near_miss_foils_present():
-    """MAJOR 3 FIX: Near-miss foils are present (not just generic junk)."""
+    """MAJOR 3 FIX: foils are genuine task-specific near-misses (not generic junk).
+
+    After removing the vacuous timeout/import junk foils, every per-task foil
+    must be task-specific, and at least one must be a genuine near-miss that
+    matches EXACTLY ONE interpretation checker (probing the boundary between
+    interpretations, not just failing everything).
+    """
     tasks = generate_tasks()
-    task = [t for t in tasks if "code_sort" in t.id][0]
-    
+    # Pick the sort task with the most interpretations (so near-miss foils that
+    # target alternative interpretations are actually exercised; a k=0 control
+    # exposes only I0's checker).
+    sort_tasks = [t for t in tasks if "code_sort" in t.id]
+    task = max(sort_tasks, key=lambda t: len(t.interpretations))
+
     checkers, candidates, foils = get_checkers_and_candidates("code_spec", task)
-    
-    assert len(foils) > 3, "Should have multiple foils including near-misses"
-    
-    # Check that at least one foil is task-specific (contains the entrypoint name)
-    task_specific_count = sum(1 for f in foils if "sort_func" in str(f))
-    assert task_specific_count >= 1, "Should have task-specific foils with correct entrypoint"
+
+    assert len(foils) >= 2, "Should have multiple near-miss foils"
+
+    # All foils are task-specific (use the correct entrypoint name).
+    assert all("sort_func" in str(f) for f in foils), \
+        "All foils should be task-specific (contain the entrypoint)"
+
+    # At least one foil is a genuine near-miss: matches exactly one checker.
+    near_miss = 0
+    for f in foils:
+        matches = sum(1 for c in checkers.values() if c.check(f).passed)
+        assert matches <= 1, "Foil must match at most one checker"
+        if matches == 1:
+            near_miss += 1
+    assert near_miss >= 1, \
+        "At least one foil must be a genuine near-miss (matches exactly one interpretation)"
 
 
 def test_major3_foils_match_at_most_one():
