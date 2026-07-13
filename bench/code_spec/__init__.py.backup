@@ -8,8 +8,6 @@ realized by an actual reference implementation with executable gold checkers.
 
 from typing import Any, Dict, List, Tuple
 import textwrap
-import threading
-import queue
 
 from bench.build import (
     FullSpec,
@@ -26,9 +24,10 @@ from common.schema import Task
 # GOLD CHECKERS - Execute candidate code to verify behavior
 # ============================================================================
 
-import threading
-import queue
-
+import multiprocessing
+import signal
+import sys
+from io import StringIO
 
 class CodeChecker(GoldChecker):
     """Base checker that executes Python code safely with timeout and sandboxing."""
@@ -49,111 +48,99 @@ class CodeChecker(GoldChecker):
         if not isinstance(candidate, str):
             return CheckResult(passed=False, details=f"Candidate must be Python code string, got {type(candidate)}")
         
-        # MAJOR 1 FIX: Run with timeout using threading (Windows-compatible, simpler than multiprocessing)
-        result_queue = queue.Queue()
-        
-        def _run_candidate():
-            """Worker function that runs in thread."""
+        # Use multiprocessing to enforce timeout (Windows-compatible)
+        def _run_candidate(code, entrypoint, test_cases, result_queue):
+            """Worker function that runs in subprocess."""
             try:
                 # Restricted builtins - allow safe modules only
-                safe_modules = {'decimal', 'math', 're', 'itertools', 'functools'}
-                
-                # Get the real __import__ before we override
-                import builtins as real_builtins
-                original_import = real_builtins.__import__
-                
-                def safe_import(name, globals_dict=None, locals_dict=None, fromlist=(), level=0):
-                    if name.split('.')[0] not in safe_modules:
-                        raise ImportError(f"Module '{name}' is not allowed for security")
-                    return original_import(name, globals_dict, locals_dict, fromlist, level)
-                
-                # Create globals dict with safe builtins dictionary
-                safe_builtins_dict = {
-                    'None': None, 'True': True, 'False': False,
-                    'bool': bool, 'int': int, 'float': float, 'str': str,
-                    'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
-                    'len': len, 'range': range, 'enumerate': enumerate,
-                    'zip': zip, 'map': map, 'filter': filter, 'sorted': sorted,
-                    'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round,
-                    'all': all, 'any': any, 'isinstance': isinstance,
-                    'ValueError': ValueError, 'TypeError': TypeError,
-                    'KeyError': KeyError, 'IndexError': IndexError,
-                    'RuntimeError': RuntimeError, 'Exception': Exception,
-                    '__import__': safe_import,
-                }
-                
-                namespace = {
-                    '__builtins__': safe_builtins_dict,
-                    '__name__': '__main__',
+                safe_builtins = {
+                    '__builtins__': {
+                        # Essential builtins
+                        'None': None, 'True': True, 'False': False,
+                        'bool': bool, 'int': int, 'float': float, 'str': str,
+                        'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
+                        'len': len, 'range': range, 'enumerate': enumerate,
+                        'zip': zip, 'map': map, 'filter': filter, 'sorted': sorted,
+                        'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round,
+                        'all': all, 'any': any, 'isinstance': isinstance,
+                        'ValueError': ValueError, 'TypeError': TypeError,
+                        'KeyError': KeyError, 'IndexError': IndexError,
+                        'RuntimeError': RuntimeError, 'Exception': Exception,
+                        # Limited __import__ for safe modules only
+                        '__import__': lambda name, *args, **kwargs: __import__(name, *args, **kwargs) if name in ['decimal', 'math', 're', 'itertools', 'functools'] else (_ for _ in ()).throw(ImportError(f"Module '{name}' is not allowed")),
+                    }
                 }
                 
                 # Execute candidate code
-                exec(candidate, namespace)
+                namespace = {}
+                exec(code, safe_builtins, namespace)
                 
-                # BLOCKER 1 FIX: Resolve entrypoint by NAME first, fallback to single user function
-                if self.entrypoint in namespace and callable(namespace[self.entrypoint]):
-                    func = namespace[self.entrypoint]
+                # Resolve entrypoint
+                if entrypoint in namespace and callable(namespace[entrypoint]):
+                    func = namespace[entrypoint]
                 else:
                     # Fallback: single user-defined function (not imported, not a class)
-                    user_funcs = []
-                    for k, v in namespace.items():
-                        if (callable(v) 
-                            and not k.startswith('__')
-                            and not isinstance(v, type)  # exclude classes
-                            and hasattr(v, '__module__')
-                            and getattr(v, '__module__', None) in (None, '__main__', namespace.get('__name__', '__main__'))):
-                            user_funcs.append(v)
+                    user_funcs = [v for k, v in namespace.items() 
+                                 if callable(v) 
+                                 and not k.startswith('__')
+                                 and hasattr(v, '__module__')
+                                 and v.__module__ == namespace.get('__name__', '__main__')
+                                 and not isinstance(v, type)]  # exclude classes
                     
                     if len(user_funcs) == 1:
                         func = user_funcs[0]
                     else:
-                        result_queue.put(("error", f"Could not resolve entrypoint '{self.entrypoint}'. Found {len(user_funcs)} user-defined functions."))
+                        result_queue.put(("error", f"Could not resolve entrypoint '{entrypoint}'. Found {len(user_funcs)} user-defined functions."))
                         return
                 
                 # Run test cases
-                for i, (inp, expected) in enumerate(self.test_cases):
+                for i, (inp, expected) in enumerate(test_cases):
                     if isinstance(inp, tuple):
                         result = func(*inp)
                     else:
                         result = func(inp)
                     
-                    # Handle floating point comparison
-                    if isinstance(expected, float) and isinstance(result, float):
-                        if abs(result - expected) > 1e-9:
-                            result_queue.put(("fail", f"Test {i+1} failed: input={inp}, expected={expected}, got={result}"))
-                            return
-                    elif result != expected:
+                    if result != expected:
                         result_queue.put(("fail", f"Test {i+1} failed: input={inp}, expected={expected}, got={result}"))
                         return
                 
-                result_queue.put(("pass", f"All {len(self.test_cases)} tests passed"))
+                result_queue.put(("pass", f"All {len(test_cases)} tests passed"))
                 
             except Exception as e:
                 result_queue.put(("error", f"Execution error: {e}"))
         
-        thread = threading.Thread(target=_run_candidate, daemon=True)
-        thread.start()
-        thread.join(timeout=5.0)  # 5 second timeout
+        # Run with timeout
+        result_queue = multiprocessing.Queue()
+        process = multiprocessing.Process(
+            target=_run_candidate,
+            args=(candidate, self.entrypoint, self.test_cases, result_queue)
+        )
+        process.start()
+        process.join(timeout=5.0)  # 5 second timeout
         
-        if thread.is_alive():
-            # Timeout - thread still running (infinite loop)
-            # Note: Cannot forcibly kill thread in Python, but daemon thread will die with process
+        if process.is_alive():
+            # Timeout - terminate the process
+            process.terminate()
+            process.join(timeout=1.0)
+            if process.is_alive():
+                process.kill()
+                process.join()
             return CheckResult(passed=False, details=f"{self.description} - Execution timeout (infinite loop or too slow)")
         
         # Get result
-        try:
-            status, message = result_queue.get(timeout=0.1)
+        if not result_queue.empty():
+            status, message = result_queue.get()
             if status == "pass":
                 return CheckResult(passed=True, details=f"{self.description} - {message}")
             else:
                 return CheckResult(passed=False, details=f"{self.description} - {message}")
-        except queue.Empty:
-            return CheckResult(passed=False, details=f"{self.description} - No result from execution")
+        else:
+            return CheckResult(passed=False, details=f"{self.description} - No result from subprocess")
+
 
 
 # ============================================================================
 # PROBLEM LIBRARY - Base coding problems with requirement classes
-# BLOCKER 2 FIX: All problems rewritten/verified for GENUINE ambiguity
 # ============================================================================
 
 def problem_sort_records():
@@ -162,8 +149,7 @@ def problem_sort_records():
     spec = FullSpec(
         domain="code_spec",
         task_id="code_sort_001",
-        # GENUINE: prompt says "sorts" which is neutral on direction
-        prompt_core="""Write a function `sort_func` that sorts a list of records (dicts with keys 'name' and 'age').""",
+        prompt_core="""Write a function that sorts a list of records (dicts with keys 'name' and 'age').""",
         requirement_classes=[
             RequirementClass(
                 id="sort_order",
@@ -207,14 +193,63 @@ def problem_sort_records():
     return spec
 
 
+def problem_filter_items():
+    """Filter items with ambiguous null handling and edge cases."""
+    
+    spec = FullSpec(
+        domain="code_spec",
+        task_id="code_filter_001",
+        prompt_core="""Write a function that filters a list to keep only positive numbers.""",
+        requirement_classes=[
+            RequirementClass(
+                id="zero_handling",
+                description="Whether to include zero",
+                clauses=["Exclude zero (keep only strictly positive values)."]
+            ),
+            RequirementClass(
+                id="null_handling",
+                description="How to handle None values",
+                clauses=["Skip None values entirely."]
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description="Exclude zero, skip None (target)",
+                is_target=True,
+                gold_check="filter_strict_skip"
+            ),
+            InterpretationBranch(
+                id="I1",
+                description="Include zero, skip None",
+                is_target=False,
+                gold_check="filter_nonneg_skip",
+                opened_by="zero_handling"
+            ),
+            InterpretationBranch(
+                id="I2",
+                description="Exclude zero, replace None with 1",
+                is_target=False,
+                gold_check="filter_strict_replaceone",
+                opened_by="null_handling"
+            ),
+        ],
+        key_questions=[
+            "Should I include zero as a positive number?",
+            "How should I handle None values?"
+        ]
+    )
+    
+    return spec
+
+
 def problem_string_join():
     """Join strings with ambiguous separator and empty handling."""
     
     spec = FullSpec(
         domain="code_spec",
         task_id="code_string_001",
-        # GENUINE: "combines" is neutral on how (concatenate vs join with separator)
-        prompt_core="""Write a function `join_func` that combines a list of words into a single string.""",
+        prompt_core="""Write a function that combines a list of words into a single string.""",
         requirement_classes=[
             RequirementClass(
                 id="separator",
@@ -258,14 +293,113 @@ def problem_string_join():
     return spec
 
 
+def problem_sum_list():
+    """Sum a list with ambiguous empty input and type handling."""
+    
+    spec = FullSpec(
+        domain="code_spec",
+        task_id="code_sum_001",
+        prompt_core="""Write a function that calculates the sum of numbers in a list.""",
+        requirement_classes=[
+            RequirementClass(
+                id="empty_input",
+                description="Return value for empty list",
+                clauses=["Return 0 for an empty list."]
+            ),
+            RequirementClass(
+                id="type_coercion",
+                description="How to handle non-numeric types",
+                clauses=["Convert string numbers to numeric (e.g., '5' becomes 5)."]
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description="Return 0 for empty, convert strings (target)",
+                is_target=True,
+                gold_check="sum_zero_convert"
+            ),
+            InterpretationBranch(
+                id="I1",
+                description="Return -1 for empty, convert strings",
+                is_target=False,
+                gold_check="sum_neg_convert",
+                opened_by="empty_input"
+            ),
+            InterpretationBranch(
+                id="I2",
+                description="Return 0 for empty, skip non-numeric",
+                is_target=False,
+                gold_check="sum_zero_skip",
+                opened_by="type_coercion"
+            ),
+        ],
+        key_questions=[
+            "What should I return for an empty list?",
+            "How should I handle string representations of numbers?"
+        ]
+    )
+    
+    return spec
+
+
+def problem_find_max():
+    """Find maximum with ambiguous empty handling and tie resolution."""
+    
+    spec = FullSpec(
+        domain="code_spec",
+        task_id="code_max_001",
+        prompt_core="""Write a function that finds the maximum value in a list.""",
+        requirement_classes=[
+            RequirementClass(
+                id="empty_handling",
+                description="Behavior for empty list",
+                clauses=["Return float('-inf') for an empty list."]
+            ),
+            RequirementClass(
+                id="return_type",
+                description="What to return",
+                clauses=["Return just the maximum value."]
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description="Return -inf for empty, return value (target)",
+                is_target=True,
+                gold_check="max_inf_value"
+            ),
+            InterpretationBranch(
+                id="I1",
+                description="Return 0 for empty, return value",
+                is_target=False,
+                gold_check="max_zero_value",
+                opened_by="empty_handling"
+            ),
+            InterpretationBranch(
+                id="I2",
+                description="Return -inf for empty, return index",
+                is_target=False,
+                gold_check="max_inf_index",
+                opened_by="return_type"
+            ),
+        ],
+        key_questions=[
+            "What should I return for an empty list?",
+            "Should I return the value or the index of the maximum?"
+        ]
+    )
+    
+    return spec
+
+
 def problem_parse_csv_line():
     """Parse CSV line with ambiguous quote and empty field handling."""
     
     spec = FullSpec(
         domain="code_spec",
         task_id="code_csv_001",
-        # GENUINE: CSV parsing genuinely ambiguous on quote-stripping and empty-repr
-        prompt_core="""Write a function `csv_func` that parses a comma-separated line into a list of fields.""",
+        prompt_core="""Write a function that parses a comma-separated line into a list of fields.""",
         requirement_classes=[
             RequirementClass(
                 id="quote_handling",
@@ -315,8 +449,7 @@ def problem_count_occurrences():
     spec = FullSpec(
         domain="code_spec",
         task_id="code_count_001",
-        # GENUINE: "counts" is neutral on case and overlap
-        prompt_core="""Write a function `count_func` that counts how many times a substring appears in a string.""",
+        prompt_core="""Write a function that counts how many times a substring appears in a string.""",
         requirement_classes=[
             RequirementClass(
                 id="case_sensitive",
@@ -366,8 +499,7 @@ def problem_format_number():
     spec = FullSpec(
         domain="code_spec",
         task_id="code_format_001",
-        # GENUINE: "formats" is neutral on precision, rounding, sign
-        prompt_core="""Write a function `format_func` that formats a floating-point number as a string with decimal places.""",
+        prompt_core="""Write a function that formats a floating-point number as a string.""",
         requirement_classes=[
             RequirementClass(
                 id="decimal_places",
@@ -424,13 +556,6 @@ def problem_format_number():
     return spec
 
 
-# Removed straw problems per BLOCKER 2:
-# - code_filter_001: "positive numbers" already excludes zero; None→1 is arbitrary
-# - code_sum_001: empty→-1 is arbitrary; string coercion for "list of numbers" is out-of-spec
-# - code_max_001: "maximum VALUE" cannot mean index
-
-
-
 # ============================================================================
 # REFERENCE IMPLEMENTATIONS - One per interpretation per problem
 # ============================================================================
@@ -450,6 +575,25 @@ def sort_func(records):
     return sorted(records, key=lambda r: (r['age'], r['name']))
 """,
     
+    # Filter items
+    "filter_strict_skip": """
+def filter_func(items):
+    return [x for x in items if x is not None and x > 0]
+""",
+    "filter_nonneg_skip": """
+def filter_func(items):
+    return [x for x in items if x is not None and x >= 0]
+""",
+    "filter_strict_replaceone": """
+def filter_func(items):
+    result = []
+    for x in items:
+        val = 1 if x is None else x
+        if val > 0:
+            result.append(val)
+    return result
+""",
+    
     # String join
     "join_space_keep": """
 def join_func(words):
@@ -462,6 +606,59 @@ def join_func(words):
     "join_space_skip": """
 def join_func(words):
     return ' '.join(w for w in words if w)
+""",
+    
+    # Sum list
+    "sum_zero_convert": """
+def sum_func(numbers):
+    if not numbers:
+        return 0
+    total = 0
+    for x in numbers:
+        if isinstance(x, str):
+            total += float(x)
+        else:
+            total += x
+    return total
+""",
+    "sum_neg_convert": """
+def sum_func(numbers):
+    if not numbers:
+        return -1
+    total = 0
+    for x in numbers:
+        if isinstance(x, str):
+            total += float(x)
+        else:
+            total += x
+    return total
+""",
+    "sum_zero_skip": """
+def sum_func(numbers):
+    if not numbers:
+        return 0
+    return sum(x for x in numbers if isinstance(x, (int, float)) and not isinstance(x, bool))
+""",
+    
+    # Find max
+    "max_inf_value": """
+def max_func(items):
+    if not items:
+        return float('-inf')
+    return max(items)
+""",
+    "max_zero_value": """
+def max_func(items):
+    if not items:
+        return 0
+    return max(items)
+""",
+    "max_inf_index": """
+def max_func(items):
+    if not items:
+        return -1
+    max_val = max(items)
+    return items.index(max_val)
 """,
     
     # Parse CSV
@@ -507,7 +704,7 @@ def count_func(text, substring):
     return count
 """,
     
-    # Format number - MAJOR 2 FIX: true half-up using Decimal
+    # Format number
     "format_2dec_halfup_noplus": """
 def format_func(number):
     from decimal import Decimal, ROUND_HALF_UP
@@ -540,11 +737,10 @@ def format_func(number):
 
 # ============================================================================
 # TEST CASES - Input/output pairs for each interpretation
-# MAJOR 2 FIX: Added tie-breaking cases for rounding (2.675, 1.005, etc.)
 # ============================================================================
 
 TEST_CASES = {
-    # Sort records - test cases must produce DIFFERENT outputs for each interpretation
+    # Sort records - CRITICAL: test cases must produce DIFFERENT outputs for each interpretation
     "sort_asc_stable": [
         (
             [{'name': 'Charlie', 'age': 30}, {'name': 'Bob', 'age': 25}, {'name': 'Alice', 'age': 30}],
@@ -564,6 +760,17 @@ TEST_CASES = {
         ),
     ],
     
+    # Filter items - each interpretation needs test cases that distinguish it from others
+    "filter_strict_skip": [
+        ([2, None, 0, 3], [2, 3]),  # Skip None, exclude 0
+    ],
+    "filter_nonneg_skip": [
+        ([2, None, 0, 3], [2, 0, 3]),  # Skip None, include 0 - DIFFERENT (has 0)
+    ],
+    "filter_strict_replaceone": [
+        ([2, None, 0, 3], [2, 1, 3]),  # Replace None with 1, exclude 0 - DIFFERENT (has 1)
+    ],
+    
     # String join
     "join_space_keep": [
         (['hello', 'world'], 'hello world'),
@@ -576,6 +783,34 @@ TEST_CASES = {
     "join_space_skip": [
         (['hello', 'world'], 'hello world'),
         (['a', '', 'b'], 'a b'),
+    ],
+    
+    # Sum list - each test case must produce DIFFERENT results
+    "sum_zero_convert": [
+        ([1, '2', 3], 6.0),  # Converts '2' to 2.0
+        ([], 0),  # Empty returns 0
+    ],
+    "sum_neg_convert": [
+        ([1, '2', 3], 6.0),  # Converts '2' to 2.0 - SAME as sum_zero_convert on this input
+        ([], -1),  # Empty returns -1 - DIFFERENT from sum_zero_convert
+    ],
+    "sum_zero_skip": [
+        ([1, '2', 3], 4),  # Skips '2' entirely - DIFFERENT from sum_zero_convert
+        ([], 0),  # Empty returns 0 - SAME as sum_zero_convert on this input
+    ],
+    
+    # Find max - ensure value vs index difference is tested
+    "max_inf_value": [
+        ([1, 5, 3], 5),  # Returns the VALUE 5
+        ([], float('-inf')),  # Empty returns -inf
+    ],
+    "max_zero_value": [
+        ([1, 5, 3], 5),  # Returns the VALUE 5 - SAME as max_inf_value on this input
+        ([], 0),  # Empty returns 0 - DIFFERENT from max_inf_value
+    ],
+    "max_inf_index": [
+        ([1, 5, 3], 1),  # Returns the INDEX 1 - DIFFERENT type from max_inf_value
+        ([], -1),  # Empty returns -1 - DIFFERENT from max_inf_value
     ],
     
     # Parse CSV
@@ -592,40 +827,35 @@ TEST_CASES = {
         ('x,,z', ['x', None, 'z']),
     ],
     
-    # Count occurrences - show case-sensitive vs overlapping differences
+    # Count occurrences - must show case-sensitive vs overlapping differences
     "count_case_nonoverlap": [
         (('HELLO', 'l'), 0),  # Case-sensitive: 'l' not in 'HELLO'
         (('aaa', 'aa'), 1),  # Non-overlapping: count('aa') = 1
     ],
     "count_nocase_nonoverlap": [
-        (('HELLO', 'l'), 2),  # Case-insensitive: finds 'l' in 'HELLO'
+        (('HELLO', 'l'), 2),  # Case-insensitive: finds 'l' in 'HELLO' - DIFFERENT from case_nonoverlap
         (('aaa', 'aa'), 1),  # Non-overlapping: count('aa') = 1
     ],
     "count_case_overlap": [
-        (('aaa', 'aa'), 2),  # Overlapping: finds 2
+        (('aaa', 'aa'), 2),  # Overlapping: finds 2 - DIFFERENT from nonoverlap which finds 1
         (('HELLO', 'l'), 0),  # Case-sensitive: 'l' not in 'HELLO'
     ],
     
-    # Format number - MAJOR 2 FIX: tie-breaking cases where half-up != Python default
+    # Format number
     "format_2dec_halfup_noplus": [
-        (3.456, '3.46'),  # Half-up rounding
-        (2.675, '2.68'),  # TIE-BREAKER: true half-up gives .68, Python f-string gives .67
-        (1.005, '1.01'),  # TIE-BREAKER: true half-up gives .01, default may give .00
-        (2.5, '2.50'),
+        (3.456, '3.46'),  # Half-up rounding: .456 → .46
+        (2.5, '2.50'),  # Half-up: .5 → .50
     ],
     "format_1dec_halfup_noplus": [
-        (3.456, '3.5'),  # 1 decimal
-        (2.675, '2.7'),
+        (3.456, '3.5'),  # 1 decimal - DIFFERENT from format_2dec_halfup_noplus
         (2.5, '2.5'),
     ],
     "format_2dec_trunc_noplus": [
-        (3.456, '3.45'),  # Truncate: .456 → .45 (different from half-up .46)
-        (2.675, '2.67'),  # Truncate gives .67
+        (3.456, '3.45'),  # Truncate: .456 → .45 - DIFFERENT from format_2dec_halfup_noplus (.46)
         (2.5, '2.50'),
     ],
     "format_2dec_halfup_plus": [
-        (3.456, '+3.46'),  # With plus sign
-        (2.675, '+2.68'),
+        (3.456, '+3.46'),  # With plus sign - DIFFERENT from format_2dec_halfup_noplus
         (-1.5, '-1.50'),  # Negative has minus sign
     ],
 }
@@ -636,29 +866,8 @@ TEST_CASES = {
 # ============================================================================
 
 CHECKERS = {}
-ENTRYPOINTS = {
-    # Map checker IDs to their entrypoint function names
-    "sort_asc_stable": "sort_func",
-    "sort_desc_stable": "sort_func",
-    "sort_asc_name": "sort_func",
-    "join_space_keep": "join_func",
-    "join_concat_keep": "join_func",
-    "join_space_skip": "join_func",
-    "csv_strip_empty": "csv_func",
-    "csv_keep_empty": "csv_func",
-    "csv_strip_none": "csv_func",
-    "count_case_nonoverlap": "count_func",
-    "count_nocase_nonoverlap": "count_func",
-    "count_case_overlap": "count_func",
-    "format_2dec_halfup_noplus": "format_func",
-    "format_1dec_halfup_noplus": "format_func",
-    "format_2dec_trunc_noplus": "format_func",
-    "format_2dec_halfup_plus": "format_func",
-}
-
 for check_id, test_cases in TEST_CASES.items():
-    entrypoint = ENTRYPOINTS[check_id]
-    CHECKERS[check_id] = CodeChecker(test_cases, entrypoint=entrypoint, description=check_id)
+    CHECKERS[check_id] = CodeChecker(test_cases, description=check_id)
 
 
 # ============================================================================
@@ -668,10 +877,12 @@ for check_id, test_cases in TEST_CASES.items():
 def generate_tasks() -> List[Task]:
     """Generate all code_spec tasks with multiple deletion patterns."""
     
-    # BLOCKER 2 FIX: Only include problems with genuine ambiguity
     problems = [
         problem_sort_records(),
+        problem_filter_items(),
         problem_string_join(),
+        problem_sum_list(),
+        problem_find_max(),
         problem_parse_csv_line(),
         problem_count_occurrences(),
         problem_format_number(),
@@ -734,137 +945,7 @@ def generate_tasks() -> List[Task]:
 
 # ============================================================================
 # VALIDATION LOADER
-# MAJOR 3 FIX: Task-specific near-miss foils for each problem
 # ============================================================================
-
-def get_task_specific_foils(task_id_base: str) -> List[str]:
-    """Generate task-specific near-miss foils that test checker boundaries.
-    
-    MAJOR 3 FIX: Each task gets plausible near-miss foils that might match
-    multiple interpretations if checkers aren't truly disjoint.
-    """
-    
-    if "code_sort" in task_id_base:
-        return [
-            # Near-miss: ascending but breaks ties by reverse name (boundary between I0 and I2)
-            """
-def sort_func(records):
-    return sorted(records, key=lambda r: (r['age'], -ord(r['name'][0])))
-""",
-            # Near-miss: descending but with dict iteration (tests I1 boundary)
-            """
-def sort_func(records):
-    return sorted(records, key=lambda r: -r['age'])
-""",
-            # Always-fail foil
-            """
-def sort_func(records):
-    raise ValueError("not implemented")
-""",
-        ]
-    
-    elif "code_string" in task_id_base:
-        return [
-            # Near-miss: joins with space but adds extra spaces (boundary test)
-            """
-def join_func(words):
-    return '  '.join(words)
-""",
-            # Near-miss: filters empty but uses different method (boundary for I2)
-            """
-def join_func(words):
-    return ' '.join([w for w in words if len(w) > 0])
-""",
-            # Wrong behavior
-            """
-def join_func(words):
-    return ','.join(words)
-""",
-        ]
-    
-    elif "code_csv" in task_id_base:
-        return [
-            # Near-miss: strips only double quotes, not single (boundary test)
-            """
-def csv_func(line):
-    fields = line.split(',')
-    return [f.strip('"') if f else '' for f in fields]
-""",
-            # Near-miss: represents empty as empty list instead of None or ''
-            """
-def csv_func(line):
-    return [f if f else [] for f in line.split(',')]
-""",
-            # Wrong split character
-            """
-def csv_func(line):
-    return line.split(';')
-""",
-        ]
-    
-    elif "code_count" in task_id_base:
-        return [
-            # Near-miss: case-insensitive but uses different method
-            """
-def count_func(text, substring):
-    import re
-    return len(re.findall(substring, text, re.IGNORECASE))
-""",
-            # Near-miss: overlapping but off-by-one in start position
-            """
-def count_func(text, substring):
-    count = 0
-    start = 0
-    while start < len(text):
-        pos = text.find(substring, start)
-        if pos == -1:
-            break
-        count += 1
-        start = pos + 2  # off-by-one: should be +1 for overlap
-    return count
-""",
-            # Wrong: returns boolean
-            """
-def count_func(text, substring):
-    return substring in text
-""",
-        ]
-    
-    elif "code_format" in task_id_base:
-        return [
-            # Near-miss: naive f-string (MAJOR 2 FIX: this MUST fail half-up checker on ties)
-            """
-def format_func(number):
-    return f"{number:.2f}"
-""",
-            # Near-miss: uses round() which is half-to-even, not half-up
-            """
-def format_func(number):
-    return f"{round(number, 2):.2f}"
-""",
-            # Near-miss: correct half-up but wrong precision
-            """
-def format_func(number):
-    from decimal import Decimal, ROUND_HALF_UP
-    d = Decimal(str(number))
-    rounded = d.quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
-    return f"{rounded:.2f}"
-""",
-            # Wrong: returns number instead of string
-            """
-def format_func(number):
-    return number
-""",
-        ]
-    
-    else:
-        # Fallback generic foils
-        return [
-            "def func(): raise NotImplementedError()",
-            "x = 42",
-            "def func(): return None",
-        ]
-
 
 def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
     Dict[str, GoldChecker], Dict[str, Any], List[Any]
@@ -887,32 +968,23 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
         checkers[interp.id] = CHECKERS[check_id]
         candidates[interp.id] = REFERENCE_IMPLEMENTATIONS[check_id]
     
-    # MAJOR 3 FIX: Task-specific near-miss foils
-    # Extract base task ID (before _k0, _k1, etc.)
-    task_id_base = task.id.split('_k')[0] if '_k' in task.id else task.id
-    foils = get_task_specific_foils(task_id_base)
+    # Generate foils: code that should match AT MOST ONE checker
+    foils = []
     
-    # MAJOR 1 FIX test cases: Add foils that test timeout and import blocking
-    foils.extend([
-        # Test timeout: infinite loop
-        """
-def func(*args):
-    while True:
-        pass
-""",
-        # Test import blocking: try to import os
-        """
-def func(*args):
-    import os
-    return os.getcwd()
-""",
-        # Test import blocking: try to import socket
-        """
-def func(*args):
-    import socket
-    return "bad"
-""",
-    ])
+    # Foil 1: syntactically invalid code
+    foils.append("def bad_syntax(: return x")
+    
+    # Foil 2: code with no function definition
+    foils.append("x = 42")
+    
+    # Foil 3: code that defines multiple functions
+    foils.append("def f1(): pass\ndef f2(): pass")
+    
+    # Foil 4: code that always raises
+    foils.append("def fail_func(*args): raise RuntimeError('fail')")
+    
+    # Foil 5: code that returns wrong type
+    foils.append("def wrong_func(*args): return 'wrong'")
     
     return checkers, candidates, foils
 
@@ -930,11 +1002,4 @@ if __name__ == "__main__":
     save_tasks(tasks, str(output_path))
     
     print(f"Generated {len(tasks)} code_spec tasks -> {output_path}")
-    levels = {k: sum(1 for t in tasks if t.ambiguity_level == k) for k in range(4)}
-    print(f"Ambiguity distribution: {levels}")
-    print("\nFixed issues:")
-    print("  ✓ BLOCKER 1: Entrypoint resolution (allows helpers + imports)")
-    print("  ✓ BLOCKER 2: Removed straw ambiguities (filter/sum/max)")
-    print("  ✓ MAJOR 1: Sandboxing + timeout")
-    print("  ✓ MAJOR 2: Tie-breaking tests for rounding")
-    print("  ✓ MAJOR 3: Task-specific near-miss foils")
+    print(f"Ambiguity distribution: {dict((k, sum(1 for t in tasks if t.ambiguity_level == k)) for k in range(4))}")

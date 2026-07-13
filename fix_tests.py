@@ -1,4 +1,6 @@
-"""Tests for code_spec domain - including fixes for all 5 audit findings."""
+"""Script to generate updated test_code_spec.py with audit fix lock-ins."""
+
+TEST_CONTENT = '''"""Tests for code_spec domain - including fixes for all 5 audit findings."""
 
 import pytest
 import time
@@ -76,7 +78,7 @@ def sort_func(records):
     elapsed = time.time() - start
     
     assert not result.passed, "Infinite loop should fail"
-    assert "timeout" in result.details.lower() or "infinite loop" in result.details.lower(), \
+    assert "timeout" in result.details.lower() or "infinite loop" in result.details.lower(), \\
         f"Expected timeout message, got: {result.details}"
     assert elapsed < 10, f"Timeout took too long: {elapsed:.1f}s (expected <10s)"
 
@@ -116,7 +118,7 @@ def format_func(number):
     
     checker = CHECKERS["format_2dec_halfup_noplus"]
     result = checker.check(naive_formatter)
-    assert not result.passed, \
+    assert not result.passed, \\
         f"Naive f-string should FAIL half-up checker on tie-breaking cases, but got: {result.details}"
 
 
@@ -161,7 +163,7 @@ def test_major3_foils_match_at_most_one():
             for interp_id, checker in checkers.items():
                 if checker.check(foil).passed:
                     matches.append(interp_id)
-            assert len(matches) <= 1, \
+            assert len(matches) <= 1, \\
                 f"Foil #{i} in {task.id} matches MULTIPLE checkers: {matches}"
 
 
@@ -294,5 +296,11 @@ def test_prompt_vs_latent_spec():
             assert task.prompt == task.latent_spec, f"k=0 control {task.id} has prompt != latent_spec"
         else:
             # Ambiguous: prompt should be strictly less specified
-            assert len(task.prompt) < len(task.latent_spec), \
+            assert len(task.prompt) < len(task.latent_spec), \\
                 f"k={task.ambiguity_level} task {task.id} prompt not less specified than latent_spec"
+'''
+
+with open("tests/test_code_spec.py", "w", encoding="utf-8") as f:
+    f.write(TEST_CONTENT)
+
+print("Test file written successfully!")
