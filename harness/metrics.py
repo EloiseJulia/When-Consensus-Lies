@@ -66,30 +66,54 @@ def false_consensus_rate(labels: List[str], target: str) -> float:
 convergent_delusion = false_consensus_rate
 
 
-def marginal_rho(labels: List[str], target: str) -> float:
-    """Compute marginal agreement rate (binary: correct vs any-wrong).
-    
-    SECONDARY METRIC: bridges to prior literature on binary correlation.
-    Does NOT distinguish which wrong interpretation agents land on.
-    
+def error_indicators(labels: List[str], target: str) -> List[int]:
+    """Binary error vector E where E_k = 1 if agent/task k is wrong, else 0."""
+    return [0 if label == target else 1 for label in labels]
+
+
+def _pearson(x: List[float], y: List[float]):
+    """Pearson correlation, or None if either series has zero variance."""
+    n = len(x)
+    if n == 0 or len(y) != n:
+        return None
+    mx = sum(x) / n
+    my = sum(y) / n
+    sxx = sum((a - mx) ** 2 for a in x)
+    syy = sum((b - my) ** 2 for b in y)
+    if sxx == 0 or syy == 0:
+        return None  # correlation undefined when a series is constant
+    sxy = sum((a - mx) * (b - my) for a, b in zip(x, y))
+    return sxy / math.sqrt(sxx * syy)
+
+
+def marginal_rho(error_matrix: List[List[int]]) -> float:
+    """Mean pairwise error correlation across agents (SECONDARY bridge metric).
+
+    Implements marginal ρ = mean over agent pairs of corr(E_i, E_j), where E_i is
+    agent i's binary error vector ACROSS TASKS (1 = wrong on that task). This is the
+    binary-correlation bridge to prior literature and is NOT the primary metric —
+    it cannot tell whether agents fail on the SAME wrong interpretation, only whether
+    their errors co-occur. Use `false_consensus_rate` (convergent_delusion) as primary.
+
     Args:
-        labels: List of agent labels
-        target: The correct label
-    
+        error_matrix: rows = agents, cols = tasks; each entry in {0, 1} (1 = error).
+                      Build a row with `error_indicators(labels, target)`.
+
     Returns:
-        Float in [0, 1]: Phi coefficient proxy (share agreeing on majority label)
+        Mean Pearson correlation over pairs with defined variance; 0.0 if none
+        (e.g. all agents always correct or always wrong → no error variance to
+        correlate, so ρ is reported as 0.0 rather than a spurious 1.0).
     """
-    if not labels:
+    n = len(error_matrix)
+    if n < 2:
         return 0.0
-    
-    # Count correct vs wrong
-    correct_count = sum(1 for label in labels if label == target)
-    wrong_count = len(labels) - correct_count
-    
-    # Majority label
-    majority_count = max(correct_count, wrong_count)
-    
-    return majority_count / len(labels)
+    corrs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            c = _pearson(error_matrix[i], error_matrix[j])
+            if c is not None:
+                corrs.append(c)
+    return sum(corrs) / len(corrs) if corrs else 0.0
 
 
 def a_maj(labels: List[str], target: str) -> float:

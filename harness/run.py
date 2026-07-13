@@ -46,22 +46,16 @@ def run_task(task: Task, config: str, client: LLMClient, n_agents: int = 5) -> L
             seed=seed
         )
         
-        # Mock: derive label from agent index (for test diversity)
-        # Real labeling happens in label.py via executable signals
-        interpretations = task.interpretations
-        label_idx = agent_idx % len(interpretations)
-        mock_label = interpretations[label_idx].id
-        
         # Mock: derive confidence (deterministic from seed)
         mock_conf = 0.5 + (seed % 50) / 100.0  # Range [0.5, 1.0)
-        
+
         run = AgentRun(
             task_id=task.id,
             config=config,
             model_role="tested_agents",
             model_id=completion.model,
             output=completion.text,
-            label=mock_label,  # Will be overwritten by label_run in real pipeline
+            label="",  # Unlabeled: labeling is a separate stage (label_run in the pipeline)
             verbalized_conf=mock_conf,
             logit_conf=None,  # Mock mode doesn't have logits
             seed=seed

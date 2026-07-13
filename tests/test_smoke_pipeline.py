@@ -37,6 +37,12 @@ def test_smoke_pipeline():
     assert len(runs) == 5
     assert all(isinstance(run, AgentRun) for run in runs)
     assert all(run.task_id == task.id for run in runs)
+
+    # run_task must NOT pre-assign labels: labeling is a separate pipeline stage.
+    assert all(run.label == "" for run in runs)
+
+    # Identity dimensions must be distinct per run (seed differentiates them).
+    assert len({run.seed for run in runs}) == 5
     
     # Label runs (mock deterministic)
     labels = [label_run(run, task) for run in runs]
