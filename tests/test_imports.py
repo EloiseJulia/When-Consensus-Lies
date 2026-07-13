@@ -14,7 +14,8 @@ def test_import_common():
 def test_import_bench():
     """Test bench package imports."""
     import bench
-    from bench.build import generate_ambiguous_task, generate_gold_checker
+    from bench.build import assemble_task, delete_requirements, validate_full_spec
+    from bench.validate import assign_label, validate_domain, validate_task
     
     assert bench.__version__
 

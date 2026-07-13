@@ -6,6 +6,7 @@ Ensures every interpretation is DETERMINISTICALLY DISTINGUISHED:
 """
 
 import argparse
+import importlib
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,10 +16,37 @@ from bench.gold.base import CheckResult, GoldChecker, get_checker
 from common.schema import Task
 
 
+class AmbiguousLabelError(Exception):
+    """Raised when a candidate matches more than one interpretation checker.
+
+    This makes labeling ambiguity LOUD instead of silent — the core guarantee
+    the Phase-2 labeler relies on.
+    """
+
+
+def assign_label(
+    candidate: Any,
+    checkers: Dict[str, GoldChecker],
+    perp_label: str = "I_perp",
+) -> str:
+    """Deterministically label a candidate against a task's checkers.
+
+    Returns the single matching interpretation id, `perp_label` if none match,
+    and RAISES AmbiguousLabelError if two or more match (never silent).
+    """
+    matches = [cid for cid, ch in checkers.items() if ch.check(candidate).passed]
+    if len(matches) > 1:
+        raise AmbiguousLabelError(
+            f"Candidate matches multiple interpretations: {matches}"
+        )
+    return matches[0] if matches else perp_label
+
+
 def validate_task(
     task: Task,
     checkers: Dict[str, GoldChecker],
-    candidates: Dict[str, Any]
+    candidates: Dict[str, Any],
+    foils: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """Validate that a task's interpretations are deterministically distinguished.
     
@@ -26,6 +54,10 @@ def validate_task(
         task: The task to validate
         checkers: Map from interpretation ID to gold checker
         candidates: Map from interpretation ID to reference candidate
+        foils: Optional adversarial candidates that must match AT MOST ONE
+               checker. Foils probe checker disjointness beyond the reference
+               candidates (defends against overlapping checkers that would
+               certify 100% while a real answer matches multiple interps).
     
     Returns:
         Dict with:
@@ -35,6 +67,23 @@ def validate_task(
     """
     errors = []
     results = []
+
+    # Structural invariant: EXACTLY ONE target interpretation.
+    n_targets = sum(1 for i in task.interpretations if i.is_target)
+    if n_targets != 1:
+        errors.append(
+            f"Task must have exactly one target interpretation, got {n_targets}"
+        )
+
+    # Benchmark-validity: a task claiming ambiguity (level>=1) must actually
+    # open at least one non-target interpretation.
+    if task.ambiguity_level >= 1:
+        n_nontarget = sum(1 for i in task.interpretations if not i.is_target)
+        if n_nontarget < 1:
+            errors.append(
+                f"ambiguity_level={task.ambiguity_level} but no non-target "
+                f"interpretation is present"
+            )
     
     # Check each interpretation has a checker and candidate
     for interp in task.interpretations:
@@ -78,6 +127,22 @@ def validate_task(
         elif matches[0] != interp.id:
             errors.append(
                 f"Candidate for {interp.id} matches WRONG checker: {matches[0]}"
+            )
+
+    # Foils: adversarial candidates that must match AT MOST ONE checker.
+    for idx, foil in enumerate(foils or []):
+        foil_matches = []
+        for check_interp in task.interpretations:
+            if checkers[check_interp.id].check(foil).passed:
+                foil_matches.append(check_interp.id)
+        results.append({
+            "candidate_for": f"foil[{idx}]",
+            "matches": foil_matches,
+        })
+        if len(foil_matches) > 1:
+            errors.append(
+                f"Foil #{idx} matches MULTIPLE checkers: {foil_matches} "
+                f"(checkers are not disjoint)"
             )
     
     return {
@@ -126,7 +191,12 @@ def validate_domain(
         
         # Load checkers and candidates for this task
         if checker_loader:
-            checkers, candidates = checker_loader(domain, task)
+            loaded = checker_loader(domain, task)
+            if len(loaded) == 3:
+                checkers, candidates, foils = loaded
+            else:
+                checkers, candidates = loaded
+                foils = None
         else:
             # Use global registry (domain slices must register their checkers)
             checkers = {}
@@ -145,7 +215,7 @@ def validate_domain(
                 "provide checker_loader that returns (checkers, candidates)"
             )
         
-        validation = validate_task(task, checkers, candidates)
+        validation = validate_task(task, checkers, candidates, foils=foils)
         if validation["distinguishable"]:
             distinguishable_count += 1
         else:
@@ -181,11 +251,21 @@ def main():
     
     args = parser.parse_args()
     
-    # Note: This CLI requires domains to register their checkers and provide
-    # a checker_loader function. For the _example domain, this is handled in
-    # bench/_example/__init__.py
-    
-    from bench._example import get_checkers_and_candidates
+    # Dynamically import the domain package's checker loader (plug-in contract:
+    # every domain exposes get_checkers_and_candidates(domain, task)).
+    try:
+        domain_mod = importlib.import_module(f"bench.{args.domain}")
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            f"Domain package 'bench.{args.domain}' not found: {exc}"
+        )
+    try:
+        get_checkers_and_candidates = domain_mod.get_checkers_and_candidates
+    except AttributeError:
+        raise SystemExit(
+            f"Domain 'bench.{args.domain}' must define "
+            f"get_checkers_and_candidates(domain, task)"
+        )
     
     summary = validate_domain(
         args.domain,

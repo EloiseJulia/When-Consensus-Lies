@@ -127,15 +127,50 @@ def generate_example_tasks():
     )
     task2 = assemble_task(task2_spec, k=1, classes_to_delete=["separator"])
     
-    task3_spec = task1_spec
-    task3_spec.task_id = "example_arithmetic_003"
+    # Task 3: unambiguous CONTROL (k=0, prompt == latent_spec). Fresh spec (no
+    # aliasing) with only the target interpretation present.
+    task3_spec = FullSpec(
+        domain="_example",
+        task_id="example_arithmetic_003",
+        prompt_core="Given two numbers 3 and 4, add them.",
+        requirement_classes=[
+            RequirementClass(
+                id="operation_type",
+                description="Which arithmetic operation to use",
+                clauses=["Use addition to combine the numbers."]
+            )
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description="Addition (target)",
+                is_target=True,
+                gold_check="sum_checker"
+            ),
+            InterpretationBranch(
+                id="I1",
+                description="Multiplication (opened by deletion)",
+                is_target=False,
+                gold_check="product_checker",
+                opened_by="operation_type"
+            ),
+        ],
+        key_questions=["(control) operation is fully specified as addition"]
+    )
     task3 = assemble_task(task3_spec, k=0, classes_to_delete=[])
     
     return [task1, task2, task3]
 
 
-def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[Dict[str, GoldChecker], Dict[str, Any]]:
-    """Provide checkers and reference candidates for example tasks."""
+def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
+    Dict[str, GoldChecker], Dict[str, Any], list
+]:
+    """Provide checkers, reference candidates, and adversarial foils.
+
+    Returns a 3-tuple (checkers, candidates, foils). Foils are candidates that
+    must match AT MOST ONE checker; they probe checker disjointness beyond the
+    reference candidates.
+    """
     
     checkers_map = {
         "sum_checker": SumChecker(),
@@ -151,15 +186,18 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[Dict[str, Gold
             "I1": 12,
             "I2": 3.5,
         }
+        foils = [0, 42, -1]  # match no arithmetic checker
     elif task.id == "example_string_002":
         candidates = {
             "I0": "helloworld",
             "I1": "hello world",
         }
+        foils = ["HELLOWORLD", "hello-world", ""]  # match neither checker
     elif task.id == "example_arithmetic_003":
         candidates = {
             "I0": 7,
         }
+        foils = [0, 12, 3.5]  # none should match the sole target checker
     else:
         raise ValueError(f"Unknown task: {task.id}")
     
@@ -167,7 +205,7 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[Dict[str, Gold
     for interp in task.interpretations:
         checkers[interp.id] = checkers_map[interp.gold_check]
     
-    return checkers, candidates
+    return checkers, candidates, foils
 
 
 if __name__ == "__main__":

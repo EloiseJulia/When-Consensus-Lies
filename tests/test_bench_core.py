@@ -237,3 +237,162 @@ def test_file_io_roundtrip(tmp_path):
     for orig, load in zip(tasks, loaded):
         assert orig.id == load.id
         assert orig.ambiguity_level == load.ambiguity_level
+
+
+# --- Fixes locked by the core audit (BLOCKER 1/2, MAJOR 3/4) ---
+
+
+def _two_class_spec():
+    """A spec with two requirement classes each opening one non-target interp."""
+    return FullSpec(
+        domain="test",
+        task_id="test_fix",
+        prompt_core="Core.",
+        requirement_classes=[
+            RequirementClass(id="a", description="A", clauses=["Clause A text."]),
+            RequirementClass(id="b", description="B", clauses=["Clause B text."]),
+        ],
+        interpretations=[
+            InterpretationBranch(id="I0", description="target", is_target=True, gold_check="c0"),
+            InterpretationBranch(id="I1", description="alt-a", is_target=False, gold_check="c1", opened_by="a"),
+            InterpretationBranch(id="I2", description="alt-b", is_target=False, gold_check="c2", opened_by="b"),
+        ],
+        key_questions=["Qa", "Qb"],
+    )
+
+
+def test_delete_rejects_unknown_class():
+    """BLOCKER 1: deleting a non-existent class id must raise."""
+    spec = _two_class_spec()
+    with pytest.raises(ValueError, match="Unknown requirement class"):
+        delete_requirements(spec, k=1, classes_to_delete=["does_not_exist"])
+
+
+def test_delete_rejects_k_out_of_range():
+    """BLOCKER 1: k larger than available classes must raise."""
+    spec = _two_class_spec()
+    with pytest.raises(ValueError, match=r"k must be in"):
+        assemble_task(spec, k=3)
+
+
+def test_delete_rejects_count_mismatch():
+    """BLOCKER 1: classes_to_delete length must equal k."""
+    spec = _two_class_spec()
+    with pytest.raises(ValueError, match="exactly k"):
+        delete_requirements(spec, k=2, classes_to_delete=["a"])
+
+
+def test_k0_control_prompt_equals_latent():
+    """BLOCKER 1: k=0 control leaves prompt == latent_spec, only target present."""
+    spec = _two_class_spec()
+    task = assemble_task(spec, k=0, classes_to_delete=[])
+    assert task.prompt == task.latent_spec
+    assert task.ambiguity_level == 0
+    assert [i.id for i in task.interpretations] == ["I0"]
+
+
+def test_deletion_makes_prompt_strictly_shorter():
+    """BLOCKER 1: k>=1 must strictly reduce the prompt vs latent_spec."""
+    spec = _two_class_spec()
+    task = assemble_task(spec, k=1, classes_to_delete=["a"])
+    assert len(task.prompt) < len(task.latent_spec)
+    assert "Clause A text." not in task.prompt
+    assert "Clause A text." in task.latent_spec
+
+
+def test_spec_multi_target_rejected():
+    """MAJOR 3: a spec with two targets must raise at validation."""
+    spec = _two_class_spec()
+    spec.interpretations[1].is_target = True  # now two targets
+    with pytest.raises(ValueError, match="exactly one target"):
+        assemble_task(spec, k=1, classes_to_delete=["a"])
+
+
+def test_nontarget_requires_opened_by():
+    """MAJOR 3: a non-target without opened_by must raise."""
+    spec = _two_class_spec()
+    spec.interpretations[1].opened_by = None
+    with pytest.raises(ValueError, match="must declare opened_by"):
+        assemble_task(spec, k=1, classes_to_delete=["a"])
+
+
+def test_validate_task_rejects_two_targets():
+    """MAJOR 3: validator flags a task with two target interpretations."""
+    task = Task(
+        id="t", domain="test", prompt="p", latent_spec="p spec",
+        interpretations=[
+            Interpretation(id="I0", is_target=True, gold_check="c0"),
+            Interpretation(id="I1", is_target=True, gold_check="c1"),
+        ],
+        ambiguity_level=1, key_questions=["Q"],
+    )
+    checkers = {"I0": AlwaysPassChecker(), "I1": AlwaysFailChecker()}
+    candidates = {"I0": "x", "I1": "y"}
+    result = validate_task(task, checkers, candidates)
+    assert result["distinguishable"] is False
+    assert any("exactly one target" in e for e in result["errors"])
+
+
+def test_validate_task_ambiguity_without_alternative():
+    """Benchmark-validity: ambiguity_level>=1 with no non-target is rejected."""
+    task = Task(
+        id="t", domain="test", prompt="p", latent_spec="p spec",
+        interpretations=[Interpretation(id="I0", is_target=True, gold_check="c0")],
+        ambiguity_level=2, key_questions=["Q"],
+    )
+    checkers = {"I0": AlwaysPassChecker()}
+    candidates = {"I0": "x"}
+    result = validate_task(task, checkers, candidates)
+    assert result["distinguishable"] is False
+    assert any("no non-target" in e for e in result["errors"])
+
+
+def test_foils_catch_overlapping_checkers():
+    """BLOCKER 2: a foil matching multiple checkers fails validation even when
+    reference candidates alone look distinguishable."""
+    task = Task(
+        id="t", domain="test", prompt="p", latent_spec="p spec",
+        interpretations=[
+            Interpretation(id="I0", is_target=True, gold_check="c0"),
+            Interpretation(id="I1", is_target=False, gold_check="c1"),
+        ],
+        ambiguity_level=1, key_questions=["Q"],
+    )
+
+    class StartsWithA(GoldChecker):
+        def check(self, candidate) -> CheckResult:
+            return CheckResult(passed=str(candidate).startswith("a"))
+
+    class EndsWithZ(GoldChecker):
+        def check(self, candidate) -> CheckResult:
+            return CheckResult(passed=str(candidate).endswith("z"))
+
+    checkers = {"I0": StartsWithA(), "I1": EndsWithZ()}
+    candidates = {"I0": "apple", "I1": "buzz"}
+    # Reference candidates alone are distinguishable...
+    ok = validate_task(task, checkers, candidates)
+    assert ok["distinguishable"] is True
+    # ...but a foil that both starts with 'a' and ends with 'z' exposes overlap.
+    bad = validate_task(task, checkers, candidates, foils=["az"])
+    assert bad["distinguishable"] is False
+    assert any("Foil" in e and "MULTIPLE" in e for e in bad["errors"])
+
+
+def test_assign_label_raises_on_ambiguous():
+    """assign_label returns a unique id / I_perp, and RAISES on >1 match."""
+    from bench.validate import AmbiguousLabelError, assign_label
+
+    class StartsWithA(GoldChecker):
+        def check(self, candidate) -> CheckResult:
+            return CheckResult(passed=str(candidate).startswith("a"))
+
+    class EndsWithZ(GoldChecker):
+        def check(self, candidate) -> CheckResult:
+            return CheckResult(passed=str(candidate).endswith("z"))
+
+    checkers = {"I0": StartsWithA(), "I1": EndsWithZ()}
+    assert assign_label("apple", checkers) == "I0"
+    assert assign_label("buzz", checkers) == "I1"
+    assert assign_label("hello", checkers) == "I_perp"
+    with pytest.raises(AmbiguousLabelError):
+        assign_label("az", checkers)
