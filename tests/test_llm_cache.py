@@ -40,3 +40,12 @@ def test_cache_key_is_mode_and_model_aware(tmp_path):
     client.offline = False
     online_key = client._cache_key("tested_agents", "p", 1)
     assert offline_key != online_key
+
+
+def test_unknown_role_fails_fast(tmp_path):
+    """A typoed role must raise, not fabricate mock-model provenance."""
+    cfg = load_config()
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+    with pytest.raises(ValueError):
+        client.complete(role="typo_role", prompt="p", seed=1)
+

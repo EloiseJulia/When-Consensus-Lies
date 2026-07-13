@@ -38,3 +38,17 @@ def test_all_wrong_has_zero_rho_not_one():
 
 def test_single_agent_returns_zero():
     assert marginal_rho([[1, 0, 1]]) == 0.0
+
+
+def test_a_maj_unique_majority():
+    from harness.metrics import a_maj
+    assert a_maj(["I0", "I0", "I1"], "I0") == 1.0
+    assert a_maj(["I1", "I1", "I0"], "I0") == 0.0
+
+
+def test_a_maj_tie_is_order_independent():
+    """A tie has no majority winner -> 0.0 regardless of list order."""
+    from harness.metrics import a_maj
+    assert a_maj(["I0", "I1"], "I0") == 0.0
+    assert a_maj(["I1", "I0"], "I0") == 0.0
+

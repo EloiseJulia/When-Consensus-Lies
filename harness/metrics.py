@@ -117,27 +117,30 @@ def marginal_rho(error_matrix: List[List[int]]) -> float:
 
 
 def a_maj(labels: List[str], target: str) -> float:
-    """Compute majority-vote accuracy.
-    
+    """Majority-vote accuracy with strict, order-independent tie handling.
+
+    Returns 1.0 only if `target` is the UNIQUE strict plurality winner. If two or
+    more labels tie for the top count there is no majority winner, so the result
+    is 0.0 regardless of list order (avoids order-dependent scoring).
+
     Args:
         labels: List of agent labels
         target: The correct label
-    
+
     Returns:
-        1.0 if majority label equals target, else 0.0
+        1.0 if target is the unique modal label, else 0.0
     """
     if not labels:
         return 0.0
-    
-    # Count frequencies
+
     counts = {}
     for label in labels:
         counts[label] = counts.get(label, 0) + 1
-    
-    # Find majority label (ties go to first occurrence)
-    majority_label = max(labels, key=lambda x: (counts[x], -labels.index(x)))
-    
-    return 1.0 if majority_label == target else 0.0
+
+    max_count = max(counts.values())
+    winners = [label for label, c in counts.items() if c == max_count]
+
+    return 1.0 if len(winners) == 1 and winners[0] == target else 0.0
 
 
 def ece(confidences: List[float], correct: List[bool], n_bins: int = 10) -> float:

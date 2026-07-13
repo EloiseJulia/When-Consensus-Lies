@@ -107,13 +107,10 @@ class LLMClient:
         # Generate mock output that varies by hash
         mock_text = f"MOCK_OUTPUT_{hash_hex[:16]}"
         
-        # Mock model name from config
-        try:
-            from common.config import model_for_role
-            model_info = model_for_role(role, self.config)
-            model_name = model_info.get("model", "mock-model")
-        except:
-            model_name = "mock-model"
+        # Resolve model name from config. Fail fast on unknown roles rather than
+        # fabricating "mock-model" provenance (a silent failure this project studies).
+        from common.config import model_for_role
+        model_name = model_for_role(role, self.config)["model"]
         
         return Completion(
             text=mock_text,
@@ -124,13 +121,13 @@ class LLMClient:
         )
     
     def _role_identity(self, role: str) -> str:
-        """Resolved family:model for a role, so the cache key is provenance-aware."""
-        try:
-            from common.config import model_for_role
-            info = model_for_role(role, self.config)
-            return f"{info.get('family', '?')}:{info.get('model', 'mock-model')}"
-        except Exception:
-            return "?:mock-model"
+        """Resolved family:model for a role, so the cache key is provenance-aware.
+
+        Raises on unknown roles (fail fast — no fabricated fallback provenance).
+        """
+        from common.config import model_for_role
+        info = model_for_role(role, self.config)
+        return f"{info['family']}:{info['model']}"
 
     def _cache_key(self, role: str, prompt: str, seed: int) -> str:
         """Generate cache key from inputs.
