@@ -18,8 +18,11 @@ See bench/_example/ for a complete working example.
    the real defense against overlapping checkers that certify 100% while a
    plausible answer secretly matches two interpretations.
 5. **get_checkers_and_candidates(domain, task)**: Function returning
-   `(checkers_dict, candidates_dict, foils_list)` (3-tuple; a 2-tuple without
-   foils is accepted for back-compat but discouraged).
+   `(checkers_dict, candidates_dict, foils_list)` (3-tuple). Foils are
+   **MANDATORY for domain certification** — `validate_domain` fails closed
+   (marks the task NOT distinguishable) if a task has no foils. A 2-tuple is
+   accepted only by the low-level `validate_task` primitive, never by
+   certification.
 
 ## Key API Signatures
 
@@ -54,7 +57,8 @@ def get_checkers_and_candidates(domain, task):
 
 ## Constraints (enforced by build.py / validate.py — violations RAISE or FAIL)
 
-- **Exactly one** target interpretation (is_target=True, id "I0") per task.
+- **Exactly one** target interpretation, and it MUST have the canonical id
+  `"I0"`; `"I0"` is reserved for the target (non-targets use I1, I2, ...).
 - Every **non-target** interpretation MUST declare `opened_by` = an existing
   requirement class id (clear provenance; keeps controls clean).
 - Deletion is validated: class ids must exist, be distinct, and number exactly

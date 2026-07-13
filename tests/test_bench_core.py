@@ -378,6 +378,67 @@ def test_foils_catch_overlapping_checkers():
     assert any("Foil" in e and "MULTIPLE" in e for e in bad["errors"])
 
 
+def test_target_must_be_i0():
+    """MAJOR: the sole target must carry the canonical id 'I0'."""
+    spec = _two_class_spec()
+    spec.interpretations[0].id = "TARGET"  # target no longer I0
+    with pytest.raises(ValueError, match="id 'I0'"):
+        assemble_task(spec, k=1, classes_to_delete=["a"])
+
+
+def test_validate_task_rejects_noncanonical_target():
+    """MAJOR: validate_task flags a task whose target id != 'I0'."""
+    task = Task(
+        id="t", domain="test", prompt="p", latent_spec="p spec",
+        interpretations=[
+            Interpretation(id="TARGET", is_target=True, gold_check="c0"),
+            Interpretation(id="I1", is_target=False, gold_check="c1"),
+        ],
+        ambiguity_level=1, key_questions=["Q"],
+    )
+    checkers = {"TARGET": AlwaysPassChecker(), "I1": AlwaysFailChecker()}
+    candidates = {"TARGET": "x", "I1": "y"}
+    result = validate_task(task, checkers, candidates, foils=["z"])
+    assert result["distinguishable"] is False
+    assert any("id 'I0'" in e for e in result["errors"])
+
+
+def test_deleted_classes_order_is_deterministic():
+    """MINOR: deleted_classes preserves caller order (not hash-seeded set order)."""
+    spec = _two_class_spec()
+    res = delete_requirements(spec, k=2, classes_to_delete=["b", "a"])
+    assert res["deleted_classes"] == ["b", "a"]
+
+
+def test_certification_fails_closed_without_foils(tmp_path):
+    """BLOCKER: validate_domain (certification) marks tasks with no foils as
+    NOT distinguishable, even if reference candidates look separable."""
+    spec = _two_class_spec()
+    task = assemble_task(spec, k=1, classes_to_delete=["a"])
+    filepath = tmp_path / "nf.jsonl"
+    save_tasks([task], str(filepath))
+
+    class C0(GoldChecker):
+        def check(self, candidate) -> CheckResult:
+            return CheckResult(passed=(candidate == 0))
+
+    class C1(GoldChecker):
+        def check(self, candidate) -> CheckResult:
+            return CheckResult(passed=(candidate == 1))
+
+    # 2-tuple loader (no foils) -> certification must fail closed.
+    def loader(domain, t):
+        return {"I0": C0(), "I1": C1()}, {"I0": 0, "I1": 1}
+
+    summary = validate_domain("nf", data_path=filepath, checker_loader=loader)
+    assert summary["distinguishable_pct"] == 0.0
+    assert summary["failed_tasks"]
+    assert any(
+        "foil" in e.lower()
+        for f in summary["failed_tasks"] for e in f["errors"]
+    )
+
+
 def test_assign_label_raises_on_ambiguous():
     """assign_label returns a unique id / I_perp, and RAISES on >1 match."""
     from bench.validate import AmbiguousLabelError, assign_label

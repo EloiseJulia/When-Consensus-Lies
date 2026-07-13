@@ -65,6 +65,15 @@ def validate_full_spec(full_spec: FullSpec) -> None:
         raise ValueError(
             f"Spec must have exactly one target interpretation, got {len(targets)}"
         )
+    # Canonical label contract: the sole target IS "I0", and no non-target may
+    # reuse the "I0" id.
+    if targets[0].id != "I0":
+        raise ValueError(
+            f"Target interpretation must have id 'I0', got '{targets[0].id}'"
+        )
+    for interp in full_spec.interpretations:
+        if interp.id == "I0" and not interp.is_target:
+            raise ValueError("Interpretation id 'I0' is reserved for the target")
 
     id_set = set(ids)
     for interp in full_spec.interpretations:
@@ -160,7 +169,7 @@ def delete_requirements(
     return {
         "underdetermined_prompt": underdetermined_prompt,
         "latent_spec": latent_spec,
-        "deleted_classes": list(deleted_set),
+        "deleted_classes": list(classes_to_delete),
         "opened_interpretations": opened_interpretations,
     }
 

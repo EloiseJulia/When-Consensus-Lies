@@ -47,6 +47,7 @@ def validate_task(
     checkers: Dict[str, GoldChecker],
     candidates: Dict[str, Any],
     foils: Optional[List[Any]] = None,
+    require_foils: bool = False,
 ) -> Dict[str, Any]:
     """Validate that a task's interpretations are deterministically distinguished.
     
@@ -58,6 +59,9 @@ def validate_task(
                checker. Foils probe checker disjointness beyond the reference
                candidates (defends against overlapping checkers that would
                certify 100% while a real answer matches multiple interps).
+        require_foils: When True (used for DOMAIN CERTIFICATION), a task with no
+               foils FAILS closed — a domain cannot opt out of the disjointness
+               defense and still be certified distinguishable.
     
     Returns:
         Dict with:
@@ -68,11 +72,25 @@ def validate_task(
     errors = []
     results = []
 
-    # Structural invariant: EXACTLY ONE target interpretation.
-    n_targets = sum(1 for i in task.interpretations if i.is_target)
-    if n_targets != 1:
+    # Structural invariant: EXACTLY ONE target interpretation, canonical id I0.
+    targets = [i for i in task.interpretations if i.is_target]
+    if len(targets) != 1:
         errors.append(
-            f"Task must have exactly one target interpretation, got {n_targets}"
+            f"Task must have exactly one target interpretation, got {len(targets)}"
+        )
+    elif targets[0].id != "I0":
+        errors.append(
+            f"Target interpretation must have id 'I0', got '{targets[0].id}'"
+        )
+    for interp in task.interpretations:
+        if interp.id == "I0" and not interp.is_target:
+            errors.append("Interpretation id 'I0' is reserved for the target")
+
+    # Fail-closed: certification requires adversarial foils.
+    if require_foils and not foils:
+        errors.append(
+            "Domain certification requires a non-empty adversarial foil list "
+            "(fail-closed disjointness defense)"
         )
 
     # Benchmark-validity: a task claiming ambiguity (level>=1) must actually
@@ -215,7 +233,9 @@ def validate_domain(
                 "provide checker_loader that returns (checkers, candidates)"
             )
         
-        validation = validate_task(task, checkers, candidates, foils=foils)
+        validation = validate_task(
+            task, checkers, candidates, foils=foils, require_foils=True
+        )
         if validation["distinguishable"]:
             distinguishable_count += 1
         else:
