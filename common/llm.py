@@ -70,14 +70,16 @@ class LLMClient:
         if cached:
             return cached
         
-        # Generate completion (with retry wrapper)
+        # Generate completion (with retry wrapper for TRANSIENT errors only)
         for attempt in range(max_retries):
             try:
                 completion = self._generate(role, prompt, seed)
                 self._write_cache(cache_key, completion)
                 self._log_cost(role, prompt, completion)
                 return completion
-            except Exception as e:
+            except NotImplementedError:
+                raise  # permanent (e.g. online mode deferred) — never retry
+            except Exception:
                 if attempt == max_retries - 1:
                     raise
                 time.sleep(2 ** attempt)  # Exponential backoff
@@ -121,9 +123,26 @@ class LLMClient:
             cost_usd=0.0  # Mock mode is free
         )
     
+    def _role_identity(self, role: str) -> str:
+        """Resolved family:model for a role, so the cache key is provenance-aware."""
+        try:
+            from common.config import model_for_role
+            info = model_for_role(role, self.config)
+            return f"{info.get('family', '?')}:{info.get('model', 'mock-model')}"
+        except Exception:
+            return "?:mock-model"
+
     def _cache_key(self, role: str, prompt: str, seed: int) -> str:
-        """Generate cache key from inputs."""
-        content = f"{role}|{prompt}|{seed}"
+        """Generate cache key from inputs.
+
+        Includes the execution mode (offline vs online) and the resolved
+        family:model identity so the cache can never (a) serve an offline mock
+        to an online client, or (b) return a stale model id after the role's
+        configured model/family changes — either would corrupt AgentRun.model_id
+        provenance.
+        """
+        mode = "offline" if self.offline else "online"
+        content = f"{mode}|{self._role_identity(role)}|{role}|{prompt}|{seed}"
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
     
     def _read_cache(self, cache_key: str) -> Optional[Completion]:
