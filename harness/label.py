@@ -4,8 +4,21 @@ Phase 0 MOCK: deterministic mapping for smoke tests.
 Real Phase 2: executable signals from error types, tracebacks, numerical values.
 """
 
+import hashlib
 from typing import Dict
 from common.schema import AgentRun, Task
+
+
+def _stable_index(text: str, modulo: int) -> int:
+    """Deterministic, cross-process-stable index from a string.
+
+    Uses hashlib (NOT Python's builtin hash(), which is per-process salted and
+    would make labeling non-reproducible across interpreter restarts).
+    """
+    if modulo <= 0:
+        raise ValueError("modulo must be positive")
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return int(digest, 16) % modulo
 
 
 def label_run(run: AgentRun, task: Task) -> str:
@@ -30,8 +43,8 @@ def label_run(run: AgentRun, task: Task) -> str:
     # Real logic deferred to Phase 2, marked clearly
     
     # === MOCK LOGIC (PHASE 0 ONLY) ===
-    output_hash = hash(run.output)
-    label_idx = output_hash % len(task.interpretations)
+    # Deterministic across processes (hashlib, not builtin hash()).
+    label_idx = _stable_index(run.output, len(task.interpretations))
     return task.interpretations[label_idx].id
 
 

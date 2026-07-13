@@ -43,6 +43,28 @@ def test_provenance_separation_fails_on_duplicate():
         assert_provenance_separation(bad_config)
 
 
+def test_provenance_fails_when_meta_role_shares_homogeneous_baseline():
+    """A meta role sharing the homogeneous shared-prior family must be rejected."""
+
+    bad_config = {
+        "roles": {
+            "constructor": {"family": "google", "model": "gemini"},
+            "judge": {"family": "openai", "model": "gpt-4"},
+            # code_reviewer == homogeneous baseline family (anthropic) -> violation
+            "code_reviewer": {"family": "anthropic", "model": "claude"},
+            "tested_agents": {
+                "homogeneous": [{"family": "anthropic", "model": "claude"}],
+                "heterogeneous": [{"family": "qwen", "model": "qwen-plus"}],
+                "reasoning": [],
+            },
+        },
+        "seeds": {"global": 123},
+    }
+
+    with pytest.raises(AssertionError, match="homogeneous shared-prior"):
+        assert_provenance_separation(bad_config)
+
+
 def test_constructor_not_in_tested_agents():
     """Verify constructor family doesn't appear in tested_agents."""
     config = load_config()

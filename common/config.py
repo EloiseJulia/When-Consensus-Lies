@@ -37,46 +37,70 @@ def model_for_role(role: str, config: Dict[str, Any] = None) -> Dict[str, str]:
 
 
 def assert_provenance_separation(config: Dict[str, Any] = None) -> None:
-    """Assert that constructor/tested/judge/code_reviewer use distinct families.
-    
-    HARD LAW 6: provenance separation is inviolable.
-    
+    """Assert provenance separation (HARD LAW 6).
+
+    Enforced invariants (the ones that actually protect the science):
+      1. constructor / judge / code_reviewer use pairwise-distinct families
+         (the three "meta" roles must never collapse into one family).
+      2. None of constructor / judge / code_reviewer shares a family with the
+         HOMOGENEOUS tested pool. The homogeneous pool is the shared-prior ρ
+         baseline; if a meta role shared its family it could inherit the same
+         blind spot and turn ρ / labels / reviews into an artifact.
+      3. constructor does not appear anywhere in tested_agents at all (it must
+         not have authored the priors of any subject it constructs tasks for).
+
+    Intentional NON-constraint (documented so future audits don't re-flag it):
+      The HETEROGENEOUS tested pool is deliberately broad (spans many families)
+      to model real heterogeneous multi-agent systems. judge / code_reviewer are
+      allowed to share a family with the heterogeneous pool because per-item
+      separation is enforced at RUN TIME (Phase 2): a judge never scores, and a
+      reviewer never reviews, an output produced by its own family on that item.
+
     Raises:
-        AssertionError: If any two critical roles share a model family
+        AssertionError: if any enforced invariant above is violated.
     """
     if config is None:
         config = load_config()
-    
-    # Extract families
+
     constructor_family = config["roles"]["constructor"]["family"]
     judge_family = config["roles"]["judge"]["family"]
     code_reviewer_family = config["roles"]["code_reviewer"]["family"]
-    
-    # Tested agents: extract all families from all groups
+
     tested = config["roles"]["tested_agents"]
-    tested_families = set()
+
+    def _families(group: str) -> set:
+        return {m["family"] for m in tested.get(group, [])}
+
+    homogeneous_families = _families("homogeneous")
+    all_tested_families = set()
     for group in ["homogeneous", "heterogeneous", "reasoning"]:
-        for model_info in tested.get(group, []):
-            tested_families.add(model_info["family"])
-    
-    # Check pairwise distinctness for critical roles
-    critical_roles = {
+        all_tested_families |= _families(group)
+
+    meta_roles = {
         "constructor": constructor_family,
         "judge": judge_family,
         "code_reviewer": code_reviewer_family,
     }
-    
-    # Constructor vs judge vs code_reviewer must be mutually distinct
-    families = list(critical_roles.values())
+
+    # (1) meta roles pairwise-distinct
+    families = list(meta_roles.values())
     if len(families) != len(set(families)):
         raise AssertionError(
-            f"Provenance separation violated: constructor/judge/code_reviewer must use "
-            f"distinct families. Got: {critical_roles}"
+            "Provenance separation violated: constructor/judge/code_reviewer must "
+            f"use distinct families. Got: {meta_roles}"
         )
-    
-    # Tested agents should not overlap with constructor (strict separation)
-    if constructor_family in tested_families:
+
+    # (2) no meta role shares the shared-prior (homogeneous) baseline family
+    for role, fam in meta_roles.items():
+        if fam in homogeneous_families:
+            raise AssertionError(
+                f"Provenance separation violated: {role} family '{fam}' overlaps the "
+                f"homogeneous shared-prior tested pool {sorted(homogeneous_families)}"
+            )
+
+    # (3) constructor must not appear anywhere in tested_agents
+    if constructor_family in all_tested_families:
         raise AssertionError(
-            f"Provenance separation violated: constructor family '{constructor_family}' "
-            f"appears in tested_agents"
+            f"Provenance separation violated: constructor family "
+            f"'{constructor_family}' appears in tested_agents"
         )

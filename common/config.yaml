@@ -33,9 +33,14 @@ roles:
     model: gpt-4-turbo
 
   code_reviewer:
-    # Reviews AI-written code; must differ from implementer
-    family: anthropic
-    model: claude-3-5-sonnet-20241022
+    # Reviews AI-written code; MUST differ from the code author's family and from
+    # the homogeneous shared-prior baseline (anthropic). Default routing only —
+    # the Manager picks the actual auditor family per slice so it never equals
+    # that slice's implementer family (Phase 0 was written by anthropic, audited
+    # by openai). deepseek is distinct from constructor/judge and from the
+    # homogeneous baseline.
+    family: deepseek
+    model: deepseek-chat
 
 seeds:
   global: 20260713
