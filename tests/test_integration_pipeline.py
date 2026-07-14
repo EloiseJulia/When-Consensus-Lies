@@ -1,0 +1,435 @@
+"""Integration pipeline tests — Phase 2-S2d.
+
+Implementer family: Claude/Anthropic  (auditor MUST use a different model family).
+
+Three parts, as specified in paper/plans/phase2-S2d-integration-plan.md:
+
+  Part 1 — Controlled end-to-end golden cases (per domain, hand-computed assertions).
+            Uses get_checkers_and_candidates canonical candidates to construct
+            deterministic AgentRun outputs that map to KNOWN interpretations,
+            then asserts frozen convergent_delusion / a_maj values.
+
+  Part 2 — Real run wiring pass (offline mock; shape + validity checks only;
+            no specific metric value asserted since mock outputs → mostly I_perp).
+
+  Part 3 — tests/test_metrics_golden.py and tests/test_marginal_rho.py remain
+            INTACT and run automatically as part of pytest.  No duplication here;
+            see those files for the frozen unit-level golden metric assertions.
+
+Relationship to test_smoke_pipeline.py:
+  test_smoke_pipeline.py exercises the Phase-0 MOCK hash path (useful as a
+  no-network sanity check).  This file carries the MEANINGFUL executable-signal
+  assertions.  Both coexist; do not remove test_smoke_pipeline.py.
+"""
+
+import pytest
+from common.schema import AgentRun
+from common.config import load_config
+from common.llm import LLMClient
+from harness.run import run_task
+from harness.label import label_run
+from harness.metrics import (
+    false_consensus_rate,
+    convergent_delusion,
+    a_maj,
+    marginal_rho,
+    ece,
+    confidence_accuracy_slope,
+    error_indicators,
+)
+from bench.build import load_tasks
+
+
+# ── Fixture: clear subprocess-result caches before each test ─────────────────
+
+@pytest.fixture(autouse=True)
+def clear_domain_caches():
+    """Prevent cross-test cache pollution in the subprocess gold-checker domains."""
+    try:
+        from bench.data_analysis import _RESULT_CACHE as _da
+        _da.clear()
+    except ImportError:
+        pass
+    try:
+        from bench.code_spec import _RESULT_CACHE as _cs
+        _cs.clear()
+    except ImportError:
+        pass
+    yield
+
+
+# ── Shared builder ────────────────────────────────────────────────────────────
+
+def _make_run(task_id: str, output: str, seed: int, conf: float = 0.8) -> AgentRun:
+    """Construct a minimal AgentRun for controlled-output labeling tests."""
+    return AgentRun(
+        task_id=task_id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=conf,
+        logit_conf=None,
+        seed=seed,
+    )
+
+
+# ============================================================================
+# PART 1 — CONTROLLED END-TO-END GOLDEN CASES
+# ============================================================================
+
+def test_golden_code_spec():
+    """Part 1 golden — code_spec, 5 controlled agents, frozen hand-computed values.
+
+    Task: code_sort_001_k2_all  (ambiguity_level=2)
+      I0 = sort ascending, stable (target)
+      I1 = sort descending, stable
+      I2 = sort ascending, secondary sort by name
+
+    Controlled distribution (5 agents):
+      agents 0–2 : I1 candidate in ```python fence  → label I1
+      agent  3   : I0 candidate in ```python fence  → label I0  (target)
+      agent  4   : I2 candidate in ```python fence  → label I2
+
+    The canonical candidates come from get_checkers_and_candidates, the same
+    mechanism that passes the domain's own validation suite — so the mapping is
+    guaranteed by the bench, not by this test.
+
+    HAND CALCULATIONS
+    ─────────────────
+    Expected labels: [I1, I1, I1, I0, I2]
+
+    convergent_delusion  (primary metric):
+      wrong_counts = {I1: 3, I2: 1}   (I0 is the target → excluded)
+      max_wrong_count = 3
+      total = 5
+      => 3 / 5 = 0.6
+
+    a_maj:
+      counts = {I1: 3, I0: 1, I2: 1}
+      unique_winner = I1  (strict plurality, count 3 > every other label)
+      I1 ≠ target I0
+      => 0.0
+    """
+    from bench.code_spec import get_checkers_and_candidates
+
+    tasks = load_tasks("bench/data/code_spec.jsonl")
+    task = next(t for t in tasks if t.id == "code_sort_001_k2_all")
+
+    _, candidates, _ = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
+    i1_code = candidates["I1"]
+    i2_code = candidates["I2"]
+
+    controlled_runs = [
+        _make_run(task.id, f"```python\n{i1_code}\n```", seed=100, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i1_code}\n```", seed=101, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i1_code}\n```", seed=102, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i0_code}\n```", seed=103, conf=0.90),  # → I0
+        _make_run(task.id, f"```python\n{i2_code}\n```", seed=104, conf=0.70),  # → I2
+    ]
+
+    # Step 1: prove each controlled output maps to the intended interpretation (NOT I_perp)
+    labels = [label_run(run, task) for run in controlled_runs]
+    assert labels[0] == "I1", f"agent 0: expected I1, got {labels[0]}"
+    assert labels[1] == "I1", f"agent 1: expected I1, got {labels[1]}"
+    assert labels[2] == "I1", f"agent 2: expected I1, got {labels[2]}"
+    assert labels[3] == "I0", f"agent 3: expected I0 (target), got {labels[3]}"
+    assert labels[4] == "I2", f"agent 4: expected I2, got {labels[4]}"
+
+    # Step 2: frozen golden metric assertions
+    # convergent_delusion = max_wrong_count / total = 3 / 5 = 0.6
+    cd = convergent_delusion(labels, target="I0")
+    assert cd == 0.6, f"convergent_delusion: expected 3/5=0.6, got {cd}"
+
+    # a_maj: unique plurality is I1 (3 votes); I1 ≠ target I0 → 0.0
+    am = a_maj(labels, target="I0")
+    assert am == 0.0, f"a_maj: expected 0.0 (wrong plurality), got {am}"
+
+    # Step 3: secondary metrics must run without error and return floats
+    confs = [r.verbalized_conf for r in controlled_runs]
+    correct_bools = [lbl == "I0" for lbl in labels]  # [F, F, F, T, F]
+
+    # marginal_rho: single task → 5×1 error matrix; pairwise variance undefined → 0.0
+    err_mat = [[e] for e in error_indicators(labels, "I0")]
+    rho = marginal_rho(err_mat)
+    assert isinstance(rho, float), f"marginal_rho: expected float, got {type(rho)}"
+
+    ece_val = ece(confs, correct_bools)
+    assert isinstance(ece_val, float), f"ece: expected float, got {type(ece_val)}"
+
+    slope = confidence_accuracy_slope(confs, correct_bools)
+    assert isinstance(slope, float), f"confidence_accuracy_slope: expected float, got {type(slope)}"
+
+
+def test_golden_data_analysis():
+    """Part 1 golden — data_analysis, 5 controlled agents, frozen hand-computed values.
+
+    Note: data_analysis has no k=2 tasks (max ambiguity_level=1 in the dataset).
+    The 'second wrong' label is deliberately I_perp (garbage output that passes no
+    checker), which is a valid non-target label in the full label space.
+
+    Task: data_mean_001_k1_missing_values  (ambiguity_level=1)
+      I0 = skip None values, return mean of filtered list (target)
+      I1 = return None if any element is None
+
+    Controlled distribution (5 agents):
+      agents 0–2 : I1 candidate in ```python fence     → label I1
+      agent  3   : I0 candidate in ```python fence     → label I0  (target)
+      agent  4   : garbage code (wrong return type)    → label I_perp
+
+    HAND CALCULATIONS
+    ─────────────────
+    Expected labels: [I1, I1, I1, I0, I_perp]
+
+    convergent_delusion  (primary metric):
+      wrong_counts = {I1: 3, I_perp: 1}
+      max_wrong_count = 3  (three agents on I1)
+      total = 5
+      => 3 / 5 = 0.6
+
+    a_maj:
+      counts = {I1: 3, I0: 1, I_perp: 1}
+      unique_winner = I1  (strict plurality)
+      I1 ≠ target I0
+      => 0.0
+    """
+    from bench.data_analysis import get_checkers_and_candidates
+
+    tasks = load_tasks("bench/data/data_analysis.jsonl")
+    task = next(t for t in tasks if t.id == "data_mean_001_k1_missing_values")
+
+    _, candidates, _ = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
+    i1_code = candidates["I1"]
+    # Garbage: wrong return type → fails all checkers → I_perp
+    garbage_code = "def compute_mean(numbers):\n    return 'not_a_number'"
+
+    controlled_runs = [
+        _make_run(task.id, f"```python\n{i1_code}\n```",      seed=200, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i1_code}\n```",      seed=201, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i1_code}\n```",      seed=202, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i0_code}\n```",      seed=203, conf=0.90),  # → I0
+        _make_run(task.id, f"```python\n{garbage_code}\n```", seed=204, conf=0.30),  # → I_perp
+    ]
+
+    labels = [label_run(run, task) for run in controlled_runs]
+    assert labels[0] == "I1",    f"agent 0: expected I1, got {labels[0]}"
+    assert labels[1] == "I1",    f"agent 1: expected I1, got {labels[1]}"
+    assert labels[2] == "I1",    f"agent 2: expected I1, got {labels[2]}"
+    assert labels[3] == "I0",    f"agent 3: expected I0 (target), got {labels[3]}"
+    assert labels[4] == "I_perp", f"agent 4: expected I_perp (garbage), got {labels[4]}"
+
+    # convergent_delusion = max_wrong_count / total = 3 / 5 = 0.6
+    cd = convergent_delusion(labels, target="I0")
+    assert cd == 0.6, f"convergent_delusion: expected 3/5=0.6, got {cd}"
+
+    # a_maj: unique plurality is I1 (3 votes); I1 ≠ target I0 → 0.0
+    am = a_maj(labels, target="I0")
+    assert am == 0.0, f"a_maj: expected 0.0 (wrong plurality), got {am}"
+
+    confs = [r.verbalized_conf for r in controlled_runs]
+    correct_bools = [lbl == "I0" for lbl in labels]
+
+    err_mat = [[e] for e in error_indicators(labels, "I0")]
+    rho = marginal_rho(err_mat)
+    assert isinstance(rho, float)
+
+    ece_val = ece(confs, correct_bools)
+    assert isinstance(ece_val, float)
+
+    slope = confidence_accuracy_slope(confs, correct_bools)
+    assert isinstance(slope, float)
+
+
+def test_golden_policy_qa():
+    """Part 1 golden — policy_qa, 5 controlled agents, frozen hand-computed values.
+
+    Task: policy_overtime_001_k2_all  (ambiguity_level=2)
+      I0 = 40 h threshold + 1.5× rate → $950.00  (target)
+           Arithmetic: 40*$20 + 5*$20*1.5 = $800 + $150 = $950
+      I1 = 44 h threshold              → $910.00
+           Arithmetic: 44*$20 + 1*$20*1.5 = $880 + $30  = $910
+      I2 = 2.0× rate                   → $1000.00
+           Arithmetic: 40*$20 + 5*$20*2.0 = $800 + $200 = $1000
+
+    Format: "FINAL ANSWER: $<amount>" (the STRUCTURED format accepted by
+    harness/label.py's _extract_numeric_from_output path).
+
+    Controlled distribution (5 agents):
+      agents 0–2 : FINAL ANSWER: $910.00  → label I1
+      agent  3   : FINAL ANSWER: $950.00  → label I0  (target)
+      agent  4   : FINAL ANSWER: $1000.00 → label I2
+
+    HAND CALCULATIONS
+    ─────────────────
+    Expected labels: [I1, I1, I1, I0, I2]
+
+    convergent_delusion  (primary metric):
+      wrong_counts = {I1: 3, I2: 1}
+      max_wrong_count = 3
+      total = 5
+      => 3 / 5 = 0.6
+
+    a_maj:
+      counts = {I1: 3, I0: 1, I2: 1}
+      unique_winner = I1  (strict plurality)
+      I1 ≠ target I0
+      => 0.0
+    """
+    from bench.policy_qa import get_checkers_and_candidates
+
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.id == "policy_overtime_001_k2_all")
+
+    _, candidates, _ = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]   # 950.0
+    i1_amount = candidates["I1"]["amount"]   # 910.0
+    i2_amount = candidates["I2"]["amount"]   # 1000.0
+
+    controlled_runs = [
+        _make_run(task.id, f"FINAL ANSWER: ${i1_amount:.2f}", seed=300, conf=0.80),  # → I1
+        _make_run(task.id, f"FINAL ANSWER: ${i1_amount:.2f}", seed=301, conf=0.80),  # → I1
+        _make_run(task.id, f"FINAL ANSWER: ${i1_amount:.2f}", seed=302, conf=0.80),  # → I1
+        _make_run(task.id, f"FINAL ANSWER: ${i0_amount:.2f}", seed=303, conf=0.90),  # → I0
+        _make_run(task.id, f"FINAL ANSWER: ${i2_amount:.2f}", seed=304, conf=0.70),  # → I2
+    ]
+
+    labels = [label_run(run, task) for run in controlled_runs]
+    assert labels[0] == "I1", f"agent 0: expected I1 (${i1_amount:.2f}), got {labels[0]}"
+    assert labels[1] == "I1", f"agent 1: expected I1 (${i1_amount:.2f}), got {labels[1]}"
+    assert labels[2] == "I1", f"agent 2: expected I1 (${i1_amount:.2f}), got {labels[2]}"
+    assert labels[3] == "I0", f"agent 3: expected I0 (${i0_amount:.2f}, target), got {labels[3]}"
+    assert labels[4] == "I2", f"agent 4: expected I2 (${i2_amount:.2f}), got {labels[4]}"
+
+    # convergent_delusion = max_wrong_count / total = 3 / 5 = 0.6
+    cd = convergent_delusion(labels, target="I0")
+    assert cd == 0.6, f"convergent_delusion: expected 3/5=0.6, got {cd}"
+
+    # a_maj: unique plurality is I1 (3 votes); I1 ≠ target I0 → 0.0
+    am = a_maj(labels, target="I0")
+    assert am == 0.0, f"a_maj: expected 0.0 (wrong plurality), got {am}"
+
+    confs = [r.verbalized_conf for r in controlled_runs]
+    correct_bools = [lbl == "I0" for lbl in labels]
+
+    err_mat = [[e] for e in error_indicators(labels, "I0")]
+    rho = marginal_rho(err_mat)
+    assert isinstance(rho, float)
+
+    ece_val = ece(confs, correct_bools)
+    assert isinstance(ece_val, float)
+
+    slope = confidence_accuracy_slope(confs, correct_bools)
+    assert isinstance(slope, float)
+
+
+# ============================================================================
+# PART 2 — REAL RUN WIRING PASS (offline mock; shape + validity, no fixed values)
+# ============================================================================
+#
+# These tests call the TRUE code path (run_task → label_run → metrics) with an
+# offline LLMClient.  Offline mock outputs are "MOCK_OUTPUT_…" strings which
+# match no interpreter → all labels are I_perp.  That is expected and fine.
+# We assert only: correct run count, correct identity fields, label == "" out of
+# run_task, labels ∈ valid set, convergent_delusion ∈ [0.0, 1.0].
+# ============================================================================
+
+def _wiring_check(
+    domain: str,
+    task_ids: list,
+    configs: list,  # list of (config_name, expected_run_count, extra_kwargs)
+) -> None:
+    """Common wiring-pass logic shared across domains."""
+    cfg_obj = load_config()
+    client = LLMClient(cfg_obj, offline=True)
+    tasks = load_tasks(f"bench/data/{domain}.jsonl")
+
+    for task_id in task_ids:
+        task = next(t for t in tasks if t.id == task_id)
+        valid_labels = {i.id for i in task.interpretations} | {"I_perp"}
+        target = next(i.id for i in task.interpretations if i.is_target)
+
+        for cfg_name, expected_count, extra_kwargs in configs:
+            runs = run_task(task, config=cfg_name, client=client, **extra_kwargs)
+
+            # Shape / identity checks
+            assert len(runs) == expected_count, (
+                f"{task_id}/{cfg_name}: expected {expected_count} runs, got {len(runs)}"
+            )
+            for run in runs:
+                assert run.task_id == task.id, (
+                    f"{task_id}/{cfg_name}: run.task_id={run.task_id!r}"
+                )
+                assert run.config == cfg_name, (
+                    f"{task_id}/{cfg_name}: run.config={run.config!r}"
+                )
+                # run_task MUST NOT pre-assign labels
+                assert run.label == "", (
+                    f"{task_id}/{cfg_name}: run.label must be '' out of run_task, "
+                    f"got {run.label!r}"
+                )
+
+            # Label each run via the real code path
+            labels = [label_run(r, task) for r in runs]
+            assert all(lbl in valid_labels for lbl in labels), (
+                f"{task_id}/{cfg_name}: label not in valid set: {labels}"
+            )
+
+            # Metric must be a float in [0, 1]
+            cd = false_consensus_rate(labels, target=target)
+            assert isinstance(cd, float), (
+                f"{task_id}/{cfg_name}: convergent_delusion type {type(cd)}"
+            )
+            assert 0.0 <= cd <= 1.0, (
+                f"{task_id}/{cfg_name}: convergent_delusion out of range: {cd}"
+            )
+
+
+def test_wiring_code_spec():
+    """Part 2 wiring: code_spec — single, sc (k=5), verifier; no-crash + shape check."""
+    _wiring_check(
+        domain="code_spec",
+        task_ids=[
+            "code_sort_001_k1_sort_order",
+            "code_string_001_k1_separator",
+        ],
+        configs=[
+            ("single",   1, {}),
+            ("sc",       5, {"k": 5}),
+            ("verifier", 1, {}),
+        ],
+    )
+
+
+def test_wiring_data_analysis():
+    """Part 2 wiring: data_analysis — single, sc (k=5), verifier."""
+    _wiring_check(
+        domain="data_analysis",
+        task_ids=[
+            "data_mean_001_k1_missing_values",
+            "data_variance_001_k1_formula",
+        ],
+        configs=[
+            ("single",   1, {}),
+            ("sc",       5, {"k": 5}),
+            ("verifier", 1, {}),
+        ],
+    )
+
+
+def test_wiring_policy_qa():
+    """Part 2 wiring: policy_qa — single, sc (k=5), verifier."""
+    _wiring_check(
+        domain="policy_qa",
+        task_ids=[
+            "policy_overtime_001_k1_overtime_threshold",
+            "policy_interest_001_k1_day_count",
+        ],
+        configs=[
+            ("single",   1, {}),
+            ("sc",       5, {"k": 5}),
+            ("verifier", 1, {}),
+        ],
+    )
