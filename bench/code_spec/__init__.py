@@ -101,22 +101,53 @@ class CodeChecker(GoldChecker):
         # candidate output can never corrupt it.
         fd, verdict_path = tempfile.mkstemp(prefix="codespec_verdict_", suffix=".json")
         os.close(fd)
+        
+        # MAJOR FIX #3: On Windows, use CREATE_NEW_PROCESS_GROUP + taskkill /T
+        # to kill entire process tree on timeout. On Unix, use process groups.
+        process = None
         try:
             try:
-                subprocess.run(
-                    [sys.executable, _RUNNER_PATH, verdict_path],
-                    input=payload,
-                    text=True,
-                    # DEVNULL (not PIPE): a candidate-spawned grandchild that
-                    # inherits these handles cannot keep the parent blocked past
-                    # the timeout.
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=_TIMEOUT_SECONDS,
-                )
+                if sys.platform == "win32":
+                    # Windows: Use CREATE_NEW_PROCESS_GROUP so we can kill the tree
+                    CREATE_NEW_PROCESS_GROUP = 0x00000200
+                    process = subprocess.Popen(
+                        [sys.executable, _RUNNER_PATH, verdict_path],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=CREATE_NEW_PROCESS_GROUP,
+                    )
+                    try:
+                        process.communicate(input=payload.encode('utf-8'), timeout=_TIMEOUT_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        # Kill the entire process tree using taskkill /F /T
+                        try:
+                            subprocess.run(
+                                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=2,
+                            )
+                        except Exception:
+                            # Fallback: just kill the main process
+                            process.kill()
+                        process.wait(timeout=1)
+                        result = (False, "Execution timeout (infinite loop or too slow)")
+                        _RESULT_CACHE[cache_key] = result
+                        return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
+                else:
+                    # Unix-like: use process group and start_new_session
+                    subprocess.run(
+                        [sys.executable, _RUNNER_PATH, verdict_path],
+                        input=payload,
+                        text=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=_TIMEOUT_SECONDS,
+                        start_new_session=True,  # Create new process group
+                    )
             except subprocess.TimeoutExpired:
-                # subprocess.run kills the child on timeout -> runaway code is
-                # actually terminated.
+                # Fallback for subprocess.run on Unix
                 result = (False, "Execution timeout (infinite loop or too slow)")
                 _RESULT_CACHE[cache_key] = result
                 return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
@@ -147,18 +178,26 @@ class CodeChecker(GoldChecker):
 # ============================================================================
 
 def problem_sort_records():
-    """Sort a list of records with ambiguous sort order and tiebreak."""
+    """Sort a list of records with ambiguous sort order and tiebreak.
+    
+    MAJOR FIX #2: Split sort key ("by age") from direction ("ascending").
+    The prompt_core now specifies "by age" (the key), and the deletable
+    sort_order class carries ONLY the direction. This models exactly one
+    axis (direction), with a genuine natural default (ascending is Python's
+    sorted() default).
+    """
     
     spec = FullSpec(
         domain="code_spec",
         task_id="code_sort_001",
-        # GENUINE: prompt says "sorts" which is neutral on direction
-        prompt_core="""Write a function `sort_func` that sorts a list of records (dicts with keys 'name' and 'age').""",
+        # FIX: Prompt core now includes "by age" (the sort key must survive deletion)
+        prompt_core="""Write a function `sort_func` that sorts a list of records (dicts with keys 'name' and 'age') by age.""",
         requirement_classes=[
             RequirementClass(
                 id="sort_order",
                 description="Sort order direction",
-                clauses=["Sort in ascending order by age."]
+                # FIX: Clause now carries ONLY the direction (one axis)
+                clauses=["Sort in ascending order."]
             ),
             RequirementClass(
                 id="tiebreak",

@@ -1,14 +1,14 @@
 """Isolated candidate-execution runner for the code_spec domain.
 
-Reads a JSON job from stdin, executes the candidate code in THIS separate
-process, runs the test cases, and writes a JSON verdict to the file named by
-``sys.argv[1]``. The verdict does NOT travel over stdout: the parent
-(`CodeChecker`) discards this process's stdout/stderr (DEVNULL), so (a) benign
-candidate print()s can never corrupt the verdict, and (b) a candidate that
-spawns a grandchild process cannot keep the parent blocked past the timeout by
-inheriting an open stdout pipe. Because it runs as a child process, the parent
-can enforce a HARD timeout by killing it — an infinite-loop candidate is
-actually terminated, not merely abandoned on a daemon thread.
+SECURITY FIX: The candidate code now runs in a worker process that NEVER
+receives the verdict path. The worker returns test results over stdout, and the
+supervisor (this script when called with a verdict path) compares results to
+expected values and writes the verdict. This prevents candidates from forging a
+passing verdict by writing to the verdict file or monkey-patching json.dumps.
+
+Two modes:
+- Worker mode (no args): Execute candidate, emit results to stdout as JSON
+- Supervisor mode (verdict_path arg): Spawn worker, compare results, write verdict
 
 THREAT MODEL (important, and deliberately scoped): candidates are ordinary
 model-generated solutions to coding prompts, NOT adversaries trying to escape a
@@ -29,19 +29,25 @@ Job schema (stdin, one JSON object):
       ]
     }
 
-Verdict (written to argv[1], one JSON object):
+Worker output (stdout, JSON):
+    {"status": "results", "results": [{"test": 1, "result": <val>, "input": <val>}, ...]}
+    OR {"status": "error", "message": "..."}
+
+Verdict (written by supervisor to verdict_path, one JSON object):
     {"status": "pass"|"fail"|"error", "message": "..."}
 """
 
 import json
+import subprocess
 import sys
 
 
 FLOAT_TOL = 1e-9
+TIMEOUT_SECONDS = 5.0
 
 
-def _emit(path, status, message):
-    """Write the single JSON verdict to the dedicated verdict file."""
+def _emit_verdict(path, status, message):
+    """Write the single JSON verdict to the dedicated verdict file (supervisor only)."""
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(json.dumps({"status": status, "message": message}))
@@ -95,17 +101,17 @@ def _resolve_entrypoint(namespace, entrypoint):
     )
 
 
-def main():
-    if len(sys.argv) < 2:
-        # No verdict path -> nothing we can report back through; fail loudly.
-        sys.stderr.write("runner: missing verdict path argument\n")
-        return
-    verdict_path = sys.argv[1]
-
+def worker_main():
+    """WORKER MODE: execute candidate code and emit test results to stdout.
+    
+    The worker NEVER receives the verdict path. It only executes the candidate
+    and outputs test results. The supervisor compares results to expected values
+    and makes the pass/fail decision.
+    """
     try:
         job = json.loads(sys.stdin.read())
     except Exception as exc:  # noqa: BLE001
-        _emit(verdict_path, "error", f"bad job: {exc}")
+        print(json.dumps({"status": "error", "message": f"bad job: {exc}"}))
         return
 
     candidate = job["candidate"]
@@ -116,33 +122,116 @@ def main():
     try:
         exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
     except Exception as exc:  # noqa: BLE001
-        _emit(verdict_path, "error", f"Execution error: {exc}")
+        print(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
         return
 
     func, err = _resolve_entrypoint(namespace, entrypoint)
     if func is None:
-        _emit(verdict_path, "error", err)
+        print(json.dumps({"status": "error", "message": err}))
         return
 
+    # Execute all test cases and collect results
+    results = []
     for i, tc in enumerate(test_cases):
         inp = tc["input"]
-        expected = tc["expected"]
         try:
             if tc["multi"]:
                 result = func(*inp)
             else:
                 result = func(inp)
+            # Convert result to JSON-serializable form
+            results.append({"test": i + 1, "result": result, "input": inp})
         except Exception as exc:  # noqa: BLE001
-            _emit(verdict_path, "fail", f"Test {i + 1} raised: {exc}")
+            print(json.dumps({
+                "status": "error",
+                "message": f"Test {i + 1} raised: {exc}",
+                "test": i + 1
+            }))
             return
 
-        if not _compare(result, expected):
-            _emit(verdict_path, "fail",
-                  f"Test {i + 1} failed: input={inp!r}, "
-                  f"expected={expected!r}, got={result!r}")
+    # Return all test results for the supervisor to judge
+    print(json.dumps({"status": "results", "results": results}))
+
+
+def supervisor_main(verdict_path):
+    """SUPERVISOR MODE: spawn worker, compare results to gold, write verdict.
+    
+    The supervisor makes the pass/fail decision and is the ONLY code that
+    writes to the verdict file. The candidate code never sees the verdict path.
+    """
+    try:
+        job_input = sys.stdin.read()
+        job = json.loads(job_input)
+    except Exception as exc:  # noqa: BLE001
+        _emit_verdict(verdict_path, "error", f"bad job: {exc}")
+        return
+
+    test_cases = job["test_cases"]
+
+    # Spawn worker subprocess (no verdict path in args!)
+    try:
+        result = subprocess.run(
+            [sys.executable, __file__],  # Worker mode (no args)
+            input=job_input,
+            text=True,
+            capture_output=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        _emit_verdict(verdict_path, "fail", "Execution timeout (infinite loop or too slow)")
+        return
+    except Exception as exc:  # noqa: BLE001
+        _emit_verdict(verdict_path, "error", f"Worker subprocess failed: {exc}")
+        return
+
+    # Parse worker output
+    try:
+        worker_result = json.loads(result.stdout)
+    except Exception as exc:  # noqa: BLE001
+        _emit_verdict(verdict_path, "error", f"Invalid worker output: {exc}")
+        return
+
+    if worker_result.get("status") == "error":
+        _emit_verdict(verdict_path, "error", worker_result.get("message", "Unknown error"))
+        return
+
+    if worker_result.get("status") != "results":
+        _emit_verdict(verdict_path, "error", "Worker did not return results")
+        return
+
+    # Compare worker results to expected values (SUPERVISOR DECIDES, not worker)
+    results = worker_result.get("results", [])
+    if len(results) != len(test_cases):
+        _emit_verdict(verdict_path, "error",
+                     f"Expected {len(test_cases)} results, got {len(results)}")
+        return
+
+    for i, (res, tc) in enumerate(zip(results, test_cases)):
+        expected = tc["expected"]
+        actual = res["result"]
+        
+        if not _compare(actual, expected):
+            _emit_verdict(verdict_path, "fail",
+                         f"Test {i + 1} failed: input={res['input']!r}, "
+                         f"expected={expected!r}, got={actual!r}")
             return
 
-    _emit(verdict_path, "pass", f"All {len(test_cases)} tests passed")
+    _emit_verdict(verdict_path, "pass", f"All {len(test_cases)} tests passed")
+
+
+def main():
+    # Worker mode: no command-line args (spawned by supervisor)
+    if len(sys.argv) == 1:
+        worker_main()
+        return
+
+    # Supervisor mode: verdict path provided
+    if len(sys.argv) < 2:
+        sys.stderr.write("runner: missing verdict path argument\n")
+        return
+    
+    verdict_path = sys.argv[1]
+    supervisor_main(verdict_path)
 
 
 if __name__ == "__main__":
