@@ -921,7 +921,12 @@ def test_stress_reference_candidate_deterministic():
     
     This test catches the bug where infra errors were cached and propagated.
     """
-    checkers, candidates = get_checkers_and_candidates()
+    tasks = generate_tasks()
+    # Pick the first task (k=0 control)
+    task = [t for t in tasks if t.ambiguity_level == 0][0]
+    
+    # Get checkers and candidates for this task
+    checkers, candidates, _ = get_checkers_and_candidates("data_analysis", task)
     
     # Pick the first canonical reference implementation
     # (All references are valid, so any one works for this stress test)

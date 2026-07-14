@@ -86,8 +86,21 @@ class DataChecker(GoldChecker):
         """Detect infrastructure errors vs genuine candidate failures.
         
         FLAKINESS FIX A: Infra errors are transient (file I/O race, spawn fail)
-        and MUST be retried. Genuine candidate errors (wrong result, exec error)
-        are deterministic and cacheable.
+        and MUST be retried. Genuine candidate errors (wrong result, exec error,
+        no output, invalid output) are deterministic and cacheable.
+        
+        NARROWLY classified infra errors (after worker-side fsync):
+        - verdict is None: supervisor produced no verdict sentinel
+        - status=="error" with "bad input": worker couldn't parse OUR input_file (race)
+        - status=="error" with "bad job": supervisor couldn't parse job JSON
+        - status=="error" with "Worker spawn failed": process spawn error
+        
+        Everything else is a DETERMINISTIC candidate outcome:
+        - "No/invalid output": candidate wrote nothing/malformed (early exit/forgery) = FAIL
+        - "Invalid output status": candidate's output_file has bad status = FAIL
+        - "Execution error": candidate code crashed = FAIL
+        - "Test raised": candidate function raised = FAIL
+        - Comparison mismatch: candidate wrong answer = FAIL
         """
         if verdict is None:
             return True  # No verdict = infra error
@@ -96,24 +109,22 @@ class DataChecker(GoldChecker):
         message = verdict.get("message", "")
         
         # status="error" can be either infra or genuine candidate error
-        # Distinguish by message pattern:
+        # Distinguish by message pattern (NARROW classification):
         if status == "error":
             # Infrastructure failures (transient, retry):
             infra_patterns = [
-                "bad input",         # Worker couldn't read input_file (race)
-                "No/invalid output", # Supervisor couldn't read output_file
-                "No output",         # Supervisor couldn't read output_file
+                "bad input",           # Worker couldn't read input_file (race)
+                "bad job",             # Supervisor couldn't parse job
                 "Worker spawn failed", # Process spawn error
-                "Invalid output status", # Malformed output JSON
-                "bad job",           # Supervisor couldn't parse job
             ]
             for pattern in infra_patterns:
                 if pattern in message:
                     return True
-            # Genuine candidate errors (deterministic, cacheable):
-            # "Execution error: ..." - candidate code crashed
-            # "Test raised: ..." - candidate function raised exception
-            # (These are legitimate candidate failures, not infra issues)
+            # All other status="error" are genuine candidate failures:
+            # "No/invalid output" - candidate wrote nothing = FAIL (forgery/early-exit)
+            # "Invalid output status" - candidate output malformed = FAIL
+            # "Execution error: ..." - candidate code crashed = FAIL
+            # "Test raised: ..." - candidate function raised = FAIL
         
         return False  # Pass/fail/genuine-error are all deterministic
 
