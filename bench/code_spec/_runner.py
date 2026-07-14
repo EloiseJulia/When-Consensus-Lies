@@ -1,29 +1,32 @@
 """Isolated candidate-execution runner for the code_spec domain.
 
-SECURITY FIX (3-level architecture with pipe-based verdict): Complete isolation.
+SECURITY ARCHITECTURE (3-level isolation with scrubbed worker environment):
 
-Architecture:
 1. Supervisor (this script, no args): Holds gold/expected outputs. Spawns ONE 
    candidate worker per test case. Writes verdict to STDOUT with sentinel.
-2. Candidate worker (this script with input_file, output_file args): Receives 
-   ONLY test input, execs candidate code, calls entrypoint, writes output to 
-   file. NEVER sees expected outputs.
+2. Candidate worker (bootstrap script in isolated sandbox): Receives ONLY test 
+   input, execs candidate code, calls entrypoint, writes output to file. NEVER 
+   sees expected outputs.
 
-The candidate cannot forge a passing verdict because:
-- It never sees expected outputs (gold) - supervisor holds them
-- It only writes its own answer to output_file, which supervisor then checks
-- Verdict travels over CodeChecker→Supervisor pipe (supervisor's stdout)
-- Candidate worker's stdout is separate pipe to supervisor, NOT to CodeChecker
-- Candidate cannot write to supervisor's stdout pipe (not inherited)
+THREAT MODEL (deliberate scope):
 
-THREAT MODEL (important, and deliberately scoped): candidates are ordinary
-model-generated solutions to coding prompts, NOT adversaries trying to escape a
-sandbox. This runner therefore provides *isolation + a hard timeout* (so a bad
-candidate cannot hang or corrupt the parent harness), NOT a security sandbox.
-We do not attempt to defeat Python introspection escapes; that is out of scope
-for a benchmark of non-adversarial code. The scientific guarantee we need is
-deterministic, correct labeling of realistic candidates plus robustness against
-crashes/hangs — both of which this provides.
+GUARANTEES (enforced by this harness):
+- No forged verdicts: Verdict travels over parent-owned pipe, candidate cannot write it
+- No incidental gold leakage: Expected outputs never passed to candidate process
+- No cross-test contamination: One isolated worker per test case
+- Timeout enforcement: Runaway candidates are killed with their entire process tree
+- Import path isolation: Editable-install repo not on candidate's import path
+
+NOT GUARANTEED (accepted limitations for non-adversarial candidates):
+- This is NOT a security sandbox against deliberately malicious code
+- A candidate performing filesystem/interpreter introspection CAN exfiltrate gold
+  (e.g., absolute-path open() to read repo source files if it derives the path)
+- Candidates in this study are cooperative LLM spec-solutions, not adversaries
+- OS-level sandboxing (container, chroot, restricted user with repo unreadable)
+  is noted as FUTURE WORK for adversarial evaluation
+
+The harness provides isolation + timeout for cooperative candidates and prevents
+incidental/accidental leakage, NOT security against deliberate exfiltration.
 
 Supervisor job schema (stdin, one JSON object):
     {
@@ -58,6 +61,118 @@ FLOAT_TOL = 1e-9
 TIMEOUT_SECONDS = 5.0
 
 
+# Bootstrap script template for candidate worker
+# This runs in the sandbox temp dir, so sys.argv[0] and __main__.__file__
+# point to the sandbox, NOT the repo. This stops trivial path discovery.
+CANDIDATE_BOOTSTRAP = """
+import json
+import sys
+import os
+
+# Best-effort hardening: clean up import hooks to raise the bar against
+# re-enabling the editable install (not airtight, but stops trivial attacks)
+try:
+    # Remove repo paths and site-packages from sys.path
+    original_path = sys.path[:]
+    sys.path[:] = [p for p in sys.path if not any(x in p.lower() for x in ['site-packages', 'bench', 'common', 'consensus-lies'])]
+    
+    # Remove editable install finders from sys.meta_path
+    if hasattr(sys, 'meta_path'):
+        sys.meta_path[:] = [f for f in sys.meta_path if not any(x in str(type(f)).lower() for x in ['editable', 'pathfinder'])]
+    
+    # Remove bench/common from sys.modules if present
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith(('bench', 'common')):
+            del sys.modules[mod_name]
+except Exception:
+    pass  # Best effort
+
+FLOAT_TOL = 1e-9
+
+def _resolve_entrypoint(namespace, entrypoint):
+    fn = namespace.get(entrypoint)
+    if callable(fn) and not isinstance(fn, type):
+        return fn, None
+    
+    user_funcs = []
+    for name, value in namespace.items():
+        if name.startswith("__"):
+            continue
+        if not callable(value) or isinstance(value, type):
+            continue
+        if getattr(value, "__module__", None) in (None, "__main__"):
+            user_funcs.append(value)
+    
+    if len(user_funcs) == 1:
+        return user_funcs[0], None
+    return None, f"Could not resolve entrypoint '{entrypoint}'. Found {len(user_funcs)} user-defined functions."
+
+# Main worker logic
+if len(sys.argv) != 3:
+    sys.exit(1)
+
+input_file = sys.argv[1]
+output_file = sys.argv[2]
+
+try:
+    with open(input_file, "r", encoding="utf-8") as f:
+        job = json.load(f)
+except Exception as exc:
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"status": "error", "message": f"bad input: {exc}"}))
+    except OSError:
+        pass
+    sys.exit(1)
+
+candidate = job["candidate"]
+entrypoint = job["entrypoint"]
+test_input = job["input"]
+multi = job["multi"]
+
+# Clean namespace: __file__ points to this bootstrap in sandbox, __name__ is __main__
+namespace = {
+    "__name__": "__main__",
+    "__file__": __file__,  # Points to bootstrap in sandbox, not repo
+}
+
+try:
+    exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
+except Exception as exc:
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
+    except OSError:
+        pass
+    sys.exit(1)
+
+func, err = _resolve_entrypoint(namespace, entrypoint)
+if func is None:
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"status": "error", "message": err}))
+    except OSError:
+        pass
+    sys.exit(1)
+
+try:
+    if multi:
+        result = func(*test_input)
+    else:
+        result = func(test_input)
+    
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"status": "ok", "result": result}))
+except Exception as exc:
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"status": "error", "message": f"Test raised: {exc}"}))
+    except OSError:
+        pass
+    sys.exit(1)
+"""
+
+
 def _emit_verdict(status, message):
     """Write the verdict to stdout with sentinel prefix (supervisor only).
     
@@ -87,102 +202,6 @@ def _compare(result, expected):
         except Exception:
             return False
     return result == expected
-
-
-def _resolve_entrypoint(namespace, entrypoint):
-    """Resolve the entrypoint by NAME; fall back to a single user-defined
-    function, ignoring imported callables and classes."""
-    fn = namespace.get(entrypoint)
-    if callable(fn) and not isinstance(fn, type):
-        return fn, None
-
-    user_funcs = []
-    for name, value in namespace.items():
-        if name.startswith("__"):
-            continue
-        if not callable(value) or isinstance(value, type):
-            continue
-        # Only functions actually defined by the candidate (module __main__),
-        # not imported callables.
-        if getattr(value, "__module__", None) in (None, "__main__"):
-            user_funcs.append(value)
-
-    if len(user_funcs) == 1:
-        return user_funcs[0], None
-    return None, (
-        f"Could not resolve entrypoint '{entrypoint}'. "
-        f"Found {len(user_funcs)} user-defined functions."
-    )
-
-
-def candidate_worker_main(input_file, output_file):
-    """CANDIDATE WORKER: Execute candidate code with ONLY test input.
-    
-    This process NEVER sees expected outputs. It receives only:
-    - candidate code
-    - entrypoint name  
-    - test input
-    
-    It writes only its computed result to output_file. The supervisor compares
-    this result to the expected output (which the candidate never sees).
-    """
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            job = json.load(f)
-    except Exception as exc:  # noqa: BLE001
-        try:
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(json.dumps({"status": "error", "message": f"bad input: {exc}"}))
-        except OSError:
-            pass
-        return
-
-    candidate = job["candidate"]
-    entrypoint = job["entrypoint"]
-    test_input = job["input"]
-    multi = job["multi"]
-
-    # Clean namespace: no __file__ pointing to repo, prevent candidate from
-    # deriving source paths
-    namespace = {
-        "__name__": "__main__",
-        "__file__": "<candidate>",  # Sandboxed, not real file path
-    }
-    try:
-        exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
-    except Exception as exc:  # noqa: BLE001
-        try:
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
-        except OSError:
-            pass
-        return
-
-    func, err = _resolve_entrypoint(namespace, entrypoint)
-    if func is None:
-        try:
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(json.dumps({"status": "error", "message": err}))
-        except OSError:
-            pass
-        return
-
-    # Execute the test case
-    try:
-        if multi:
-            result = func(*test_input)
-        else:
-            result = func(test_input)
-        
-        # Write the candidate's answer to output file
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"status": "ok", "result": result}))
-    except Exception as exc:  # noqa: BLE001
-        try:
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(json.dumps({"status": "error", "message": f"Test raised: {exc}"}))
-        except OSError:
-            pass
 
 
 def _kill_process_tree(pid):
@@ -233,6 +252,9 @@ def supervisor_main():
 
     # Run ONE candidate worker per test case (no multiplexing)
     for test_num, tc in enumerate(test_cases, 1):
+        # Create isolated sandbox directory for worker cwd
+        sandbox_dir = tempfile.mkdtemp(prefix="codespec_sandbox_")
+        
         # Create temp files for input/output communication
         fd_in, input_file = tempfile.mkstemp(prefix=f"codespec_input_{test_num}_", suffix=".json")
         os.close(fd_in)
@@ -250,13 +272,17 @@ def supervisor_main():
             with open(input_file, "w", encoding="utf-8") as f:
                 f.write(json.dumps(worker_input))
             
+            # Write bootstrap script into sandbox
+            bootstrap_path = os.path.join(sandbox_dir, "_candidate_bootstrap.py")
+            with open(bootstrap_path, "w", encoding="utf-8") as f:
+                f.write(CANDIDATE_BOOTSTRAP)
+            
             # Spawn candidate worker subprocess
             # MAJOR FIX #3: Put candidate in process group for tree killing
             # BLOCKER FIX: Worker's stdout is separate from supervisor's stdout
             # BLOCKER FIX: Worker runs with scrubbed environment (repo off import path)
-            
-            # Create isolated sandbox directory for worker cwd
-            sandbox_dir = tempfile.mkdtemp(prefix="codespec_sandbox_")
+            # CHEAP HARDENING: Bootstrap in sandbox means sys.argv[0] and __main__.__file__
+            # point to sandbox, not repo - stops trivial path discovery
             
             try:
                 try:
@@ -268,15 +294,13 @@ def supervisor_main():
                             clean_env[key] = value
                     
                     # Build worker command with -S -E -B flags
-                    # -S: don't add site-packages (disables editable install finder)
-                    # -E: ignore PYTHON* environment variables
-                    # -B: don't write .pyc files
+                    # Launch the bootstrap script in the sandbox
                     worker_cmd = [
                         sys.executable,
                         '-S',  # No site-packages
                         '-E',  # No PYTHON* env vars
                         '-B',  # No .pyc
-                        __file__,
+                        bootstrap_path,  # Bootstrap in sandbox, not repo _runner.py
                         input_file,
                         output_file,
                     ]
@@ -319,7 +343,13 @@ def supervisor_main():
                     _emit_verdict("error", f"Worker spawn failed: {exc}")
                     return
             finally:
-                # Clean up sandbox directory
+                # Clean up sandbox directory and bootstrap
+                try:
+                    bootstrap_to_clean = os.path.join(sandbox_dir, "_candidate_bootstrap.py")
+                    if os.path.exists(bootstrap_to_clean):
+                        os.unlink(bootstrap_to_clean)
+                except OSError:
+                    pass
                 try:
                     os.rmdir(sandbox_dir)
                 except OSError:
@@ -370,14 +400,8 @@ def supervisor_main():
 
 
 def main():
-    # Candidate worker mode: input_file output_file args
-    if len(sys.argv) == 3:
-        input_file = sys.argv[1]
-        output_file = sys.argv[2]
-        candidate_worker_main(input_file, output_file)
-        return
-
     # Supervisor mode: no args (reads job from stdin, writes verdict to stdout)
+    # The candidate worker is now launched via bootstrap script in sandbox
     supervisor_main()
 
 

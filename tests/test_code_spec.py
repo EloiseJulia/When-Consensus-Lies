@@ -691,46 +691,47 @@ def sort_func(records):
     assert not result.passed, f"Bench module import succeeded! Details: {result.details}"
 
 
-def test_blocker_gold_file_read():
-    """BLOCKER FIX: Candidate cannot read gold by deriving file paths.
+def test_blocker_gold_path_discovery_bootstrap():
+    """CHEAP HARDENING: sys.argv[0] and __main__.__file__ point to sandbox, not repo.
     
-    Try to read the __init__.py file directly by path manipulation.
-    The worker's __file__ is sandboxed and cwd is in an isolated temp dir.
+    After the bootstrap change, a candidate reading sys.argv[0] or
+    sys.modules['__main__'].__file__ gets a sandbox path (not the repo path).
+    
+    This stops trivial path discovery. LIMITATION (documented in DOMAIN_API.md):
+    Absolute-path open() exfiltration (e.g., if candidate knows exact repo path)
+    is NOT blocked — candidates are cooperative LLM solutions, not adversaries.
+    OS-level sandboxing is future work.
     """
-    file_read_candidate = """
-import os
+    path_discovery_candidate = """
 import sys
+import os
 
 def sort_func(records):
-    # Try to find and read the code_spec module file
-    try:
-        # Try various path manipulations
-        for attempt in [
-            os.path.join(os.getcwd(), '..', 'bench', 'code_spec', '__init__.py'),
-            os.path.join(__file__, '..', '..', 'bench', 'code_spec', '__init__.py'),
-            '/bench/code_spec/__init__.py',
-        ]:
-            try:
-                with open(attempt, 'r') as f:
-                    # If we can read it, we've broken isolation
-                    content = f.read()
-                    if 'TEST_CASES' in content:
-                        # This shouldn't succeed
-                        pass
-            except:
-                pass
-    except:
-        pass
+    # Try to discover repo path from sys.argv[0] or __main__.__file__
+    # After bootstrap fix, these should point to sandbox temp dir, not repo
+    argv0 = sys.argv[0]
+    main_file = sys.modules.get('__main__', None)
+    main_file_path = getattr(main_file, '__file__', '')
     
-    # Return wrong answer
+    # Check if we can trivially find the repo
+    for path in [argv0, main_file_path]:
+        if path and 'bench' in path and 'code_spec' in path:
+            # This would reveal the repo path - should NOT happen
+            # Return a sentinel to signal the attack worked
+            return "PATH_DISCOVERY_SUCCESS"
+    
+    # Return wrong answer (expected behavior - paths are sandboxed)
     return []
 """
     
     checker = CHECKERS["sort_asc_stable"]
-    result = checker.check(file_read_candidate)
+    result = checker.check(path_discovery_candidate)
     
-    # The attack must FAIL
-    assert not result.passed, f"File read attack succeeded! Details: {result.details}"
+    # The candidate should fail with wrong answer (not discover repo path)
+    assert not result.passed, f"Path discovery test should fail with wrong answer"
+    # Ensure it failed with wrong answer, not with the success sentinel
+    assert "PATH_DISCOVERY_SUCCESS" not in str(result.details), \
+        f"Candidate discovered repo path from argv[0] or __main__.__file__! Details: {result.details}"
 
 
 def test_major_timeout_kills_descendants():

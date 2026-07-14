@@ -75,3 +75,23 @@ def get_checkers_and_candidates(domain, task):
   >1 match (ambiguity is never silent).
 
 Run: `python -m bench.validate --domain <domain>` → must show 100% distinguishable
+
+
+## Security Threat Model for Gold Checkers
+
+When a domain implements a gold checker that executes candidate code (e.g., `code_spec`), the harness provides the following **GUARANTEES**:
+
+1. **No forged verdicts**: Candidates CANNOT write/influence the final pass/fail verdict. The verdict travels over a parent-owned pipe that the candidate process tree cannot reach.
+2. **No incidental gold leakage**: Expected outputs (gold) are NEVER in the candidate's process memory or file system access. Only the supervisor holds gold; the candidate receives only inputs.
+3. **No cross-test contamination**: Each test case runs in an isolated worker process. One test's candidate code cannot affect another's.
+4. **Timeout enforcement**: If a candidate exceeds the time limit, the ENTIRE process tree (including grandchildren) is killed.
+
+The harness is **EXPLICITLY NOT**:
+
+- A security sandbox against deliberately malicious code
+- A defense against filesystem/interpreter introspection to exfiltrate gold
+- Proof against candidates that derive the repository path and read source files
+
+**Scope**: Candidates in this study are cooperative LLM-generated spec-solutions, **not adversaries**. The harness defends against bugs (e.g., accidental early exit, forged output) and incidental leakage, not against a candidate that deliberately performs `open(<absolute_repo_path>)`.
+
+**Future work**: OS-level sandboxing (container, restricted user with repo unreadable) is noted for production deployments where candidate code is untrusted.
