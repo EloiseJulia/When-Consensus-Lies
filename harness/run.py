@@ -205,11 +205,14 @@ def run_mad(
     for round_idx in range(rounds):
         # FIX BUG 2: Snapshot ALL agents' previous-round answers BEFORE starting this round
         # (prevents order-dependent debate where later agents see earlier agents' current-round answers)
+        # CANONICALIZE: sort by agent idx so prompt text is independent of iteration order
         if round_idx > 0:
             prev_round_snapshot = [
                 (a["idx"], a["history"][-1][1])  # (agent_idx, round r-1 answer)
                 for a in agents
             ]
+            # Sort by agent idx for deterministic canonical order
+            prev_round_snapshot.sort(key=lambda x: x[0])
         
         for agent in agents:
             if round_idx == 0:
@@ -219,7 +222,7 @@ def run_mad(
                     agent_idx=agent["idx"]
                 )
             else:
-                # Subsequent rounds: show FROZEN previous round answers (from snapshot)
+                # Subsequent rounds: show FROZEN previous round answers (from canonical snapshot)
                 prev_answers = "\n".join([
                     f"Agent {idx}: {answer}"
                     for idx, answer in prev_round_snapshot

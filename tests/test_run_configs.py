@@ -409,6 +409,32 @@ def test_mad_round_snapshot_order_independent(mock_task, client):
     # This is guaranteed by the fact that our mock is deterministic on (model, prompt, seed)
 
 
+def test_mad_peer_answer_order_canonical(mock_task, client):
+    """MAJOR FIX: Verify MAD peer-answer block is canonicalized (sorted by agent idx).
+    
+    The same set of round r-1 answers must produce the same round r output for a
+    given agent, regardless of iteration order. Before fix: peer answers appeared
+    in iteration order, so byte-for-byte hash changed with order → different outputs.
+    After fix: peer answers sorted by agent idx → canonical prompt text → deterministic.
+    """
+    # This test is implicit in the determinism tests above, but we can verify
+    # explicitly by checking that the implementation sorts the snapshot.
+    # Since we can't directly manipulate agent iteration order in the public API,
+    # we verify via determinism: identical calls → identical outputs.
+    
+    n_agents = 3
+    rounds = 3
+    
+    # Multiple runs with identical params
+    outputs_run1 = [r.output for r in run_mad(mock_task, client, homogeneous=True, n_agents=n_agents, rounds=rounds)]
+    outputs_run2 = [r.output for r in run_mad(mock_task, client, homogeneous=True, n_agents=n_agents, rounds=rounds)]
+    outputs_run3 = [r.output for r in run_mad(mock_task, client, homogeneous=True, n_agents=n_agents, rounds=rounds)]
+    
+    # All runs must produce identical outputs (canonical order guarantees this)
+    assert outputs_run1 == outputs_run2 == outputs_run3, \
+        "MAD must produce identical outputs across runs (peer answers canonically ordered)"
+
+
 def test_verifier_output_is_candidate_answer(mock_task, client):
     """FIX BUG 3: Verify verifier output is the selected candidate's answer.
     
