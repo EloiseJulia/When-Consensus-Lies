@@ -119,8 +119,11 @@ try:
         job = json.load(f)
 except Exception as exc:
     try:
+        # FLAKINESS FIX C: flush+fsync output_file
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(json.dumps({"status": "error", "message": f"bad input: {exc}"}))
+            f.flush()
+            os.fsync(f.fileno())
     except OSError:
         pass
     sys.exit(1)
@@ -140,8 +143,11 @@ try:
     exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
 except Exception as exc:
     try:
+        # FLAKINESS FIX C: flush+fsync output_file
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
+            f.flush()
+            os.fsync(f.fileno())
     except OSError:
         pass
     sys.exit(1)
@@ -149,8 +155,11 @@ except Exception as exc:
 func, err = _resolve_entrypoint(namespace, entrypoint)
 if func is None:
     try:
+        # FLAKINESS FIX C: flush+fsync output_file
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(json.dumps({"status": "error", "message": err}))
+            f.flush()
+            os.fsync(f.fileno())
     except OSError:
         pass
     sys.exit(1)
@@ -161,12 +170,18 @@ try:
     else:
         result = func(test_input)
     
+    # FLAKINESS FIX C: flush+fsync output_file
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(json.dumps({"status": "ok", "result": result}))
+        f.flush()
+        os.fsync(f.fileno())
 except Exception as exc:
     try:
+        # FLAKINESS FIX C: flush+fsync output_file
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(json.dumps({"status": "error", "message": f"Test raised: {exc}"}))
+            f.flush()
+            os.fsync(f.fileno())
     except OSError:
         pass
     sys.exit(1)
@@ -274,8 +289,11 @@ def supervisor_main():
                 "input": tc["input"],
                 "multi": tc["multi"],
             }
+            # FLAKINESS FIX C: flush+fsync to ensure worker sees complete file
             with open(input_file, "w", encoding="utf-8") as f:
                 f.write(json.dumps(worker_input))
+                f.flush()
+                os.fsync(f.fileno())
             
             # Write bootstrap script into sandbox
             bootstrap_path = os.path.join(sandbox_dir, "_candidate_bootstrap.py")

@@ -82,6 +82,41 @@ class DataChecker(GoldChecker):
             })
         return cases
 
+    def _is_infra_error(self, verdict) -> bool:
+        """Detect infrastructure errors vs genuine candidate failures.
+        
+        FLAKINESS FIX A: Infra errors are transient (file I/O race, spawn fail)
+        and MUST be retried. Genuine candidate errors (wrong result, exec error)
+        are deterministic and cacheable.
+        """
+        if verdict is None:
+            return True  # No verdict = infra error
+        
+        status = verdict.get("status")
+        message = verdict.get("message", "")
+        
+        # status="error" can be either infra or genuine candidate error
+        # Distinguish by message pattern:
+        if status == "error":
+            # Infrastructure failures (transient, retry):
+            infra_patterns = [
+                "bad input",         # Worker couldn't read input_file (race)
+                "No/invalid output", # Supervisor couldn't read output_file
+                "No output",         # Supervisor couldn't read output_file
+                "Worker spawn failed", # Process spawn error
+                "Invalid output status", # Malformed output JSON
+                "bad job",           # Supervisor couldn't parse job
+            ]
+            for pattern in infra_patterns:
+                if pattern in message:
+                    return True
+            # Genuine candidate errors (deterministic, cacheable):
+            # "Execution error: ..." - candidate code crashed
+            # "Test raised: ..." - candidate function raised exception
+            # (These are legitimate candidate failures, not infra issues)
+        
+        return False  # Pass/fail/genuine-error are all deterministic
+
     def check(self, candidate: Any) -> CheckResult:
         if not isinstance(candidate, str):
             return CheckResult(passed=False,
@@ -99,44 +134,57 @@ class DataChecker(GoldChecker):
             "test_cases": self._serialize_cases(),
         })
 
-        # BLOCKER FIX: Verdict delivered over PARENT-OWNED PIPE (supervisor stdout),
-        # NOT a shared temp file. The supervisor writes verdict to stdout with a
-        # sentinel prefix. The candidate worker's stdout goes to a separate pipe
-        # (to supervisor), so candidate cannot write to DataChecker's pipe.
-        try:
-            result = subprocess.run(
-                [sys.executable, _RUNNER_PATH],  # No verdict_path arg
-                input=payload,
-                text=True,
-                capture_output=True,  # Capture supervisor stdout
-                timeout=_TIMEOUT_SECONDS * 2,  # Allow supervisor its own timeout budget
-            )
-        except subprocess.TimeoutExpired:
-            # Supervisor itself timed out (shouldn't happen in practice)
-            result_tuple = (False, "Supervisor timeout (unexpected)")
-            _RESULT_CACHE[cache_key] = result_tuple
-            return CheckResult(passed=False, details=f"{self.description} - {result_tuple[1]}")
-
-        # Parse verdict from supervisor stdout (sentinel line)
-        verdict = None
-        for line in result.stdout.splitlines():
-            if line.startswith("__DATA_ANALYSIS_VERDICT__ "):
-                try:
-                    verdict_json = line[len("__DATA_ANALYSIS_VERDICT__ "):]
-                    verdict = json.loads(verdict_json)
-                    break
-                except Exception:  # noqa: BLE001
-                    pass
+        # FLAKINESS FIX A: Retry loop for infrastructure errors (max 3 attempts)
+        # Happy path runs worker ONCE. Retries fire only on transient infra errors.
+        max_attempts = 3
+        last_infra_error = None
         
-        if verdict is None:
-            msg = "No verdict in supervisor output"
-            _RESULT_CACHE[cache_key] = (False, msg)
-            return CheckResult(passed=False, details=f"{self.description} - {msg}")
+        for attempt in range(max_attempts):
+            # BLOCKER FIX: Verdict delivered over PARENT-OWNED PIPE (supervisor stdout),
+            # NOT a shared temp file. The supervisor writes verdict to stdout with a
+            # sentinel prefix. The candidate worker's stdout goes to a separate pipe
+            # (to supervisor), so candidate cannot write to DataChecker's pipe.
+            try:
+                result = subprocess.run(
+                    [sys.executable, _RUNNER_PATH],  # No verdict_path arg
+                    input=payload,
+                    text=True,
+                    capture_output=True,  # Capture supervisor stdout
+                    timeout=_TIMEOUT_SECONDS * 2,  # Allow supervisor its own timeout budget
+                )
+            except subprocess.TimeoutExpired:
+                # Supervisor itself timed out (infra error, retry)
+                last_infra_error = "Supervisor timeout (unexpected)"
+                continue  # Retry
 
-        passed = verdict.get("status") == "pass"
-        msg = verdict.get("message", "")
-        _RESULT_CACHE[cache_key] = (passed, msg)
-        return CheckResult(passed=passed, details=f"{self.description} - {msg}")
+            # Parse verdict from supervisor stdout (sentinel line)
+            verdict = None
+            for line in result.stdout.splitlines():
+                if line.startswith("__DATA_ANALYSIS_VERDICT__ "):
+                    try:
+                        verdict_json = line[len("__DATA_ANALYSIS_VERDICT__ "):]
+                        verdict = json.loads(verdict_json)
+                        break
+                    except Exception:  # noqa: BLE001
+                        pass
+            
+            # FLAKINESS FIX A: Check if this is an infra error
+            if self._is_infra_error(verdict):
+                last_infra_error = verdict.get("message", "No verdict") if verdict else "No verdict in supervisor output"
+                continue  # Retry
+            
+            # FLAKINESS FIX B: Cache ONLY deterministic verdicts (pass/fail/genuine-error)
+            # Never cache infra errors or timeouts
+            passed = verdict.get("status") == "pass"
+            msg = verdict.get("message", "")
+            _RESULT_CACHE[cache_key] = (passed, msg)
+            return CheckResult(passed=passed, details=f"{self.description} - {msg}")
+        
+        # FLAKINESS FIX A: All 3 attempts were infra errors - RAISE loudly
+        # Do NOT silently return a candidate rejection or cache it
+        raise RuntimeError(
+            f"data_analysis harness infra failure after {max_attempts} retries: {last_infra_error}"
+        )
 
 
 # ============================================================================
