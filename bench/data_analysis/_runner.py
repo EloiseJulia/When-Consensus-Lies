@@ -75,28 +75,15 @@ def _compare(result, expected):
 
 
 def _resolve_entrypoint(namespace, entrypoint):
-    """Resolve the entrypoint by NAME; fall back to a single user-defined
-    function, ignoring imported callables and classes."""
+    """Resolve the entrypoint by its EXACT name. Helper functions are allowed,
+    but a candidate that does not define the required entrypoint fails
+    resolution (no lone-function fallback, so a differently-named function
+    cannot be silently rebound and scored as correct)."""
     fn = namespace.get(entrypoint)
     if callable(fn) and not isinstance(fn, type):
         return fn, None
-
-    user_funcs = []
-    for name, value in namespace.items():
-        if name.startswith("__"):
-            continue
-        if not callable(value) or isinstance(value, type):
-            continue
-        # Only functions actually defined by the candidate (module __main__),
-        # not imported callables.
-        if getattr(value, "__module__", None) in (None, "__main__"):
-            user_funcs.append(value)
-
-    if len(user_funcs) == 1:
-        return user_funcs[0], None
     return None, (
-        f"Could not resolve entrypoint '{entrypoint}'. "
-        f"Found {len(user_funcs)} user-defined functions."
+        f"Candidate does not define required entrypoint '{entrypoint}'."
     )
 
 

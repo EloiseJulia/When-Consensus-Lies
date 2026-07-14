@@ -153,8 +153,9 @@ def problem_compute_mean():
     spec = FullSpec(
         domain="data_analysis",
         task_id="data_mean_001",
-        # GENUINE: "average" is neutral on how to handle None/missing values
-        prompt_core="""Write a function `compute_mean` that calculates the average of a list of numbers.""",
+        # GENUINE: the prompt states the data MAY contain missing entries, but
+        # is neutral on how to handle them once the clause is deleted.
+        prompt_core="""Write a function `compute_mean` that calculates the average of a list of numbers that may contain missing entries represented as None.""",
         requirement_classes=[
             RequirementClass(
                 id="missing_values",
@@ -165,7 +166,8 @@ def problem_compute_mean():
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="Skip None (target - Python sum([x for x in vals if x is not None])/count)",
+                description="Skip missing values (target - the common aggregation default, "
+                            "like statistics/pandas which drop missing entries)",
                 is_target=True,
                 gold_check="mean_skip_none"
             ),
@@ -191,32 +193,35 @@ def problem_compute_variance():
     spec = FullSpec(
         domain="data_analysis",
         task_id="data_variance_001",
-        # GENUINE: "variance" is neutral on population (n) vs sample (n-1)
-        prompt_core="""Write a function `compute_variance` that calculates the variance of a list of numbers.""",
+        # GENUINE: for a COMPLETE population, population variance (÷n) is the
+        # natural default; the (deleted) clause states that default, and the
+        # sample formula (÷n-1) is the plausible alternative-convention delusion.
+        prompt_core="""Write a function `compute_variance` that calculates the variance of a list of numbers representing a complete population of measurements.""",
         requirement_classes=[
             RequirementClass(
                 id="formula",
                 description="Population vs sample variance",
-                clauses=["Use the sample variance formula (divide by n-1, not n)."]
+                clauses=["Use the population variance formula (divide by n)."]
             ),
         ],
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="Sample variance (n-1, target - Python statistics.variance)",
+                description="Population variance (÷n, target - natural default for a "
+                            "complete population, e.g. numpy.var default ddof=0)",
                 is_target=True,
-                gold_check="var_sample"
+                gold_check="var_population"
             ),
             InterpretationBranch(
                 id="I1",
-                description="Population variance (n)",
+                description="Sample variance (÷n-1, e.g. statistics.variance)",
                 is_target=False,
-                gold_check="var_population",
+                gold_check="var_sample",
                 opened_by="formula"
             ),
         ],
         key_questions=[
-            "Should I use sample variance (n-1) or population variance (n)?"
+            "Should I use population variance (÷n) or sample variance (÷n-1)?"
         ]
     )
     
@@ -267,32 +272,35 @@ def problem_filter_records():
     spec = FullSpec(
         domain="data_analysis",
         task_id="data_filter_001",
-        # GENUINE: "greater than X" is ambiguous on boundary (> vs >=)
-        prompt_core="""Write a function `filter_records` that filters a list of records (dicts with 'value' key) to include those with value greater than a given threshold.""",
+        # GENUINE: "meets a minimum threshold" is neutral on whether the boundary
+        # value itself qualifies. The (deleted) clause states the natural inclusive
+        # reading ("minimum" -> the value reaching the threshold counts).
+        prompt_core="""Write a function `filter_records` that filters a list of records (dicts with 'value' key) to keep those that meet a given minimum threshold.""",
         requirement_classes=[
             RequirementClass(
                 id="boundary",
                 description="Whether threshold is inclusive or exclusive",
-                clauses=["Use exclusive comparison (value > threshold, not >=)."]
+                clauses=["A record meets the threshold if its value is greater than or equal to the threshold (inclusive)."]
             ),
         ],
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="Exclusive (value > threshold, target)",
+                description="Inclusive (value >= threshold, target - 'minimum' includes "
+                            "the boundary value)",
                 is_target=True,
-                gold_check="filter_exclusive"
+                gold_check="filter_inclusive"
             ),
             InterpretationBranch(
                 id="I1",
-                description="Inclusive (value >= threshold)",
+                description="Exclusive (value > threshold, strictly above)",
                 is_target=False,
-                gold_check="filter_inclusive",
+                gold_check="filter_exclusive",
                 opened_by="boundary"
             ),
         ],
         key_questions=[
-            "Should the threshold comparison be exclusive (>) or inclusive (>=)?"
+            "Does meeting the minimum threshold include values equal to it (>=), or only above it (>)?"
         ]
     )
     
@@ -458,15 +466,21 @@ TEST_CASES = {
     ],
     
     # Compute median - cases that DISTINGUISH average vs lower for even-length
+    # AND that separate median from a plain-mean impostor (BLOCKER fix): the
+    # asymmetric cases below have mean != median so "return the mean" fails.
     "median_average": [
         ([1, 2, 3], 2.0),
         ([1, 2, 3, 4], 2.5),  # Discriminating: average of 2 and 3
         ([10, 20], 15.0),  # Discriminating: average of 10 and 20
+        ([1, 1, 100], 1.0),  # Anti-mean: median=1 but mean=34.0
+        ([1, 2, 3, 100], 2.5),  # Anti-mean: median avg(2,3)=2.5 but mean=26.5
     ],
     "median_lower": [
         ([1, 2, 3], 2.0),
         ([1, 2, 3, 4], 2.0),  # Discriminating: lower middle value
         ([10, 20], 10.0),  # Discriminating: lower middle value
+        ([1, 1, 100], 1.0),  # odd-length: middle value
+        ([1, 2, 3, 100], 2.0),  # even-length: lower middle = 2
     ],
     
     # Filter records - cases that DISTINGUISH exclusive (>) vs inclusive (>=)
