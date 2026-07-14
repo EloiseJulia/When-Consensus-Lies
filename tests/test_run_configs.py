@@ -18,7 +18,8 @@ from harness.run import (
     run_self_consistency,
     run_mad,
     run_verifier,
-    run_diverse
+    run_diverse,
+    answer_format_instruction,
 )
 
 
@@ -485,3 +486,211 @@ def test_interpretation_diverse_uses_task_interpretations(mock_task, client):
     assert len(runs2) == len(task2.interpretations)
     assert len(runs2) != len(runs), \
         "Different tasks with different interpretation counts should yield different run counts"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# S2e: Answer-format instruction tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def policy_task():
+    """policy_qa domain task for format-instruction tests."""
+    return Task(
+        id="policy_test_001",
+        domain="policy_qa",
+        prompt="What is the maximum insurance payout under clause 3B?",
+        latent_spec="Policy spec for clause 3B...",
+        interpretations=[
+            Interpretation(id="I0", is_target=True, gold_check="amount_i0"),
+            Interpretation(id="I1", is_target=False, gold_check="amount_i1"),
+        ],
+        ambiguity_level=1,
+        key_questions=["Which sub-clause applies?"]
+    )
+
+
+@pytest.fixture
+def data_task():
+    """data_analysis domain task for format-instruction tests."""
+    return Task(
+        id="data_test_001",
+        domain="data_analysis",
+        prompt="Write Python code to compute the mean of a dataset.",
+        latent_spec="Data analysis spec...",
+        interpretations=[
+            Interpretation(id="I0", is_target=True, gold_check="mean_i0"),
+            Interpretation(id="I1", is_target=False, gold_check="mean_i1"),
+        ],
+        ambiguity_level=1,
+        key_questions=["Which mean formula applies?"]
+    )
+
+
+def _capture_prompts(client):
+    """Monkey-patch client.complete to capture all prompt strings.
+
+    Returns a list that accumulates every prompt argument passed to complete()
+    for the duration of the test. The underlying real .complete() is still
+    invoked so shape/determinism tests remain valid.
+    """
+    captured = []
+    original = client.complete
+
+    def capturing(role, prompt, seed=None, **kwargs):
+        captured.append(prompt)
+        return original(role, prompt, seed=seed, **kwargs)
+
+    client.complete = capturing
+    return captured
+
+
+# ── Direct helper tests ───────────────────────────────────────────────────────
+
+def test_answer_format_instruction_policy_qa():
+    """policy_qa instruction must contain FINAL ANSWER: marker and JSON amount key."""
+    inst = answer_format_instruction("policy_qa")
+    assert "FINAL ANSWER:" in inst, "policy_qa instruction must contain 'FINAL ANSWER:'"
+    assert '"amount":' in inst, 'policy_qa instruction must contain \'"amount":\' for JSON path'
+
+
+def test_answer_format_instruction_code_spec():
+    """code_spec instruction must contain ```python fence directive."""
+    inst = answer_format_instruction("code_spec")
+    assert "```python" in inst, "code_spec instruction must contain '```python' fence directive"
+
+
+def test_answer_format_instruction_data_analysis():
+    """data_analysis instruction must contain ```python fence directive."""
+    inst = answer_format_instruction("data_analysis")
+    assert "```python" in inst, "data_analysis instruction must contain '```python' fence directive"
+
+
+def test_answer_format_instruction_unknown_domain_no_crash():
+    """Unknown domain must return a non-empty string fallback (never crash)."""
+    inst = answer_format_instruction("unknown_weird_domain_xyz")
+    assert isinstance(inst, str) and len(inst) > 0, \
+        "Unknown domain must return non-empty fallback string"
+
+
+# ── All 6 configs × policy_qa ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("config,kwargs", [
+    ("single", {}),
+    ("sc", {"k": 2}),
+    ("homogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("heterogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("verifier", {"n_candidates": 2}),
+    ("interpretation-diverse", {}),
+])
+def test_all_configs_policy_qa_prompts_contain_final_answer(policy_task, client, config, kwargs):
+    """Every prompt emitted by every config for policy_qa must contain 'FINAL ANSWER:'."""
+    captured = _capture_prompts(client)
+    run_task(policy_task, config, client, **kwargs)
+    assert len(captured) > 0, f"Config {config} emitted no prompts"
+    for prompt in captured:
+        assert "FINAL ANSWER:" in prompt, (
+            f"Config '{config}' prompt missing 'FINAL ANSWER:' instruction "
+            f"for policy_qa domain.\nPrompt start: {prompt[:200]}"
+        )
+
+
+# ── All 6 configs × code_spec ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("config,kwargs", [
+    ("single", {}),
+    ("sc", {"k": 2}),
+    ("homogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("heterogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("verifier", {"n_candidates": 2}),
+    ("interpretation-diverse", {}),
+])
+def test_all_configs_code_spec_prompts_contain_python_fence(mock_task, client, config, kwargs):
+    """Every prompt emitted by every config for code_spec must contain '```python'."""
+    captured = _capture_prompts(client)
+    run_task(mock_task, config, client, **kwargs)
+    assert len(captured) > 0, f"Config {config} emitted no prompts"
+    for prompt in captured:
+        assert "```python" in prompt, (
+            f"Config '{config}' prompt missing '```python' fence instruction "
+            f"for code_spec domain.\nPrompt start: {prompt[:200]}"
+        )
+
+
+# ── All 6 configs × data_analysis ────────────────────────────────────────────
+
+@pytest.mark.parametrize("config,kwargs", [
+    ("single", {}),
+    ("sc", {"k": 2}),
+    ("homogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("heterogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("verifier", {"n_candidates": 2}),
+    ("interpretation-diverse", {}),
+])
+def test_all_configs_data_analysis_prompts_contain_python_fence(data_task, client, config, kwargs):
+    """Every prompt emitted by every config for data_analysis must contain '```python'."""
+    captured = _capture_prompts(client)
+    run_task(data_task, config, client, **kwargs)
+    assert len(captured) > 0, f"Config {config} emitted no prompts"
+    for prompt in captured:
+        assert "```python" in prompt, (
+            f"Config '{config}' prompt missing '```python' fence instruction "
+            f"for data_analysis domain.\nPrompt start: {prompt[:200]}"
+        )
+
+
+# ── MAD both phases (initial round AND subsequent rounds) ─────────────────────
+
+def test_mad_initial_round_prompt_contains_format_instruction(policy_task, client):
+    """MAD initial-round prompts (round 0) must contain the format instruction."""
+    captured = _capture_prompts(client)
+    run_mad(policy_task, client, homogeneous=True, n_agents=2, rounds=2)
+
+    # Initial round prompts don't contain "Previous round answers"
+    initial_prompts = [p for p in captured if "Previous round answers from all agents" not in p]
+    assert initial_prompts, "Should have at least one initial-round MAD prompt"
+    for p in initial_prompts:
+        assert "FINAL ANSWER:" in p, \
+            f"MAD initial-round prompt missing format instruction.\nPrompt: {p[:300]}"
+
+
+def test_mad_subsequent_round_prompt_contains_format_instruction(policy_task, client):
+    """MAD subsequent-round prompts (round > 0) must contain the format instruction."""
+    captured = _capture_prompts(client)
+    run_mad(policy_task, client, homogeneous=True, n_agents=2, rounds=2)
+
+    # Subsequent round prompts contain "Previous round answers"
+    round_prompts = [p for p in captured if "Previous round answers from all agents" in p]
+    assert round_prompts, "Should have at least one subsequent-round MAD prompt"
+    for p in round_prompts:
+        assert "FINAL ANSWER:" in p, \
+            f"MAD round prompt missing format instruction.\nPrompt: {p[:300]}"
+
+
+# ── Verifier both phases (candidate generation AND selection) ─────────────────
+
+def test_verifier_candidate_prompt_contains_format_instruction(policy_task, client):
+    """Verifier candidate-generation prompts must contain the format instruction."""
+    captured = _capture_prompts(client)
+    run_verifier(policy_task, client, n_candidates=2)
+
+    # Candidate prompts don't contain "As a verifier"
+    candidate_prompts = [p for p in captured if "As a verifier" not in p]
+    assert candidate_prompts, "Should have candidate generation prompts"
+    for p in candidate_prompts:
+        assert "FINAL ANSWER:" in p, \
+            f"Verifier candidate prompt missing format instruction.\nPrompt: {p[:300]}"
+
+
+def test_verifier_select_prompt_contains_format_instruction(policy_task, client):
+    """Verifier selection prompt must contain the format instruction."""
+    captured = _capture_prompts(client)
+    run_verifier(policy_task, client, n_candidates=2)
+
+    # Selection prompt contains "As a verifier"
+    select_prompts = [p for p in captured if "As a verifier" in p]
+    assert select_prompts, "Should have a verifier selection prompt"
+    for p in select_prompts:
+        assert "FINAL ANSWER:" in p, \
+            f"Verifier selection prompt missing format instruction.\nPrompt: {p[:300]}"
