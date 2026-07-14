@@ -564,6 +564,81 @@ def sort_func(records):
     assert not result.passed, f"Monkeypatch attack succeeded! Details: {result.details}"
 
 
+def test_blocker_verdict_file_overwrite():
+    """BLOCKER FIX: Candidate descendant cannot overwrite verdict file.
+    
+    PoC attack: A wrong candidate spawns a descendant that globs the temp dir
+    for verdict files and overwrites them with a forged pass after the supervisor
+    writes the verdict but before CodeChecker reads it.
+    
+    The new architecture eliminates the shared verdict file entirely - verdict
+    travels over supervisor stdout (parent-owned pipe) which the candidate
+    cannot write to.
+    """
+    import time
+    
+    verdict_overwrite_candidate = """
+import subprocess
+import sys
+import time
+import tempfile
+import glob
+import json
+import os
+
+def sort_func(records):
+    # Spawn a descendant that tries to overwrite any verdict files
+    attack_code = '''
+import time
+import glob
+import tempfile
+import json
+
+# Try to find and overwrite verdict files in the temp directory
+for _ in range(50):  # Keep trying for a few seconds
+    try:
+        tmpdir = tempfile.gettempdir()
+        patterns = [
+            f"{tmpdir}/*verdict*",
+            f"{tmpdir}/codespec*",
+            f"{tmpdir}/*codespec*",
+        ]
+        for pattern in patterns:
+            for filepath in glob.glob(pattern):
+                if os.path.isfile(filepath):
+                    try:
+                        with open(filepath, "w") as f:
+                            f.write('{"status":"pass","message":"FORGED BY ATTACK"}')
+                    except:
+                        pass
+    except:
+        pass
+    time.sleep(0.1)
+'''
+    
+    subprocess.Popen(
+        [sys.executable, "-c", attack_code],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    
+    # Return wrong answer
+    return sorted(records, key=lambda r: -r['age'])  # Wrong: descending
+"""
+    
+    checker = CHECKERS["sort_asc_stable"]
+    start = time.time()
+    result = checker.check(verdict_overwrite_candidate)
+    elapsed = time.time() - start
+    
+    # The attack must FAIL, not pass
+    assert not result.passed, f"Verdict file overwrite attack succeeded! Details: {result.details}"
+    
+    # Should complete in reasonable time (not hang waiting for descendant)
+    assert elapsed < _TIMEOUT_SECONDS * 3, \
+        f"Check took too long: {elapsed:.1f}s (expected <{_TIMEOUT_SECONDS * 3}s)"
+
+
 def test_major_timeout_kills_descendants():
     """MAJOR FIX #3: Timeout kills descendant processes, not just the runner.
     

@@ -1,18 +1,20 @@
 """Isolated candidate-execution runner for the code_spec domain.
 
-SECURITY FIX (3-level architecture): Complete isolation from expected outputs.
+SECURITY FIX (3-level architecture with pipe-based verdict): Complete isolation.
 
 Architecture:
-1. Supervisor (this script with verdict_path arg): Holds gold/expected outputs 
-   and verdict path. Spawns ONE candidate worker per test case.
+1. Supervisor (this script, no args): Holds gold/expected outputs. Spawns ONE 
+   candidate worker per test case. Writes verdict to STDOUT with sentinel.
 2. Candidate worker (this script with input_file, output_file args): Receives 
    ONLY test input, execs candidate code, calls entrypoint, writes output to 
-   file. NEVER sees expected outputs or verdict path.
+   file. NEVER sees expected outputs.
 
 The candidate cannot forge a passing verdict because:
 - It never sees expected outputs (gold) - supervisor holds them
 - It only writes its own answer to output_file, which supervisor then checks
-- Forging stdout/output just changes the candidate's answer, not the verdict
+- Verdict travels over CodeChecker→Supervisor pipe (supervisor's stdout)
+- Candidate worker's stdout is separate pipe to supervisor, NOT to CodeChecker
+- Candidate cannot write to supervisor's stdout pipe (not inherited)
 
 THREAT MODEL (important, and deliberately scoped): candidates are ordinary
 model-generated solutions to coding prompts, NOT adversaries trying to escape a
@@ -40,8 +42,8 @@ Candidate worker output file (JSON):
     {"status": "ok", "result": <value>}
     OR {"status": "error", "message": "..."}
 
-Verdict (written by supervisor to verdict_path):
-    {"status": "pass"|"fail"|"error", "message": "..."}
+Verdict (written by supervisor to STDOUT with sentinel):
+    __CODESPEC_VERDICT__ {"status": "pass"|"fail"|"error", "message": "..."}
 """
 
 import json
@@ -56,13 +58,15 @@ FLOAT_TOL = 1e-9
 TIMEOUT_SECONDS = 5.0
 
 
-def _emit_verdict(path, status, message):
-    """Write the single JSON verdict to the dedicated verdict file (supervisor only)."""
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"status": status, "message": message}))
-    except OSError:
-        pass
+def _emit_verdict(status, message):
+    """Write the verdict to stdout with sentinel prefix (supervisor only).
+    
+    BLOCKER FIX: Verdict delivered over parent-owned pipe (stdout), NOT a
+    shared temp file. The sentinel prefix allows CodeChecker to parse the
+    verdict from stdout reliably.
+    """
+    verdict = {"status": status, "message": message}
+    print(f"__CODESPEC_VERDICT__ {json.dumps(verdict)}", flush=True)
 
 
 def _compare(result, expected):
@@ -114,7 +118,7 @@ def _resolve_entrypoint(namespace, entrypoint):
 def candidate_worker_main(input_file, output_file):
     """CANDIDATE WORKER: Execute candidate code with ONLY test input.
     
-    This process NEVER sees expected outputs or verdict path. It receives only:
+    This process NEVER sees expected outputs. It receives only:
     - candidate code
     - entrypoint name  
     - test input
@@ -200,12 +204,14 @@ def _kill_process_tree(pid):
             pass
 
 
-def supervisor_main(verdict_path):
+def supervisor_main():
     """SUPERVISOR: Spawn candidate workers, compare outputs to gold, write verdict.
     
-    The supervisor holds the expected outputs (gold) and verdict path. For each
-    test case, it spawns a candidate worker that receives ONLY the input, gets
-    back only the candidate's output, and compares that to gold.
+    The supervisor holds the expected outputs (gold). For each test case, it 
+    spawns a candidate worker that receives ONLY the input, gets back only the 
+    candidate's output, and compares that to gold.
+    
+    Verdict is written to STDOUT with sentinel (parent-owned pipe), NOT a file.
     
     The candidate never sees expected outputs, so it cannot forge a pass by
     reading them or by printing forged results.
@@ -213,7 +219,7 @@ def supervisor_main(verdict_path):
     try:
         job = json.loads(sys.stdin.read())
     except Exception as exc:  # noqa: BLE001
-        _emit_verdict(verdict_path, "error", f"bad job: {exc}")
+        _emit_verdict("error", f"bad job: {exc}")
         return
 
     candidate = job["candidate"]
@@ -241,6 +247,7 @@ def supervisor_main(verdict_path):
             
             # Spawn candidate worker subprocess
             # MAJOR FIX #3: Put candidate in process group for tree killing
+            # BLOCKER FIX: Worker's stdout is separate from supervisor's stdout
             try:
                 if sys.platform == "win32":
                     CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -268,12 +275,12 @@ def supervisor_main(verdict_path):
                         process.wait(timeout=1)
                     except subprocess.TimeoutExpired:
                         pass
-                    _emit_verdict(verdict_path, "fail", 
+                    _emit_verdict("fail", 
                                 f"Test {test_num} timeout (infinite loop or too slow)")
                     return
                 
             except Exception as exc:  # noqa: BLE001
-                _emit_verdict(verdict_path, "error", f"Worker spawn failed: {exc}")
+                _emit_verdict("error", f"Worker spawn failed: {exc}")
                 return
             
             # Read candidate's output
@@ -281,17 +288,17 @@ def supervisor_main(verdict_path):
                 with open(output_file, "r", encoding="utf-8") as f:
                     output = json.load(f)
             except Exception as exc:  # noqa: BLE001
-                _emit_verdict(verdict_path, "error", 
+                _emit_verdict("error", 
                             f"Test {test_num}: No/invalid output: {exc}")
                 return
             
             if output.get("status") == "error":
-                _emit_verdict(verdict_path, "error", 
+                _emit_verdict("error", 
                             f"Test {test_num}: {output.get('message', 'Unknown error')}")
                 return
             
             if output.get("status") != "ok":
-                _emit_verdict(verdict_path, "error", 
+                _emit_verdict("error", 
                             f"Test {test_num}: Invalid output status")
                 return
             
@@ -300,7 +307,7 @@ def supervisor_main(verdict_path):
             expected = tc["expected"]
             
             if not _compare(result, expected):
-                _emit_verdict(verdict_path, "fail",
+                _emit_verdict("fail",
                             f"Test {test_num} failed: input={tc['input']!r}, "
                             f"expected={expected!r}, got={result!r}")
                 return
@@ -317,7 +324,7 @@ def supervisor_main(verdict_path):
                 pass
     
     # All tests passed
-    _emit_verdict(verdict_path, "pass", f"All {len(test_cases)} tests passed")
+    _emit_verdict("pass", f"All {len(test_cases)} tests passed")
 
 
 def main():
@@ -328,13 +335,8 @@ def main():
         candidate_worker_main(input_file, output_file)
         return
 
-    # Supervisor mode: verdict_path arg
-    if len(sys.argv) < 2:
-        sys.stderr.write("runner: missing verdict path argument\n")
-        return
-    
-    verdict_path = sys.argv[1]
-    supervisor_main(verdict_path)
+    # Supervisor mode: no args (reads job from stdin, writes verdict to stdout)
+    supervisor_main()
 
 
 if __name__ == "__main__":
