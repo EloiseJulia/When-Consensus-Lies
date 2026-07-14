@@ -333,7 +333,7 @@ def test_label_policy_qa_i0_match():
 
 
 def test_label_policy_qa_i1_match():
-    """policy_qa: Exact I1 answer (as dollar amount) should label as I1."""
+    """policy_qa: Exact I1 answer (STRUCTURED format) should label as I1."""
     # Load a real policy_qa task
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
@@ -343,14 +343,14 @@ def test_label_policy_qa_i1_match():
     checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
     i1_answer = candidates["I1"]
     
-    # Create a run with I1 answer as dollar amount
+    # Create a run with I1 answer using FINAL ANSWER marker
     amount = i1_answer["amount"]
     run = AgentRun(
         task_id=task.id,
         config="single",
         model_role="tested_agents",
         model_id="test-model",
-        output=f"The answer is ${amount:.2f}",
+        output=f"FINAL ANSWER: ${amount:.2f}",
         label="",
         verbalized_conf=0.85,
         logit_conf=None,
@@ -363,18 +363,18 @@ def test_label_policy_qa_i1_match():
 
 
 def test_label_policy_qa_i_perp_wrong_amount():
-    """policy_qa: Wrong amount (not matching any interpretation) should label as I_perp."""
+    """policy_qa: Wrong amount (STRUCTURED but not matching) should label as I_perp."""
     # Load a real policy_qa task
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Create a run with a clearly wrong amount
+    # Create a run with a STRUCTURED but clearly wrong amount
     run = AgentRun(
         task_id=task.id,
         config="single",
         model_role="tested_agents",
         model_id="test-model",
-        output="The answer is $999999.99",
+        output="FINAL ANSWER: $999999.99",
         label="",
         verbalized_conf=0.3,
         logit_conf=None,
@@ -578,31 +578,31 @@ def test_label_determinism():
 # ============================================================================
 # AUDIT FIX TESTS (Cross-family GPT audit findings)
 # ============================================================================
+# STRUCTURED ANSWER CONTRACT TESTS (owner-approved)
+# ============================================================================
 
-def test_policy_qa_numeric_extraction_with_prose():
-    """BLOCKER FIX: policy_qa numeric extraction should handle leading prose.
+def test_policy_qa_final_answer_marker_variants():
+    """STRUCTURED CONTRACT: FINAL ANSWER marker variants should all work.
     
-    The audit found that "After calculation, the answer is $950.00." was
-    mislabeled as I_perp because the regex matched a prose comma before the
-    number. The fix scans ALL matches and requires at least one digit.
+    Tests: "FINAL ANSWER: $950.00", "FINAL ANSWER: 950 dollars", "FINAL ANSWER: $950"
     """
     # Load a real policy_qa task
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the canonical I0 reference to know the expected amount
+    # Get the canonical I0 reference
     from bench.policy_qa import get_checkers_and_candidates
     checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
     i0_amount = candidates["I0"]["amount"]
     
-    # Test cases that should all extract the number correctly
+    # Test cases: different FINAL ANSWER marker formats
     test_cases = [
-        # (output_string, description)
-        (f"${i0_amount:.2f}", "bare dollar amount"),
-        (f"The answer is ${i0_amount:.2f}", "simple prose prefix"),
-        (f"After calculation, the answer is ${i0_amount:.2f}.", "realistic prose with comma"),
-        (f"The total is ${i0_amount:,.2f} due today.", "thousands separator with prose"),
-        (f'{{"amount": {i0_amount}}}', "JSON format"),
+        (f"FINAL ANSWER: ${i0_amount:.2f}", "FINAL ANSWER: $950.00"),
+        (f"FINAL ANSWER: {i0_amount} dollars", "FINAL ANSWER: 950 dollars"),
+        (f"FINAL ANSWER: ${int(i0_amount)}", "FINAL ANSWER: $950"),
+        (f"Final answer: ${i0_amount:.2f}", "Final answer: (lowercase)"),
+        (f"FINAL ANSWER = ${i0_amount:.2f}", "FINAL ANSWER = (equals)"),
+        (f"FINAL ANSWER:${i0_amount:.2f}", "no space after colon"),
     ]
     
     for output, description in test_cases:
@@ -618,30 +618,81 @@ def test_policy_qa_numeric_extraction_with_prose():
             seed=100
         )
         label = label_run(run, task)
-        assert label == "I0", f"Failed for {description}: expected I0, got {label} for output: {output}"
+        assert label == "I0", f"Failed for {description}: expected I0, got {label}"
 
 
-def test_policy_qa_numeric_extraction_no_number():
-    """BLOCKER FIX: policy_qa should return I_perp when no number is present."""
+def test_policy_qa_json_structured_format():
+    """STRUCTURED CONTRACT: JSON format should work (pure and embedded)."""
     # Load a real policy_qa task
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Prose-only output with no number
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output="The policy is ambiguous and I cannot provide a specific amount.",
-        label="",
-        verbalized_conf=0.3,
-        logit_conf=None,
-        seed=101
-    )
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
     
-    label = label_run(run, task)
-    assert label == "I_perp", f"Expected I_perp for no-number prose, got {label}"
+    import json
+    # Test cases: JSON variants
+    test_cases = [
+        (json.dumps({"amount": i0_amount}), "pure JSON"),
+        (f'{{"amount": {i0_amount}}}', "JSON embedded in output"),
+        (f'```json\n{{"amount": {i0_amount}}}\n```', "fenced JSON"),
+    ]
+    
+    for output, description in test_cases:
+        run = AgentRun(
+            task_id=task.id,
+            config="single",
+            model_role="tested_agents",
+            model_id="test-model",
+            output=output,
+            label="",
+            verbalized_conf=0.9,
+            logit_conf=None,
+            seed=101
+        )
+        label = label_run(run, task)
+        assert label == "I0", f"Failed for {description}: expected I0, got {label}"
+
+
+def test_policy_qa_unstructured_prose_returns_i_perp():
+    """STRUCTURED CONTRACT: Unstructured free-text -> I_perp (by contract).
+    
+    Tests that outputs WITHOUT JSON or FINAL ANSWER marker return I_perp,
+    even if they contain dollar amounts in prose. This is the owner-approved
+    contract: unparseable free-text is conservatively I_perp, not guessed.
+    """
+    # Load a real policy_qa task
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # All these are UNSTRUCTURED (no JSON, no FINAL ANSWER marker) -> I_perp by contract
+    unstructured_outputs = [
+        f"The answer is ${i0_amount:.2f}.",  # prose with "the answer is"
+        f"After calculation, the answer is ${i0_amount:.2f}.",  # prose with leading text
+        f"Regular pay is $800 and overtime is $150, so the answer is ${i0_amount:.2f}.",  # multi-step
+        f"${i0_amount:.2f}",  # bare dollar amount (no marker)
+        "I'm not sure how to calculate this.",  # pure prose, no number
+    ]
+    
+    for output in unstructured_outputs:
+        run = AgentRun(
+            task_id=task.id,
+            config="single",
+            model_role="tested_agents",
+            model_id="test-model",
+            output=output,
+            label="",
+            verbalized_conf=0.5,
+            logit_conf=None,
+            seed=102
+        )
+        label = label_run(run, task)
+        assert label == "I_perp", f"Expected I_perp for unstructured output, got {label}. Output: {output}"
 
 
 def test_real_domain_checker_loading_failure_fails_loud():
@@ -688,318 +739,3 @@ def test_real_domain_checker_loading_failure_fails_loud():
         assert "gold checkers unavailable" in str(e).lower(), \
             f"Expected 'gold checkers unavailable' in error, got: {e}"
         assert "code_spec" in str(e), f"Expected domain 'code_spec' in error, got: {e}"
-
-
-def test_policy_qa_multi_step_extraction_case1():
-    """RE-AUDIT FIX: Multi-step reasoning with base → final (should extract final).
-    
-    Case: "Step 1: base is $1000, after 10% fee the answer is $900.00"
-    Should extract 900 (final), not 1000 (intermediate).
-    """
-    # Load a real policy_qa task where I0=$900 (or close)
-    # We'll use a task and verify it extracts the LAST cued amount
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    # We need to know what 900.00 maps to. For this test, let's just verify
-    # that the extraction prefers the "answer is" cue over the earlier amount.
-    # We'll construct output with canonical I0 as the final answer.
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Construct output: intermediate $1000, then "answer is" with I0's amount
-    output = f"Step 1: base is $1000, after 10% fee the answer is ${i0_amount:.2f}"
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=110
-    )
-    
-    label = label_run(run, task)
-    # Should label as I0 (the final answer with cue), not mislabel from 1000
-    assert label == "I0", f"Expected I0 for multi-step with answer cue, got {label}"
-
-
-def test_policy_qa_multi_step_extraction_case2():
-    """RE-AUDIT FIX: Multiple intermediate values → final (should extract final).
-    
-    Case: "Regular pay is $800.00 and overtime is $150.00, so the answer is $950.00."
-    Should extract 950 (final with cue), not 800 (first intermediate).
-    """
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Construct: two intermediates, then "answer is" with I0
-    output = f"Regular pay is $800.00 and overtime is $150.00, so the answer is ${i0_amount:.2f}."
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=111
-    )
-    
-    label = label_run(run, task)
-    assert label == "I0", f"Expected I0 for multi-intermediate with answer cue, got {label}"
-
-
-def test_policy_qa_multi_step_extraction_case3():
-    """RE-AUDIT FIX: Hypothetical alternative → final (should extract final).
-    
-    Case: "Using double overtime would be $1000.00, but the final answer is $950.00."
-    Should extract 950 (with "final answer" cue), not 1000 (hypothetical).
-    """
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Construct: hypothetical, then "final answer is" with I0
-    output = f"Using double overtime would be $1000.00, but the final answer is ${i0_amount:.2f}."
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=112
-    )
-    
-    label = label_run(run, task)
-    assert label == "I0", f"Expected I0 for hypothetical → final answer cue, got {label}"
-
-
-def test_policy_qa_multi_step_extraction_case4():
-    """RE-AUDIT FIX: Preliminary calc → final (should extract final with cue).
-    
-    Case: "A preliminary calculation gives 910.00, but the final answer is $950.00."
-    Should extract 950 (with "final answer" cue), not 910 (preliminary).
-    """
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Construct: preliminary (no $), then "final answer is" with I0
-    output = f"A preliminary calculation gives 910.00, but the final answer is ${i0_amount:.2f}."
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=113
-    )
-    
-    label = label_run(run, task)
-    assert label == "I0", f"Expected I0 for preliminary → final answer cue, got {label}"
-
-
-def test_policy_qa_multi_step_extraction_case5():
-    """RE-AUDIT FIX: Multiple inputs → final (should extract final with cue).
-    
-    Case: "There are 45 hours and $20.00/hour; final gross pay is $950.00."
-    Should extract 950 (with "gross pay is" cue), not 20 (rate input).
-    """
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Construct: inputs (20/hour), then "gross pay is" with I0
-    output = f"There are 45 hours and $20.00/hour; final gross pay is ${i0_amount:.2f}."
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=114
-    )
-    
-    label = label_run(run, task)
-    assert label == "I0", f"Expected I0 for inputs → gross pay cue, got {label}"
-
-
-def test_policy_qa_json_overrides_prose():
-    """RE-AUDIT: JSON amount should win even if prose has other numbers."""
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Prose with wrong number, but JSON has correct I0
-    import json
-    output = f"I calculated $800.00 initially. {json.dumps({'amount': i0_amount})}"
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=115
-    )
-    
-    label = label_run(run, task)
-    # JSON should win
-    assert label == "I0", f"Expected I0 (JSON should override prose), got {label}"
-
-
-def test_policy_qa_single_amount_still_works():
-    """RE-AUDIT: Single-amount answer should still work (fallback to last)."""
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Just one amount, no cues
-    output = f"${i0_amount:.2f}"
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=116
-    )
-    
-    label = label_run(run, task)
-    assert label == "I0", f"Expected I0 for single amount, got {label}"
-
-
-def test_policy_qa_garbage_no_number_i_perp():
-    """RE-AUDIT: Pure garbage with no number should still → I_perp."""
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    output = "This is confusing and I cannot provide a numerical answer to this question."
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.3,
-        logit_conf=None,
-        seed=117
-    )
-    
-    label = label_run(run, task)
-    assert label == "I_perp", f"Expected I_perp for no-number garbage, got {label}"
-
-
-def test_policy_qa_embedded_json_in_prose():
-    """EMBEDDED JSON FIX: Structured amount in prose should win over prose numbers.
-    
-    Case: '{"amount": 950.0} but earlier I wrote $800'
-    Should extract 950 (structured), not 800 (prose).
-    """
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # Embedded JSON with I0 amount, followed by prose with different number
-    import json
-    output = f'{json.dumps({"amount": i0_amount})} but earlier I wrote $800'
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=118
-    )
-    
-    label = label_run(run, task)
-    # Should extract 950 from structured amount, not 800 from prose
-    assert label == "I0", f"Expected I0 (structured amount should win), got {label}"
-
-
-def test_policy_qa_fenced_json():
-    """EMBEDDED JSON FIX: Structured amount in code fence should be extracted.
-    
-    Case: '```json\n{"amount": 950.0}\n```'
-    Should extract 950 from the fenced JSON.
-    """
-    tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.ambiguity_level == 1)
-    
-    from bench.policy_qa import get_checkers_and_candidates
-    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]
-    
-    # JSON in a code fence
-    import json
-    output = f'```json\n{json.dumps({"amount": i0_amount})}\n```'
-    
-    run = AgentRun(
-        task_id=task.id,
-        config="single",
-        model_role="tested_agents",
-        model_id="test-model",
-        output=output,
-        label="",
-        verbalized_conf=0.9,
-        logit_conf=None,
-        seed=119
-    )
-    
-    label = label_run(run, task)
-    # Should extract from fenced JSON
-    assert label == "I0", f"Expected I0 (fenced JSON amount), got {label}"

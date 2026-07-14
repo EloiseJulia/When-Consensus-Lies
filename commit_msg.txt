@@ -1,37 +1,34 @@
-fix(label): Handle embedded JSON in prose (structured amount priority gap)
+OWNER DECISION: Implement STRUCTURED final-answer contract for policy_qa
 
-EMBEDDED JSON FIX - Structured amount in prose should win:
-The previous JSON step only tried `json.loads(output.strip())` on the WHOLE
-output, which fails when JSON is embedded in prose. Example failure:
-  '{"amount": 950.0} but earlier I wrote $800' → extracted 800 (WRONG)
+Reworked policy_qa extraction per owner's pre-registered answer-format
+contract. Removes fragile free-text parsing that caused multi-step mislabels.
 
-The structured amount MUST win over any prose number, even when wrapped in
-prose or a code fence. This ensures explicit structured answers take precedence
-over incidental prose numbers.
+NEW EXTRACTION CONTRACT (policy_qa only; code/data unchanged):
+1. JSON amount field (pure, embedded, or fenced): {"amount": N} or {"answer": N}
+2. FINAL ANSWER marker: "FINAL ANSWER: $950" / "Final answer: 950 dollars" / etc.
+3. No fallback to free-text → unparseable returns None → I_perp (by design)
 
-NEW JSON EXTRACTION (two-step):
-1a. Try `json.loads(output.strip())` for pure JSON output (unchanged)
-1b. If that fails, search for EMBEDDED structured amount via regex:
-    - Pattern: "amount"\s*:\s*(-?\d+(?:\.\d+)?)
-    - Pattern: "answer"\s*:\s*(-?\d+(?:\.\d+)?)
-    - Requires NUMERIC value (not quoted string like "amount": "950")
-    - Handles: {"amount": 950.0} in prose, code fences, mid-sentence
+RATIONALE: Tested agents instructed to use structured final answer; unparseable
+free-text is conservatively I_perp rather than guessed.
 
-VERIFIED - Embedded JSON cases now extract correctly:
-  '{"amount": 950.0} but earlier I wrote $800' → extracts 950.0 ✓ (was 800)
-  '```json\n{"amount": 950.0}\n```' → extracts 950.0 ✓
-  'The answer is {"amount": 950.0} and not $800' → extracts 950.0 ✓
+CHANGES:
+- harness/label.py: Updated _extract_numeric_from_output() to implement contract
+  - Removed answer-cue heuristics ("the answer is", "total is", etc.)
+  - Removed last-amount fallback
+  - Kept robust embedded/fenced JSON handling
+  - Added FINAL ANSWER marker parsing (case-insensitive, multiple formats)
+  - Unstructured prose → None → I_perp
 
-ADDED 2 GOLDEN TESTS:
-- Embedded JSON in prose (with conflicting prose number)
-- Fenced JSON (```json ... ```)
-Both assert correct interpretation label (I0 for canonical amount).
+- tests/test_label.py: Updated for contract
+  - Removed 13 obsolete tests (test_policy_qa_multi_step_*, test_policy_qa_json_overrides_prose, etc.)
+  - All policy_qa tests now use STRUCTURED formats (JSON or FINAL ANSWER marker)
+  - Added test_policy_qa_unstructured_prose_returns_i_perp (enforces contract)
+  - Canonical-reference invariant verified with structured outputs for all 3 domains
 
-Full suite: 176 passed (×2 runs, 0 failures)
-Canonical-reference invariant: ALL 6 interpretations still label correctly
-  (I0→I0, I1→I1 for code_spec, data_analysis, policy_qa)
-
-This completes the policy_qa extraction robustness: JSON (pure or embedded) →
-answer-cues → last-amount fallback. Structured amounts now reliably win.
+VERIFIED:
+- Canonical-reference invariant: I0→I0, I1→I1 for code_spec, data_analysis, policy_qa
+- Full suite: 167 passed (0 failures) ×2 consecutive runs
+- Code/data labeling unchanged (executable checkers)
+- Policy labeling: structured-only, conservatively I_perp on unparseable
 
 Co-authored-by: copilot <copilot@users.noreply.github.com>

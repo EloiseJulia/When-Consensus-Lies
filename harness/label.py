@@ -77,19 +77,23 @@ def _extract_code_from_output(output: str) -> Optional[str]:
 def _extract_numeric_from_output(output: str) -> Optional[float]:
     """Extract a numeric answer from agent output (policy_qa domain).
     
-    Priority order (to handle multi-step reasoning with intermediate values):
-    1. STRUCTURED JSON: {"amount": X} or {"answer": X} takes precedence
-       - First try parsing the whole output as JSON
-       - If that fails, search for EMBEDDED structured amount fields in prose or fences
-    2. ANSWER-CUE preference: Search for explicit final-answer markers and take
-       the amount after the LAST such marker. Markers: "final answer", "the answer is",
-       "answer:", "answer is", "total is", "total:", "gross pay is", "final ... is",
-       or "= $X" patterns.
-    3. FALLBACK: If no cues, return the LAST parseable dollar/decimal amount
-       (final answers appear last in multi-step reasoning).
+    STRUCTURED FINAL-ANSWER CONTRACT (owner-approved, pre-registered):
+    Tested agents are instructed to end with a structured final answer:
+      - JSON: {"amount": N} or {"answer": N}
+      - FINAL ANSWER marker: "FINAL ANSWER: $<amount>" (or variants)
     
-    This priority fixes mislabeling when answers show work (e.g., "base is $1000,
-    after fee the answer is $900" correctly extracts 900, not 1000).
+    Labeling relies on this contract. Unparseable free-text is conservatively
+    I_perp (not guessed) to avoid systematic mislabeling of unstructured outputs.
+    
+    Priority order:
+    1. JSON amount field: Pure, embedded, or fenced JSON with numeric "amount"
+       or "answer" field.
+    2. FINAL ANSWER marker: A line/segment matching "FINAL ANSWER:" (case-insensitive,
+       also accept "Final answer:" / "FINAL ANSWER =") followed by an amount.
+       Amount may be: $950.00, $950, 950.00, 950, or 950 dollars/USD.
+       Use the amount after the LAST such marker.
+    3. If NEITHER JSON NOR FINAL ANSWER marker present -> return None -> I_perp.
+       Do NOT fall back to guessing from free prose (owner-approved contract).
     """
     # 1a. Try JSON parsing first (pure JSON output)
     try:
@@ -120,63 +124,45 @@ def _extract_numeric_from_output(output: str) -> Optional[float]:
             except ValueError:
                 continue
     
-    # Pattern for dollar amounts or plain decimal numbers
-    # Matches: $1,234.56, $950.00, 950.00, $950, 1234.56
-    # CRITICAL: Must contain at least one digit (bare commas never match)
-    amount_pattern = r'\$\s*[\d,]+(?:\.\d{1,2})?|(?<!\d)[\d,]+\.\d{1,2}(?!\d)'
+    # 2. Search for FINAL ANSWER marker (case-insensitive)
+    # Matches: "FINAL ANSWER:", "Final answer:", "FINAL ANSWER =", etc.
+    # Followed by: $950.00, $950, 950.00, 950, 950 dollars, 950 USD
+    final_answer_pattern = r'FINAL\s+ANSWER\s*[:\s=]\s*'
     
-    # 2. Search for answer-cue markers and extract amount after the LAST marker
-    # Markers indicate final answer (case-insensitive)
-    answer_cues = [
-        r'final\s+answer\s*:?\s*',
-        r'the\s+answer\s+is\s*:?\s*',
-        r'answer\s*:\s*',
-        r'answer\s+is\s*:?\s*',
-        r'total\s+is\s*:?\s*',
-        r'total\s*:\s*',
-        r'gross\s+pay\s+is\s*:?\s*',
-        r'final\s+\w+\s+is\s*:?\s*',  # "final <anything> is"
-        r'=\s*',  # "= $X" pattern
-    ]
+    # Amount pattern (with optional $, thousands separators, cents, trailing units)
+    # Matches: $1,234.56, $950.00, $950, 950.00, 950, also allows "dollars"/"USD" suffix
+    amount_pattern = r'\$?\s*[\d,]+(?:\.\d{1,2})?\s*(?:dollars|USD)?'
     
-    # Find all cue positions and their associated amounts
-    cue_amounts = []
-    for cue_pattern in answer_cues:
-        # Find all matches of this cue pattern (case-insensitive)
-        for cue_match in re.finditer(cue_pattern, output, re.IGNORECASE):
-            cue_end = cue_match.end()
-            # Look for an amount immediately after this cue (within next 50 chars)
-            remainder = output[cue_end:cue_end + 50]
-            amount_match = re.search(amount_pattern, remainder)
-            if amount_match:
-                try:
-                    cleaned = amount_match.group().replace('$', '').replace(' ', '').replace(',', '')
-                    if cleaned and any(c.isdigit() for c in cleaned):
-                        amount = float(cleaned)
-                        # Store (cue_position, amount) to find the LAST cue
-                        cue_amounts.append((cue_end, amount))
-                except ValueError:
-                    continue
+    # Find all FINAL ANSWER markers and their associated amounts
+    final_amounts = []
+    for marker_match in re.finditer(final_answer_pattern, output, re.IGNORECASE):
+        marker_end = marker_match.end()
+        # Look for an amount immediately after this marker (within next 50 chars)
+        remainder = output[marker_end:marker_end + 50]
+        amount_match = re.search(amount_pattern, remainder, re.IGNORECASE)
+        if amount_match:
+            try:
+                # Clean the matched amount string
+                amount_str = amount_match.group()
+                # Remove $, whitespace, commas, and trailing units
+                cleaned = (amount_str.replace('$', '').replace(' ', '').replace(',', '')
+                          .replace('dollars', '').replace('USD', '').strip())
+                # Must contain at least one digit
+                if cleaned and any(c.isdigit() for c in cleaned):
+                    amount = float(cleaned)
+                    # Store (marker_position, amount) to find the LAST marker
+                    final_amounts.append((marker_end, amount))
+            except ValueError:
+                continue
     
-    # If we found cue-associated amounts, return the one from the LAST cue
-    if cue_amounts:
+    # If we found FINAL ANSWER markers, return the amount from the LAST one
+    if final_amounts:
         # Sort by position and take the last one
-        cue_amounts.sort(key=lambda x: x[0])
-        return cue_amounts[-1][1]
+        final_amounts.sort(key=lambda x: x[0])
+        return final_amounts[-1][1]
     
-    # 3. FALLBACK: No cues found, return the LAST parseable amount in the text
-    # (final answers typically appear last in multi-step reasoning)
-    matches = re.findall(amount_pattern, output)
-    
-    # Scan matches in REVERSE order (last to first) to prefer final amounts
-    for match in reversed(matches):
-        try:
-            cleaned = match.replace('$', '').replace(' ', '').replace(',', '')
-            if cleaned and any(c.isdigit() for c in cleaned):
-                return float(cleaned)
-        except ValueError:
-            continue
-    
+    # 3. NO structured format found -> return None (conservative I_perp by contract)
+    # Do NOT fall back to guessing from free prose
     return None
 
 
