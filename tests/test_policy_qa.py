@@ -69,12 +69,17 @@ def test_amounts_pairwise_distinct():
         
         assert len(amounts) == 3, f"{problem_prefix}: expected 3 amounts, got {len(amounts)}"
         
-        # Verify pairwise distinct (gap > 0.01 tolerance)
+        # Verify pairwise distinct with a robustness margin well above the
+        # checker's 0.01 float tolerance. The observed minimum pairwise gap
+        # across all problems is 0.10 (tip_total 8.10 vs tip_roundup 8.00),
+        # i.e. 10x the checker tolerance, so no interpretation can be
+        # mis-scored as another. We assert a 0.05 (5x tolerance) safety floor.
+        SAFETY_FLOOR = 0.05
         amounts_sorted = sorted(amounts)
         for i in range(len(amounts_sorted)):
             for j in range(i + 1, len(amounts_sorted)):
                 diff = abs(amounts_sorted[i] - amounts_sorted[j])
-                assert diff > 0.01, \
+                assert diff > SAFETY_FLOOR, \
                     f"{problem_prefix}: amounts {amounts_sorted[i]} and {amounts_sorted[j]} too close (diff={diff:.4f})"
 
 
