@@ -1,0 +1,39 @@
+fix(label): Re-audit BLOCKER - prefer final answer over intermediate values
+
+PERSISTING BLOCKER FIX - Multi-step reasoning extraction:
+Real LLM policy_qa answers routinely show their work with multiple dollar
+amounts, but the FINAL answer appears last. The previous fix returned the
+FIRST parseable amount, systematically mislabeling multi-step answers.
+
+NEW EXTRACTION PRIORITY ORDER:
+1. STRUCTURED JSON: {"amount": X} or {"answer": X} takes precedence (unchanged)
+2. ANSWER-CUE preference: Search for explicit final-answer markers and take
+   the amount after the LAST such marker:
+   - "final answer", "the answer is", "answer:", "answer is"
+   - "total is", "total:", "gross pay is", "final ... is"
+   - "= $X" patterns
+3. FALLBACK - LAST amount: If no cues found, return the LAST parseable
+   dollar/decimal amount (final answers appear last in multi-step reasoning),
+   NOT the first
+
+VERIFIED - All 5 audit cases now extract FINAL amounts correctly:
+  Case 1: "$1000 ... the answer is $900" → extracts $900.00 (was $1000)
+  Case 2: "$800 and $150, so the answer is $950" → extracts $950.00 (was $800)
+  Case 3: "$1000, but the final answer is $950" → extracts $950.00 (was $1000)
+  Case 4: "910.00, but the final answer is $950" → extracts $950.00 (was 910)
+  Case 5: "$20.00/hour; final gross pay is $950" → extracts $950.00 (was $20)
+
+ADDED 8 GOLDEN TESTS:
+- All 5 audit cases (assert correct interpretation labels, e.g., I0 for $950)
+- JSON overrides prose (even if prose has other numbers)
+- Single-amount answer still works (fallback to last)
+- Pure garbage with no number → I_perp
+
+Full suite: 174 passed (×2 runs, 0 failures)
+Canonical-reference invariant: ALL 6 interpretations still label correctly
+  (I0→I0, I1→I1 for code_spec, data_analysis, policy_qa)
+
+This fixes systematic mislabeling of realistic multi-step policy_qa answers
+and prevents corruption of the convergent-delusion metric.
+
+Co-authored-by: copilot <copilot@users.noreply.github.com>

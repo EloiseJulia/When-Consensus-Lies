@@ -688,3 +688,250 @@ def test_real_domain_checker_loading_failure_fails_loud():
         assert "gold checkers unavailable" in str(e).lower(), \
             f"Expected 'gold checkers unavailable' in error, got: {e}"
         assert "code_spec" in str(e), f"Expected domain 'code_spec' in error, got: {e}"
+
+
+def test_policy_qa_multi_step_extraction_case1():
+    """RE-AUDIT FIX: Multi-step reasoning with base → final (should extract final).
+    
+    Case: "Step 1: base is $1000, after 10% fee the answer is $900.00"
+    Should extract 900 (final), not 1000 (intermediate).
+    """
+    # Load a real policy_qa task where I0=$900 (or close)
+    # We'll use a task and verify it extracts the LAST cued amount
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    # We need to know what 900.00 maps to. For this test, let's just verify
+    # that the extraction prefers the "answer is" cue over the earlier amount.
+    # We'll construct output with canonical I0 as the final answer.
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Construct output: intermediate $1000, then "answer is" with I0's amount
+    output = f"Step 1: base is $1000, after 10% fee the answer is ${i0_amount:.2f}"
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=110
+    )
+    
+    label = label_run(run, task)
+    # Should label as I0 (the final answer with cue), not mislabel from 1000
+    assert label == "I0", f"Expected I0 for multi-step with answer cue, got {label}"
+
+
+def test_policy_qa_multi_step_extraction_case2():
+    """RE-AUDIT FIX: Multiple intermediate values → final (should extract final).
+    
+    Case: "Regular pay is $800.00 and overtime is $150.00, so the answer is $950.00."
+    Should extract 950 (final with cue), not 800 (first intermediate).
+    """
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Construct: two intermediates, then "answer is" with I0
+    output = f"Regular pay is $800.00 and overtime is $150.00, so the answer is ${i0_amount:.2f}."
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=111
+    )
+    
+    label = label_run(run, task)
+    assert label == "I0", f"Expected I0 for multi-intermediate with answer cue, got {label}"
+
+
+def test_policy_qa_multi_step_extraction_case3():
+    """RE-AUDIT FIX: Hypothetical alternative → final (should extract final).
+    
+    Case: "Using double overtime would be $1000.00, but the final answer is $950.00."
+    Should extract 950 (with "final answer" cue), not 1000 (hypothetical).
+    """
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Construct: hypothetical, then "final answer is" with I0
+    output = f"Using double overtime would be $1000.00, but the final answer is ${i0_amount:.2f}."
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=112
+    )
+    
+    label = label_run(run, task)
+    assert label == "I0", f"Expected I0 for hypothetical → final answer cue, got {label}"
+
+
+def test_policy_qa_multi_step_extraction_case4():
+    """RE-AUDIT FIX: Preliminary calc → final (should extract final with cue).
+    
+    Case: "A preliminary calculation gives 910.00, but the final answer is $950.00."
+    Should extract 950 (with "final answer" cue), not 910 (preliminary).
+    """
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Construct: preliminary (no $), then "final answer is" with I0
+    output = f"A preliminary calculation gives 910.00, but the final answer is ${i0_amount:.2f}."
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=113
+    )
+    
+    label = label_run(run, task)
+    assert label == "I0", f"Expected I0 for preliminary → final answer cue, got {label}"
+
+
+def test_policy_qa_multi_step_extraction_case5():
+    """RE-AUDIT FIX: Multiple inputs → final (should extract final with cue).
+    
+    Case: "There are 45 hours and $20.00/hour; final gross pay is $950.00."
+    Should extract 950 (with "gross pay is" cue), not 20 (rate input).
+    """
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Construct: inputs (20/hour), then "gross pay is" with I0
+    output = f"There are 45 hours and $20.00/hour; final gross pay is ${i0_amount:.2f}."
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=114
+    )
+    
+    label = label_run(run, task)
+    assert label == "I0", f"Expected I0 for inputs → gross pay cue, got {label}"
+
+
+def test_policy_qa_json_overrides_prose():
+    """RE-AUDIT: JSON amount should win even if prose has other numbers."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Prose with wrong number, but JSON has correct I0
+    import json
+    output = f"I calculated $800.00 initially. {json.dumps({'amount': i0_amount})}"
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=115
+    )
+    
+    label = label_run(run, task)
+    # JSON should win
+    assert label == "I0", f"Expected I0 (JSON should override prose), got {label}"
+
+
+def test_policy_qa_single_amount_still_works():
+    """RE-AUDIT: Single-amount answer should still work (fallback to last)."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Just one amount, no cues
+    output = f"${i0_amount:.2f}"
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=116
+    )
+    
+    label = label_run(run, task)
+    assert label == "I0", f"Expected I0 for single amount, got {label}"
+
+
+def test_policy_qa_garbage_no_number_i_perp():
+    """RE-AUDIT: Pure garbage with no number should still → I_perp."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    output = "This is confusing and I cannot provide a numerical answer to this question."
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.3,
+        logit_conf=None,
+        seed=117
+    )
+    
+    label = label_run(run, task)
+    assert label == "I_perp", f"Expected I_perp for no-number garbage, got {label}"

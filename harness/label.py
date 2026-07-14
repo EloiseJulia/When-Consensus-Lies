@@ -77,39 +77,85 @@ def _extract_code_from_output(output: str) -> Optional[str]:
 def _extract_numeric_from_output(output: str) -> Optional[float]:
     """Extract a numeric answer from agent output (policy_qa domain).
     
-    Strategy:
-    1. Look for JSON like {"amount": 123.45}
-    2. Look for dollar amounts like $123.45 or plain numbers like 123.45
-    3. Handle prose before/after the number (e.g., "After calculation, the answer is $950.00.")
-    4. Return the numeric value as float, or None if no clear number found
+    Priority order (to handle multi-step reasoning with intermediate values):
+    1. STRUCTURED JSON: {"amount": X} or {"answer": X} takes precedence
+    2. ANSWER-CUE preference: Search for explicit final-answer markers and take
+       the amount after the LAST such marker. Markers: "final answer", "the answer is",
+       "answer:", "answer is", "total is", "total:", "gross pay is", "final ... is",
+       or "= $X" patterns.
+    3. FALLBACK: If no cues, return the LAST parseable dollar/decimal amount
+       (final answers appear last in multi-step reasoning).
     
-    FIXED: Scans ALL candidate matches (not just matches[0]) to handle prose commas.
+    This priority fixes mislabeling when answers show work (e.g., "base is $1000,
+    after fee the answer is $900" correctly extracts 900, not 1000).
     """
-    # Try JSON parsing first (most structured)
+    # 1. Try JSON parsing first (most structured)
     try:
         data = json.loads(output.strip())
-        if isinstance(data, dict) and 'amount' in data:
-            return float(data['amount'])
+        if isinstance(data, dict):
+            # Accept "amount" or "answer" field
+            if 'amount' in data:
+                return float(data['amount'])
+            elif 'answer' in data:
+                return float(data['answer'])
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
     
-    # Try to find dollar amounts or plain numbers
-    # Pattern: optional $, followed by digits with optional thousands separators and decimal
-    # CRITICAL: Must contain at least one digit (bare commas must never match)
+    # Pattern for dollar amounts or plain decimal numbers
     # Matches: $1,234.56, $950.00, 950.00, $950, 1234.56
+    # CRITICAL: Must contain at least one digit (bare commas never match)
     amount_pattern = r'\$\s*[\d,]+(?:\.\d{1,2})?|(?<!\d)[\d,]+\.\d{1,2}(?!\d)'
+    
+    # 2. Search for answer-cue markers and extract amount after the LAST marker
+    # Markers indicate final answer (case-insensitive)
+    answer_cues = [
+        r'final\s+answer\s*:?\s*',
+        r'the\s+answer\s+is\s*:?\s*',
+        r'answer\s*:\s*',
+        r'answer\s+is\s*:?\s*',
+        r'total\s+is\s*:?\s*',
+        r'total\s*:\s*',
+        r'gross\s+pay\s+is\s*:?\s*',
+        r'final\s+\w+\s+is\s*:?\s*',  # "final <anything> is"
+        r'=\s*',  # "= $X" pattern
+    ]
+    
+    # Find all cue positions and their associated amounts
+    cue_amounts = []
+    for cue_pattern in answer_cues:
+        # Find all matches of this cue pattern (case-insensitive)
+        for cue_match in re.finditer(cue_pattern, output, re.IGNORECASE):
+            cue_end = cue_match.end()
+            # Look for an amount immediately after this cue (within next 50 chars)
+            remainder = output[cue_end:cue_end + 50]
+            amount_match = re.search(amount_pattern, remainder)
+            if amount_match:
+                try:
+                    cleaned = amount_match.group().replace('$', '').replace(' ', '').replace(',', '')
+                    if cleaned and any(c.isdigit() for c in cleaned):
+                        amount = float(cleaned)
+                        # Store (cue_position, amount) to find the LAST cue
+                        cue_amounts.append((cue_end, amount))
+                except ValueError:
+                    continue
+    
+    # If we found cue-associated amounts, return the one from the LAST cue
+    if cue_amounts:
+        # Sort by position and take the last one
+        cue_amounts.sort(key=lambda x: x[0])
+        return cue_amounts[-1][1]
+    
+    # 3. FALLBACK: No cues found, return the LAST parseable amount in the text
+    # (final answers typically appear last in multi-step reasoning)
     matches = re.findall(amount_pattern, output)
     
-    # Scan ALL matches (not just matches[0]) to handle prose commas
-    for match in matches:
+    # Scan matches in REVERSE order (last to first) to prefer final amounts
+    for match in reversed(matches):
         try:
-            # Remove $ and whitespace, then strip thousands separators
             cleaned = match.replace('$', '').replace(' ', '').replace(',', '')
-            # Must contain at least one digit
             if cleaned and any(c.isdigit() for c in cleaned):
                 return float(cleaned)
         except ValueError:
-            # Try next match
             continue
     
     return None
