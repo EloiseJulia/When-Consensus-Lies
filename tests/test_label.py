@@ -573,3 +573,118 @@ def test_label_determinism():
     label2 = label_run(run2, task)
     assert label1 == label2, f"Labeling should be deterministic: {label1} vs {label2}"
     assert label1 == "I0", f"Expected I0, got {label1}"
+
+
+# ============================================================================
+# AUDIT FIX TESTS (Cross-family GPT audit findings)
+# ============================================================================
+
+def test_policy_qa_numeric_extraction_with_prose():
+    """BLOCKER FIX: policy_qa numeric extraction should handle leading prose.
+    
+    The audit found that "After calculation, the answer is $950.00." was
+    mislabeled as I_perp because the regex matched a prose comma before the
+    number. The fix scans ALL matches and requires at least one digit.
+    """
+    # Load a real policy_qa task
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    # Get the canonical I0 reference to know the expected amount
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Test cases that should all extract the number correctly
+    test_cases = [
+        # (output_string, description)
+        (f"${i0_amount:.2f}", "bare dollar amount"),
+        (f"The answer is ${i0_amount:.2f}", "simple prose prefix"),
+        (f"After calculation, the answer is ${i0_amount:.2f}.", "realistic prose with comma"),
+        (f"The total is ${i0_amount:,.2f} due today.", "thousands separator with prose"),
+        (f'{{"amount": {i0_amount}}}', "JSON format"),
+    ]
+    
+    for output, description in test_cases:
+        run = AgentRun(
+            task_id=task.id,
+            config="single",
+            model_role="tested_agents",
+            model_id="test-model",
+            output=output,
+            label="",
+            verbalized_conf=0.9,
+            logit_conf=None,
+            seed=100
+        )
+        label = label_run(run, task)
+        assert label == "I0", f"Failed for {description}: expected I0, got {label} for output: {output}"
+
+
+def test_policy_qa_numeric_extraction_no_number():
+    """BLOCKER FIX: policy_qa should return I_perp when no number is present."""
+    # Load a real policy_qa task
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    # Prose-only output with no number
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output="The policy is ambiguous and I cannot provide a specific amount.",
+        label="",
+        verbalized_conf=0.3,
+        logit_conf=None,
+        seed=101
+    )
+    
+    label = label_run(run, task)
+    assert label == "I_perp", f"Expected I_perp for no-number prose, got {label}"
+
+
+def test_real_domain_checker_loading_failure_fails_loud():
+    """MAJOR FIX: Real domains with unavailable checkers should raise, not silently mock-label.
+    
+    The audit found that checker-loading failures for real domains (code_spec,
+    data_analysis, policy_qa) silently fell back to mock hash labeling, which
+    would corrupt labels. The fix raises RuntimeError instead.
+    """
+    # Create a task with a real domain but non-existent checker
+    task = Task(
+        id="code_spec_test_001",
+        domain="code_spec",
+        prompt="Test prompt",
+        latent_spec="Full spec",
+        interpretations=[
+            Interpretation(id="I0", is_target=True, gold_check="nonexistent_checker_xyz"),
+            Interpretation(id="I1", is_target=False, gold_check="another_missing_checker"),
+        ],
+        ambiguity_level=1,
+        key_questions=["Test question"]
+    )
+    
+    # Create a run
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output="```python\ndef solution(): return 42\n```",
+        label="",
+        verbalized_conf=0.8,
+        logit_conf=None,
+        seed=102
+    )
+    
+    # Should raise RuntimeError, NOT return a mock label
+    try:
+        label = label_run(run, task)
+        # If we get here, the test fails
+        assert False, f"Expected RuntimeError for missing checkers, but got label: {label}"
+    except RuntimeError as e:
+        # Expected: should contain "gold checkers unavailable"
+        assert "gold checkers unavailable" in str(e).lower(), \
+            f"Expected 'gold checkers unavailable' in error, got: {e}"
+        assert "code_spec" in str(e), f"Expected domain 'code_spec' in error, got: {e}"

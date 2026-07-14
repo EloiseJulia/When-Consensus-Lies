@@ -79,8 +79,11 @@ def _extract_numeric_from_output(output: str) -> Optional[float]:
     
     Strategy:
     1. Look for JSON like {"amount": 123.45}
-    2. Look for dollar amounts like $123.45 or 123.45
-    3. Return the numeric value as float, or None if no clear number found
+    2. Look for dollar amounts like $123.45 or plain numbers like 123.45
+    3. Handle prose before/after the number (e.g., "After calculation, the answer is $950.00.")
+    4. Return the numeric value as float, or None if no clear number found
+    
+    FIXED: Scans ALL candidate matches (not just matches[0]) to handle prose commas.
     """
     # Try JSON parsing first (most structured)
     try:
@@ -91,18 +94,23 @@ def _extract_numeric_from_output(output: str) -> Optional[float]:
         pass
     
     # Try to find dollar amounts or plain numbers
-    # Pattern: optional $, digits, optional decimal and cents
-    # Match things like: $1234.56, 1234.56, $1,234.56
-    amount_pattern = r'\$?\s*([\d,]+(?:\.\d{1,2})?)'
+    # Pattern: optional $, followed by digits with optional thousands separators and decimal
+    # CRITICAL: Must contain at least one digit (bare commas must never match)
+    # Matches: $1,234.56, $950.00, 950.00, $950, 1234.56
+    amount_pattern = r'\$\s*[\d,]+(?:\.\d{1,2})?|(?<!\d)[\d,]+\.\d{1,2}(?!\d)'
     matches = re.findall(amount_pattern, output)
     
-    if matches:
-        # Take the first match and remove commas
+    # Scan ALL matches (not just matches[0]) to handle prose commas
+    for match in matches:
         try:
-            amount_str = matches[0].replace(',', '')
-            return float(amount_str)
+            # Remove $ and whitespace, then strip thousands separators
+            cleaned = match.replace('$', '').replace(' ', '').replace(',', '')
+            # Must contain at least one digit
+            if cleaned and any(c.isdigit() for c in cleaned):
+                return float(cleaned)
         except ValueError:
-            pass
+            # Try next match
+            continue
     
     return None
 
@@ -128,11 +136,14 @@ def label_code_domain(run: AgentRun, task: Task) -> str:
         return "I_perp"
     
     # Get checkers for this task's interpretations
+    # For real domains, checker-loading failure is FATAL (fail loud, not silent mock)
     try:
         checkers, _, _ = get_checkers_and_candidates(task.domain, task)
-    except (ValueError, KeyError):
-        # If checkers don't exist (e.g. mock task), fall back to mock labeling
-        return _mock_label_fallback(run, task)
+    except (ValueError, KeyError) as e:
+        # Real domain with unavailable checkers → FATAL ERROR (do not silently mock-label)
+        raise RuntimeError(
+            f"label: gold checkers unavailable for code_spec task {task.id}: {e}"
+        ) from e
     
     # Run candidate through each checker
     passed_interps = []
@@ -179,11 +190,14 @@ def label_data_domain(run: AgentRun, task: Task) -> str:
         return "I_perp"
     
     # Get checkers for this task's interpretations
+    # For real domains, checker-loading failure is FATAL (fail loud, not silent mock)
     try:
         checkers, _, _ = get_checkers_and_candidates(task.domain, task)
-    except (ValueError, KeyError):
-        # If checkers don't exist (e.g. mock task), fall back to mock labeling
-        return _mock_label_fallback(run, task)
+    except (ValueError, KeyError) as e:
+        # Real domain with unavailable checkers → FATAL ERROR (do not silently mock-label)
+        raise RuntimeError(
+            f"label: gold checkers unavailable for data_analysis task {task.id}: {e}"
+        ) from e
     
     # Run candidate through each checker
     passed_interps = []
@@ -234,11 +248,14 @@ def label_policy_domain(run: AgentRun, task: Task) -> str:
     candidate_answer = {"amount": amount}
     
     # Get checkers for this task's interpretations
+    # For real domains, checker-loading failure is FATAL (fail loud, not silent mock)
     try:
         checkers, _, _ = get_checkers_and_candidates(task.domain, task)
-    except (ValueError, KeyError):
-        # If checkers don't exist (e.g. mock task), fall back to mock labeling
-        return _mock_label_fallback(run, task)
+    except (ValueError, KeyError) as e:
+        # Real domain with unavailable checkers → FATAL ERROR (do not silently mock-label)
+        raise RuntimeError(
+            f"label: gold checkers unavailable for policy_qa task {task.id}: {e}"
+        ) from e
     
     # Run candidate through each checker
     passed_interps = []
