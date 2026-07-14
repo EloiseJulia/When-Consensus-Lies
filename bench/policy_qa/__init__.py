@@ -307,59 +307,65 @@ def problem_tip_001():
 
 
 def problem_refund_001():
-    """Prorated subscription refund with ambiguous term basis and cancellation-day counting.
+    """Merchandise return refund with restocking fee and shipping credit.
     
-    Fairness note: The TARGET (I0) uses a 365-day term and counts the cancellation
-    day as used, which are common defaults in subscription services.
+    Natural-default rationale (why TARGET I0 is the unaware default):
+    - Fee basis: Restocking fees are conventionally assessed on the merchandise
+      price, not on a reduced/adjusted base → TARGET uses original price as basis.
+    - Rounding: Monetary amounts default to cent precision (consistent with tip/
+      discount tasks) → TARGET rounds to nearest cent, not whole dollar.
+    
+    Both axes have established retail/accounting defaults that a competent solver
+    would apply if the clause is omitted.
     """
     
     spec = FullSpec(
         domain="policy_qa",
         task_id="policy_refund_001",
-        # NOTE: "cancels on day 90" (not "90 days have elapsed") leaves genuinely
-        # ambiguous whether day 90 itself counts as used; the include_cancel_day
-        # clause states the inclusive default (90 used).
-        prompt_core="""A customer paid $360.00 for a 12-month subscription and cancels on day 90 after activation. Compute the refund for the unused portion. Answer in dollars, rounded to the nearest cent.""",
+        prompt_core="""A customer returns merchandise originally priced at $360.00. The return policy includes a 10% restocking fee. Additionally, the customer receives a $19.95 shipping credit. Compute the net refund. Answer in dollars.""",
         requirement_classes=[
             RequirementClass(
-                id="year_basis",
-                description="Day-count basis for subscription term",
-                clauses=["Treat the subscription term as 365 days for proration."]
+                id="fee_basis",
+                description="Base amount for restocking fee calculation",
+                clauses=["The restocking fee is calculated on the original merchandise price."]
             ),
             RequirementClass(
-                id="include_cancel_day",
-                description="Treatment of cancellation day",
-                clauses=["Count the cancellation day itself as a used day."]
+                id="refund_rounding",
+                description="Rounding convention for refund amount",
+                clauses=["Round the refund to the nearest cent."]
             ),
         ],
         interpretations=[
-            # TARGET (I0): 365-day, 90 used -> 360 * (365-90)/365 = 271.23
+            # TARGET (I0): fee on original price, cent rounding
+            # refund = 360 - (360 * 0.10) + 19.95 = 360 - 36 + 19.95 = 343.95
             InterpretationBranch(
                 id="I0",
-                description="365-day basis, 90 used: 360 * 275/365 = 271.23.",
+                description="Fee on $360: 360 - 36 + 19.95 = $343.95.",
                 is_target=True,
-                gold_check="refund_365_90"
+                gold_check="refund_original_cent"
             ),
-            # Non-target (I1): 360-day term -> 360 * (360-90)/360 = 270.00
+            # Non-target (I1): fee on price AFTER shipping credit
+            # refund = (360 + 19.95) - ((360 + 19.95) * 0.10) = 379.95 - 37.995 = 341.955 → 341.96 (rounded to cent)
             InterpretationBranch(
                 id="I1",
-                description="If 360-day term: 360 * 270/360 = 270.00.",
+                description="If fee on adjusted base: (360+19.95)*0.9 = $341.96.",
                 is_target=False,
-                gold_check="refund_360",
-                opened_by="year_basis"
+                gold_check="refund_adjusted",
+                opened_by="fee_basis"
             ),
-            # Non-target (I2): cancel day not used (89 used) -> 360 * (365-89)/365 = 272.22
+            # Non-target (I2): round to whole dollar
+            # 343.95 rounded to nearest dollar = 344.00
             InterpretationBranch(
                 id="I2",
-                description="If cancel day not used (89 days): 360 * 276/365 = 272.22.",
+                description="If round to dollar: round(343.95) = $344.00.",
                 is_target=False,
-                gold_check="refund_89",
-                opened_by="include_cancel_day"
+                gold_check="refund_roundup",
+                opened_by="refund_rounding"
             ),
         ],
         key_questions=[
-            "Should proration treat the term as 365 or 360 days?",
-            "Does the cancellation day count as a used day?"
+            "Is the restocking fee calculated on the original price or an adjusted base?",
+            "Round the refund to the nearest cent, or the nearest whole dollar?"
         ]
     )
     
@@ -446,9 +452,9 @@ REFERENCE_ANSWERS = {
     "tip_roundup": {"amount": 8.00},
     
     # Subscription refund (policy_refund_001)
-    "refund_365_90": {"amount": 271.23},
-    "refund_360": {"amount": 270.00},
-    "refund_89": {"amount": 272.22},
+    "refund_original_cent": {"amount": 343.95},
+    "refund_adjusted": {"amount": 341.96},
+    "refund_roundup": {"amount": 344.00},
     
     # Stacked discount (policy_discount_001)
     "discount_sequential": {"amount": 74.80},
@@ -592,12 +598,13 @@ def get_task_specific_foils(task_id_base: str) -> List[Any]:
     elif "policy_refund" in task_id_base:
         return [
             # Near-miss: plausible rounding errors
-            {"amount": 271.00},  # Close to 271.23
-            {"amount": 271.50},  # Between interpretations
+            {"amount": 343.00},  # Close to 343.95
+            {"amount": 342.50},  # Between interpretations
+            {"amount": 345.00},  # Over-rounded
             # Wrong structure
-            271.23,
+            343.95,
             # String
-            "$271.23",
+            "$343.95",
         ]
     
     elif "policy_discount" in task_id_base:

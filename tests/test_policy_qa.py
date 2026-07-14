@@ -18,7 +18,7 @@ def test_checkers_exist():
         "overtime_950", "overtime_910", "overtime_1000",
         "interest_365_simple", "interest_360", "interest_compound",
         "tip_pretax", "tip_total", "tip_roundup",
-        "refund_365_90", "refund_360", "refund_89",
+        "refund_original_cent", "refund_adjusted", "refund_roundup",
         "discount_sequential", "discount_additive", "discount_roundup",
     ]
     
@@ -79,17 +79,17 @@ def test_key_questions_invariant():
             "Round the tip to the nearest cent, or up to the next whole dollar?"
         ],
         
-        # Refund (2 axes: year_basis, include_cancel_day)
+        # Refund (2 axes: fee_basis, refund_rounding)
         "policy_refund_001_k0": [],
-        "policy_refund_001_k1_year_basis": [
-            "Should proration treat the term as 365 or 360 days?"
+        "policy_refund_001_k1_fee_basis": [
+            "Is the restocking fee calculated on the original price or an adjusted base?"
         ],
-        "policy_refund_001_k1_include_cancel_day": [
-            "Does the cancellation day count as a used day?"
+        "policy_refund_001_k1_refund_rounding": [
+            "Round the refund to the nearest cent, or the nearest whole dollar?"
         ],
         "policy_refund_001_k2_all": [
-            "Should proration treat the term as 365 or 360 days?",
-            "Does the cancellation day count as a used day?"
+            "Is the restocking fee calculated on the original price or an adjusted base?",
+            "Round the refund to the nearest cent, or the nearest whole dollar?"
         ],
         
         # Discount (2 axes: stacking, price_rounding)
@@ -137,7 +137,7 @@ def test_amounts_pairwise_distinct():
         ("overtime", [950.00, 910.00, 1000.00]),
         ("interest", [147.95, 150.00, 149.03]),
         ("tip", [7.50, 8.10, 8.00]),
-        ("refund", [271.23, 270.00, 272.22]),
+        ("refund", [343.95, 341.96, 344.00]),
         ("discount", [74.80, 73.00, 75.00]),
     ]
     
@@ -205,8 +205,8 @@ def test_target_is_natural_default():
     # Tip: pre-tax, cent rounding
     assert REFERENCE_ANSWERS["tip_pretax"]["amount"] == 7.50
     
-    # Refund: 365-day, 90 used days
-    assert abs(REFERENCE_ANSWERS["refund_365_90"]["amount"] - 271.23) < 0.01
+    # Refund: fee on original price, cent rounding
+    assert abs(REFERENCE_ANSWERS["refund_original_cent"]["amount"] - 343.95) < 0.01
     
     # Discount: sequential stacking, cent rounding
     assert abs(REFERENCE_ANSWERS["discount_sequential"]["amount"] - 74.80) < 0.01
