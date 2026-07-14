@@ -351,66 +351,79 @@ def problem_count_occurrences():
 
 
 def problem_format_number():
-    """Format number with ambiguous decimal places, rounding, and sign handling."""
-    
+    """Format a float to 2 decimals with ambiguous rounding, sign, and grouping.
+
+    Fairness note (spot-check fix): the number of decimal places is FIXED in the
+    core prompt (2 dp) because "format a float" has no natural default precision.
+    The three ambiguity axes each have a clear Python-native default, so the
+    TARGET (I0) is exactly what an unaware-but-reasonable solver writes,
+    `f"{x:.2f}"`:
+      - rounding : default = round-half-to-even (Python's `format`/`round`).
+      - sign     : default = no '+' prefix on positives.
+      - grouping : default = no thousands separators.
+    Each non-target interpretation requires an EXPLICIT deviation that only makes
+    sense if a (now deleted) clause demanded it.
+    """
+
     spec = FullSpec(
         domain="code_spec",
         task_id="code_format_001",
-        # GENUINE: "formats" is neutral on precision, rounding, sign
-        prompt_core="""Write a function `format_func` that formats a floating-point number as a string with decimal places.""",
+        prompt_core="""Write a function `format_func` that formats a floating-point number as a string with exactly 2 decimal places.""",
         requirement_classes=[
             RequirementClass(
-                id="decimal_places",
-                description="Number of decimal places",
-                clauses=["Show 2 decimal places."]
-            ),
-            RequirementClass(
                 id="rounding",
-                description="Rounding mode",
-                clauses=["Round half up (0.5 rounds to 1)."]
+                description="Rounding mode on ties",
+                clauses=["Use banker's rounding (round half to even) on ties."]
             ),
             RequirementClass(
                 id="sign_display",
                 description="Sign display for positive numbers",
-                clauses=["Do not display a '+' sign for positive numbers."]
+                clauses=["Do not prefix positive numbers with a '+' sign."]
+            ),
+            RequirementClass(
+                id="grouping",
+                description="Thousands separators",
+                clauses=["Do not use thousands separators."]
             ),
         ],
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="2 decimals, round half up, no plus sign (target)",
+                description="Half-even, no sign, no grouping (target = f\"{x:.2f}\")",
                 is_target=True,
-                gold_check="format_2dec_halfup_noplus"
+                gold_check="format_halfeven"
             ),
             InterpretationBranch(
                 id="I1",
-                description="1 decimal, round half up, no plus sign",
+                description="Half-up rounding, otherwise default",
                 is_target=False,
-                gold_check="format_1dec_halfup_noplus",
-                opened_by="decimal_places"
-            ),
-            InterpretationBranch(
-                id="I2",
-                description="2 decimals, truncate, no plus sign",
-                is_target=False,
-                gold_check="format_2dec_trunc_noplus",
+                gold_check="format_halfup",
                 opened_by="rounding"
             ),
             InterpretationBranch(
-                id="I3",
-                description="2 decimals, round half up, with plus sign",
+                id="I2",
+                description="Show '+' sign on positives, otherwise default",
                 is_target=False,
-                gold_check="format_2dec_halfup_plus",
+                gold_check="format_plus",
                 opened_by="sign_display"
             ),
+            InterpretationBranch(
+                id="I3",
+                description="Thousands separators, otherwise default",
+                is_target=False,
+                gold_check="format_grouped",
+                opened_by="grouping"
+            ),
         ],
+        # Parallel to requirement_classes (same order); generate_tasks() emits
+        # only the questions for the axes actually deleted in each variant.
         key_questions=[
-            "How many decimal places should I show?",
-            "How should I round the value?",
-            "Should I display a '+' sign for positive numbers?"
+            "How should I round values on ties (round half up, or banker's rounding)?",
+            "Should I prefix positive numbers with a '+' sign?",
+            "Should I use thousands separators (e.g. 1,234.50)?"
         ]
     )
-    
+
     return spec
 
 
@@ -497,33 +510,26 @@ def count_func(text, substring):
     return count
 """,
     
-    # Format number - MAJOR 2 FIX: true half-up using Decimal
-    "format_2dec_halfup_noplus": """
+    # Format number: 2 decimals fixed; axes = rounding / sign / grouping.
+    # I0 target is exactly the natural default `f"{x:.2f}"` (half-even, no sign,
+    # no grouping); each non-target deviates on exactly one axis.
+    "format_halfeven": """
+def format_func(number):
+    return f"{number:.2f}"
+""",
+    "format_halfup": """
 def format_func(number):
     from decimal import Decimal, ROUND_HALF_UP
-    d = Decimal(str(number))
-    rounded = d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    rounded = Decimal(str(number)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     return f"{rounded:.2f}"
 """,
-    "format_1dec_halfup_noplus": """
+    "format_plus": """
 def format_func(number):
-    from decimal import Decimal, ROUND_HALF_UP
-    d = Decimal(str(number))
-    rounded = d.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
-    return f"{rounded:.1f}"
+    return f"{number:+.2f}"
 """,
-    "format_2dec_trunc_noplus": """
+    "format_grouped": """
 def format_func(number):
-    truncated = int(number * 100) / 100
-    return f"{truncated:.2f}"
-""",
-    "format_2dec_halfup_plus": """
-def format_func(number):
-    from decimal import Decimal, ROUND_HALF_UP
-    d = Decimal(str(number))
-    rounded = d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    sign = '+' if number >= 0 else ''
-    return f"{sign}{rounded:.2f}"
+    return f"{number:,.2f}"
 """,
 }
 
@@ -602,27 +608,30 @@ TEST_CASES = {
         (('aaaa', 'aa'), 3),      # Discriminating: overlapping count = 3
     ],
     
-    # Format number - MAJOR 2 FIX: tie-breaking cases where half-up != Python default
-    "format_2dec_halfup_noplus": [
-        (3.456, '3.46'),  # Half-up rounding
-        (2.675, '2.68'),  # TIE-BREAKER: true half-up gives .68, Python f-string gives .67
-        (1.005, '1.01'),  # TIE-BREAKER: true half-up gives .01, default may give .00
-        (2.5, '2.50'),
+    # Format number: 2 dp fixed. Inputs chosen so every pair of interpretations
+    # differs on at least one case:
+    #   0.125  -> half-even '0.12' vs half-up '0.13'
+    #   1234.5 -> plain '1234.50' vs grouped '1,234.50'
+    #   any +  -> no-sign vs '+' prefix
+    "format_halfeven": [
+        (0.125, '0.12'),
+        (3.5, '3.50'),
+        (1234.5, '1234.50'),
     ],
-    "format_1dec_halfup_noplus": [
-        (3.456, '3.5'),  # 1 decimal
-        (2.675, '2.7'),
-        (2.5, '2.5'),
+    "format_halfup": [
+        (0.125, '0.13'),
+        (3.5, '3.50'),
+        (1234.5, '1234.50'),
     ],
-    "format_2dec_trunc_noplus": [
-        (3.456, '3.45'),  # Truncate: .456 → .45 (different from half-up .46)
-        (2.675, '2.67'),  # Truncate gives .67
-        (2.5, '2.50'),
+    "format_plus": [
+        (0.125, '+0.12'),
+        (3.5, '+3.50'),
+        (1234.5, '+1234.50'),
     ],
-    "format_2dec_halfup_plus": [
-        (3.456, '+3.46'),  # With plus sign
-        (2.675, '+2.68'),
-        (-1.5, '-1.50'),  # Negative has minus sign
+    "format_grouped": [
+        (0.125, '0.12'),
+        (3.5, '3.50'),
+        (1234.5, '1,234.50'),
     ],
 }
 
@@ -646,10 +655,10 @@ ENTRYPOINTS = {
     "count_case_nonoverlap": "count_func",
     "count_nocase_nonoverlap": "count_func",
     "count_case_overlap": "count_func",
-    "format_2dec_halfup_noplus": "format_func",
-    "format_1dec_halfup_noplus": "format_func",
-    "format_2dec_trunc_noplus": "format_func",
-    "format_2dec_halfup_plus": "format_func",
+    "format_halfeven": "format_func",
+    "format_halfup": "format_func",
+    "format_plus": "format_func",
+    "format_grouped": "format_func",
 }
 
 for check_id, test_cases in TEST_CASES.items():
@@ -662,9 +671,19 @@ for check_id, test_cases in TEST_CASES.items():
 # ============================================================================
 
 def generate_tasks() -> List[Task]:
-    """Generate all code_spec tasks with multiple deletion patterns."""
-    
-    # BLOCKER 2 FIX: Only include problems with genuine ambiguity
+    """Generate all code_spec tasks with multiple deletion patterns.
+
+    key_questions invariant (spot-check fix): a task's key_questions are exactly
+    the clarifying questions for the axes DELETED in that variant — never the
+    full base-problem set. Hence for every emitted task:
+        len(key_questions) == ambiguity_level == len(interpretations) - 1
+    and the k=0 control has an EMPTY key_questions list. key_questions is the
+    gold for the Direction-B (false-surfacing) detector, so a stale question on
+    the control would invert that metric; this keeps it deterministic.
+    """
+
+    # Only include problems with genuine ambiguity where the TARGET is a
+    # defensible natural default.
     problems = [
         problem_sort_records(),
         problem_string_join(),
@@ -672,20 +691,37 @@ def generate_tasks() -> List[Task]:
         problem_count_occurrences(),
         problem_format_number(),
     ]
-    
+
     tasks = []
-    
+
     for base_spec in problems:
         base_id = base_spec.task_id
         n_req = len(base_spec.requirement_classes)
-        
-        # k=0 CONTROL: unambiguous
-        task_k0 = assemble_task(base_spec, k=0, classes_to_delete=[])
+
+        # Deterministic axis -> clarifying-question map (parallel by construction).
+        if len(base_spec.key_questions) != n_req:
+            raise ValueError(
+                f"{base_id}: key_questions ({len(base_spec.key_questions)}) must "
+                f"be parallel to requirement_classes ({n_req})"
+            )
+        qmap = {
+            rc.id: q
+            for rc, q in zip(base_spec.requirement_classes, base_spec.key_questions)
+        }
+
+        def _emit(spec_copy, k, delete_ids):
+            task = assemble_task(spec_copy, k=k, classes_to_delete=delete_ids)
+            # Override the full-spec key_questions with ONLY the deleted axes.
+            task.key_questions = [qmap[cid] for cid in delete_ids]
+            return task
+
+        # k=0 CONTROL: unambiguous -> no deleted axes -> no key_questions.
+        task_k0 = _emit(base_spec, 0, [])
         task_k0.id = f"{base_id}_k0"
         tasks.append(task_k0)
-        
-        # k=1: delete each requirement individually
-        for i, req_class in enumerate(base_spec.requirement_classes):
+
+        # k=1: delete each requirement individually.
+        for req_class in base_spec.requirement_classes:
             spec_copy = FullSpec(
                 domain=base_spec.domain,
                 task_id=f"{base_id}_k1_{req_class.id}",
@@ -694,10 +730,9 @@ def generate_tasks() -> List[Task]:
                 interpretations=base_spec.interpretations[:],
                 key_questions=base_spec.key_questions[:]
             )
-            task = assemble_task(spec_copy, k=1, classes_to_delete=[req_class.id])
-            tasks.append(task)
-        
-        # k=2: delete all requirements (if there are exactly 2)
+            tasks.append(_emit(spec_copy, 1, [req_class.id]))
+
+        # k=2: delete all requirements (problems with exactly 2 classes).
         if n_req == 2:
             req_ids = [rc.id for rc in base_spec.requirement_classes]
             spec_copy = FullSpec(
@@ -708,10 +743,9 @@ def generate_tasks() -> List[Task]:
                 interpretations=base_spec.interpretations[:],
                 key_questions=base_spec.key_questions[:]
             )
-            task = assemble_task(spec_copy, k=2, classes_to_delete=req_ids)
-            tasks.append(task)
-        
-        # k=3: delete all requirements (if there are exactly 3)
+            tasks.append(_emit(spec_copy, 2, req_ids))
+
+        # k=3: delete all requirements (problems with exactly 3 classes).
         if n_req == 3:
             req_ids = [rc.id for rc in base_spec.requirement_classes]
             spec_copy = FullSpec(
@@ -722,9 +756,8 @@ def generate_tasks() -> List[Task]:
                 interpretations=base_spec.interpretations[:],
                 key_questions=base_spec.key_questions[:]
             )
-            task = assemble_task(spec_copy, k=3, classes_to_delete=req_ids)
-            tasks.append(task)
-    
+            tasks.append(_emit(spec_copy, 3, req_ids))
+
     return tasks
 
 
@@ -828,25 +861,18 @@ def count_func(text, substring):
     
     elif "code_format" in task_id_base:
         return [
-            # Near-miss: naive f-string (MAJOR 2 FIX: this MUST fail half-up checker on ties)
-            """
-def format_func(number):
-    return f"{number:.2f}"
-""",
-            # Near-miss: uses round() which is half-to-even, not half-up
+            # Near-miss: half-even via round() — must be REJECTED by the half-up
+            # checker (matches at most the half-even target).
             """
 def format_func(number):
     return f"{round(number, 2):.2f}"
 """,
-            # Near-miss: correct half-up but wrong precision
+            # Near-miss: wrong precision (matches no interpretation).
             """
 def format_func(number):
-    from decimal import Decimal, ROUND_HALF_UP
-    d = Decimal(str(number))
-    rounded = d.quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
-    return f"{rounded:.2f}"
+    return f"{number:.1f}"
 """,
-            # Wrong: returns number instead of string
+            # Wrong: returns a number instead of a string.
             """
 def format_func(number):
     return number
@@ -913,9 +939,3 @@ if __name__ == "__main__":
     print(f"Generated {len(tasks)} code_spec tasks -> {output_path}")
     levels = {k: sum(1 for t in tasks if t.ambiguity_level == k) for k in range(4)}
     print(f"Ambiguity distribution: {levels}")
-    print("\nFixed issues:")
-    print("  ✓ BLOCKER 1: Entrypoint resolution (allows helpers + imports)")
-    print("  ✓ BLOCKER 2: Removed straw ambiguities (filter/sum/max)")
-    print("  ✓ MAJOR 1: Sandboxing + timeout")
-    print("  ✓ MAJOR 2: Tie-breaking tests for rounding")
-    print("  ✓ MAJOR 3: Task-specific near-miss foils")

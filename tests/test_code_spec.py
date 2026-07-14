@@ -21,12 +21,34 @@ def test_checkers_exist():
         "join_space_keep", "join_concat_keep", "join_space_skip",
         "csv_strip_empty", "csv_keep_empty", "csv_strip_none",
         "count_case_nonoverlap", "count_nocase_nonoverlap", "count_case_overlap",
-        "format_2dec_halfup_noplus", "format_1dec_halfup_noplus", "format_2dec_trunc_noplus", "format_2dec_halfup_plus",
+        "format_halfeven", "format_halfup", "format_plus", "format_grouped",
     ]
     
     for checker_id in required_checkers:
         assert checker_id in CHECKERS, f"Missing checker: {checker_id}"
         assert checker_id in REFERENCE_IMPLEMENTATIONS, f"Missing reference: {checker_id}"
+
+
+def test_key_questions_invariant():
+    """GOLDEN: key_questions == deleted axes for every variant (deterministic).
+
+    Enforces len(key_questions) == ambiguity_level == len(interpretations) - 1,
+    and that the k=0 control carries ZERO key_questions. key_questions is the
+    gold for the Direction-B (false-surfacing) detector; a stale question would
+    invert that metric and destroy the unambiguous control.
+    """
+    tasks = generate_tasks()
+    assert tasks, "no tasks generated"
+    for t in tasks:
+        assert len(t.key_questions) == t.ambiguity_level, \
+            f"{t.id}: {len(t.key_questions)} questions != k={t.ambiguity_level}"
+        assert t.ambiguity_level == len(t.interpretations) - 1, \
+            f"{t.id}: k={t.ambiguity_level} != interpretations-1={len(t.interpretations) - 1}"
+        if t.ambiguity_level == 0:
+            assert t.key_questions == [], f"{t.id}: control must have no key_questions"
+        # No duplicate questions within a variant.
+        assert len(set(t.key_questions)) == len(t.key_questions), \
+            f"{t.id}: duplicate key_questions"
 
 
 def test_blocker1_helper_functions_accepted():
@@ -56,7 +78,7 @@ def format_func(number):
     return f"{rounded:.2f}"
 """
     
-    checker = CHECKERS["format_2dec_halfup_noplus"]
+    checker = CHECKERS["format_halfup"]
     result = checker.check(candidate_with_import)
     assert result.passed, f"Checker rejected candidate with import: {result.details}"
 
@@ -115,21 +137,21 @@ def sort_func(records):
     assert "boom" in result.details or "raised" in result.details.lower() or "error" in result.details.lower()
 
 
-def test_major2_naive_fstring_rejected_by_halfup():
-    """MAJOR 2 FIX: Naive f-string formatting FAILS half-up checker on tie cases."""
+def test_format_natural_default_is_target_and_rejected_by_halfup():
+    """Fairness: the natural default `f"{x:.2f}"` (half-even) IS the target and
+    must be REJECTED by the half-up checker (they differ on 0.125)."""
     naive_formatter = """
 def format_func(number):
     return f"{number:.2f}"
 """
-    
-    checker = CHECKERS["format_2dec_halfup_noplus"]
-    result = checker.check(naive_formatter)
-    assert not result.passed, \
-        f"Naive f-string should FAIL half-up checker on tie-breaking cases, but got: {result.details}"
+    assert CHECKERS["format_halfeven"].check(naive_formatter).passed, \
+        "Natural f-string default must PASS the half-even target checker"
+    assert not CHECKERS["format_halfup"].check(naive_formatter).passed, \
+        "Natural f-string default must FAIL the half-up checker (0.125 -> 0.12 vs 0.13)"
 
 
-def test_major2_true_halfup_passes():
-    """MAJOR 2 FIX: True half-up implementation passes."""
+def test_format_halfup_passes_its_checker():
+    """A true half-up implementation passes the half-up checker."""
     true_halfup = """
 def format_func(number):
     from decimal import Decimal, ROUND_HALF_UP
@@ -138,7 +160,7 @@ def format_func(number):
     return f"{rounded:.2f}"
 """
     
-    checker = CHECKERS["format_2dec_halfup_noplus"]
+    checker = CHECKERS["format_halfup"]
     result = checker.check(true_halfup)
     assert result.passed, f"True half-up should pass: {result.details}"
 
@@ -225,7 +247,10 @@ def test_task_generation():
         assert task.latent_spec, "Task missing latent_spec"
         assert len(task.interpretations) >= 1, "Task has no interpretations"
         assert task.ambiguity_level >= 0, "Invalid ambiguity level"
-        assert len(task.key_questions) > 0, "Task has no key questions"
+        # key_questions == deleted axes: empty for the k=0 control, else k of them
+        # (see test_key_questions_invariant for the full golden check).
+        assert len(task.key_questions) == task.ambiguity_level, \
+            f"{task.id}: key_questions must equal ambiguity_level"
         
         # Check target interpretation
         targets = [i for i in task.interpretations if i.is_target]
