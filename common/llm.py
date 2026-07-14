@@ -48,7 +48,9 @@ class LLMClient:
         role: str,
         prompt: str,
         seed: Optional[int] = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        family: Optional[str] = None,
+        model: Optional[str] = None
     ) -> Completion:
         """Generate completion for a given role and prompt.
         
@@ -57,6 +59,8 @@ class LLMClient:
             prompt: Input prompt
             seed: Random seed for reproducibility (uses global seed if None)
             max_retries: Number of retry attempts on failure
+            family: Optional explicit model family (overrides role-based routing)
+            model: Optional explicit model name (overrides role-based routing)
         
         Returns:
             Completion object with text and metadata
@@ -65,7 +69,7 @@ class LLMClient:
             seed = self.config["seeds"]["global"]
         
         # Check cache first
-        cache_key = self._cache_key(role, prompt, seed)
+        cache_key = self._cache_key(role, prompt, seed, family, model)
         cached = self._read_cache(cache_key)
         if cached:
             return cached
@@ -73,7 +77,7 @@ class LLMClient:
         # Generate completion (with retry wrapper for TRANSIENT errors only)
         for attempt in range(max_retries):
             try:
-                completion = self._generate(role, prompt, seed)
+                completion = self._generate(role, prompt, seed, family, model)
                 self._write_cache(cache_key, completion)
                 self._log_cost(role, prompt, completion)
                 return completion
@@ -86,31 +90,38 @@ class LLMClient:
         
         raise RuntimeError("Max retries exceeded")
     
-    def _generate(self, role: str, prompt: str, seed: int) -> Completion:
+    def _generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> Completion:
         """Generate completion (offline mock mode by default)."""
         if self.offline:
-            return self._mock_generate(role, prompt, seed)
+            return self._mock_generate(role, prompt, seed, family, model)
         else:
             # Real API calls would go here (Phase 1+)
             raise NotImplementedError("Online mode deferred to Phase 1")
     
-    def _mock_generate(self, role: str, prompt: str, seed: int) -> Completion:
+    def _mock_generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> Completion:
         """Deterministic mock generation for offline operation.
         
-        Output is a stable hash of (role, prompt, seed) to ensure reproducibility.
+        Output is a stable hash of (family, model, prompt, seed) to ensure reproducibility
+        and proper heterogeneous provenance (different models → different outputs).
         """
-        # Derive deterministic output from inputs
-        content = f"{role}|{prompt}|{seed}"
+        # Resolve model info (explicit params override role-based routing)
+        if family is not None and model is not None:
+            model_family = family
+            model_name = model
+        else:
+            from common.config import model_for_role
+            model_info = model_for_role(role, self.config)
+            model_family = model_info["family"]
+            model_name = model_info["model"]
+        
+        # Derive deterministic output from inputs INCLUDING family/model
+        # (critical for heterogeneous provenance: different models must yield different outputs)
+        content = f"{model_family}|{model_name}|{prompt}|{seed}"
         hash_obj = hashlib.sha256(content.encode('utf-8'))
         hash_hex = hash_obj.hexdigest()
         
         # Generate mock output that varies by hash
         mock_text = f"MOCK_OUTPUT_{hash_hex[:16]}"
-        
-        # Resolve model name from config. Fail fast on unknown roles rather than
-        # fabricating "mock-model" provenance (a silent failure this project studies).
-        from common.config import model_for_role
-        model_name = model_for_role(role, self.config)["model"]
         
         return Completion(
             text=mock_text,
@@ -129,7 +140,7 @@ class LLMClient:
         info = model_for_role(role, self.config)
         return f"{info['family']}:{info['model']}"
 
-    def _cache_key(self, role: str, prompt: str, seed: int) -> str:
+    def _cache_key(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> str:
         """Generate cache key from inputs.
 
         Includes the execution mode (offline vs online) and the resolved
@@ -139,7 +150,14 @@ class LLMClient:
         provenance.
         """
         mode = "offline" if self.offline else "online"
-        content = f"{mode}|{self._role_identity(role)}|{role}|{prompt}|{seed}"
+        
+        # Use explicit family/model if provided, otherwise resolve from role
+        if family is not None and model is not None:
+            identity = f"{family}:{model}"
+        else:
+            identity = self._role_identity(role)
+        
+        content = f"{mode}|{identity}|{role}|{prompt}|{seed}"
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
     
     def _read_cache(self, cache_key: str) -> Optional[Completion]:

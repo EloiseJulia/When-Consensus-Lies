@@ -30,8 +30,8 @@ def test_smoke_pipeline():
     config = load_config()
     client = LLMClient(config, offline=True)
     
-    # Run task (mock mode)
-    runs = run_task(task, config="single", client=client, n_agents=5)
+    # Run task with sc config (k=5 samples)
+    runs = run_task(task, config="sc", client=client, k=5)
     
     # Verify runs were generated
     assert len(runs) == 5
