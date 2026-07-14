@@ -97,58 +97,25 @@ class CodeChecker(GoldChecker):
             "test_cases": self._serialize_cases(),
         })
 
-        # The verdict is written to this dedicated file (not stdout), so benign
-        # candidate output can never corrupt it.
+        # The verdict is written to a dedicated file by the supervisor.
+        # The supervisor handles all isolation and process tree management.
         fd, verdict_path = tempfile.mkstemp(prefix="codespec_verdict_", suffix=".json")
         os.close(fd)
-        
-        # MAJOR FIX #3: On Windows, use CREATE_NEW_PROCESS_GROUP + taskkill /T
-        # to kill entire process tree on timeout. On Unix, use process groups.
-        process = None
         try:
             try:
-                if sys.platform == "win32":
-                    # Windows: Use CREATE_NEW_PROCESS_GROUP so we can kill the tree
-                    CREATE_NEW_PROCESS_GROUP = 0x00000200
-                    process = subprocess.Popen(
-                        [sys.executable, _RUNNER_PATH, verdict_path],
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        creationflags=CREATE_NEW_PROCESS_GROUP,
-                    )
-                    try:
-                        process.communicate(input=payload.encode('utf-8'), timeout=_TIMEOUT_SECONDS)
-                    except subprocess.TimeoutExpired:
-                        # Kill the entire process tree using taskkill /F /T
-                        try:
-                            subprocess.run(
-                                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                timeout=2,
-                            )
-                        except Exception:
-                            # Fallback: just kill the main process
-                            process.kill()
-                        process.wait(timeout=1)
-                        result = (False, "Execution timeout (infinite loop or too slow)")
-                        _RESULT_CACHE[cache_key] = result
-                        return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
-                else:
-                    # Unix-like: use process group and start_new_session
-                    subprocess.run(
-                        [sys.executable, _RUNNER_PATH, verdict_path],
-                        input=payload,
-                        text=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=_TIMEOUT_SECONDS,
-                        start_new_session=True,  # Create new process group
-                    )
+                # Simple subprocess.run - the supervisor (_runner.py) handles
+                # all candidate isolation and process tree killing on timeout
+                subprocess.run(
+                    [sys.executable, _RUNNER_PATH, verdict_path],
+                    input=payload,
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=_TIMEOUT_SECONDS * 2,  # Allow supervisor its own timeout budget
+                )
             except subprocess.TimeoutExpired:
-                # Fallback for subprocess.run on Unix
-                result = (False, "Execution timeout (infinite loop or too slow)")
+                # Supervisor itself timed out (shouldn't happen in practice)
+                result = (False, "Supervisor timeout (unexpected)")
                 _RESULT_CACHE[cache_key] = result
                 return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
 

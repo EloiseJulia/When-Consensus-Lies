@@ -1,14 +1,18 @@
 """Isolated candidate-execution runner for the code_spec domain.
 
-SECURITY FIX: The candidate code now runs in a worker process that NEVER
-receives the verdict path. The worker returns test results over stdout, and the
-supervisor (this script when called with a verdict path) compares results to
-expected values and writes the verdict. This prevents candidates from forging a
-passing verdict by writing to the verdict file or monkey-patching json.dumps.
+SECURITY FIX (3-level architecture): Complete isolation from expected outputs.
 
-Two modes:
-- Worker mode (no args): Execute candidate, emit results to stdout as JSON
-- Supervisor mode (verdict_path arg): Spawn worker, compare results, write verdict
+Architecture:
+1. Supervisor (this script with verdict_path arg): Holds gold/expected outputs 
+   and verdict path. Spawns ONE candidate worker per test case.
+2. Candidate worker (this script with input_file, output_file args): Receives 
+   ONLY test input, execs candidate code, calls entrypoint, writes output to 
+   file. NEVER sees expected outputs or verdict path.
+
+The candidate cannot forge a passing verdict because:
+- It never sees expected outputs (gold) - supervisor holds them
+- It only writes its own answer to output_file, which supervisor then checks
+- Forging stdout/output just changes the candidate's answer, not the verdict
 
 THREAT MODEL (important, and deliberately scoped): candidates are ordinary
 model-generated solutions to coding prompts, NOT adversaries trying to escape a
@@ -19,7 +23,7 @@ for a benchmark of non-adversarial code. The scientific guarantee we need is
 deterministic, correct labeling of realistic candidates plus robustness against
 crashes/hangs — both of which this provides.
 
-Job schema (stdin, one JSON object):
+Supervisor job schema (stdin, one JSON object):
     {
       "candidate": "<python source string>",
       "entrypoint": "sort_func",
@@ -29,17 +33,23 @@ Job schema (stdin, one JSON object):
       ]
     }
 
-Worker output (stdout, JSON):
-    {"status": "results", "results": [{"test": 1, "result": <val>, "input": <val>}, ...]}
+Candidate worker input file (JSON):
+    {"candidate": "<code>", "entrypoint": "func_name", "input": <test_input>, "multi": bool}
+
+Candidate worker output file (JSON):
+    {"status": "ok", "result": <value>}
     OR {"status": "error", "message": "..."}
 
-Verdict (written by supervisor to verdict_path, one JSON object):
+Verdict (written by supervisor to verdict_path):
     {"status": "pass"|"fail"|"error", "message": "..."}
 """
 
 import json
+import os
+import signal
 import subprocess
 import sys
+import tempfile
 
 
 FLOAT_TOL = 1e-9
@@ -101,131 +111,224 @@ def _resolve_entrypoint(namespace, entrypoint):
     )
 
 
-def worker_main():
-    """WORKER MODE: execute candidate code and emit test results to stdout.
+def candidate_worker_main(input_file, output_file):
+    """CANDIDATE WORKER: Execute candidate code with ONLY test input.
     
-    The worker NEVER receives the verdict path. It only executes the candidate
-    and outputs test results. The supervisor compares results to expected values
-    and makes the pass/fail decision.
+    This process NEVER sees expected outputs or verdict path. It receives only:
+    - candidate code
+    - entrypoint name  
+    - test input
+    
+    It writes only its computed result to output_file. The supervisor compares
+    this result to the expected output (which the candidate never sees).
+    """
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            job = json.load(f)
+    except Exception as exc:  # noqa: BLE001
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"status": "error", "message": f"bad input: {exc}"}))
+        except OSError:
+            pass
+        return
+
+    candidate = job["candidate"]
+    entrypoint = job["entrypoint"]
+    test_input = job["input"]
+    multi = job["multi"]
+
+    namespace = {"__name__": "__main__"}
+    try:
+        exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
+    except Exception as exc:  # noqa: BLE001
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
+        except OSError:
+            pass
+        return
+
+    func, err = _resolve_entrypoint(namespace, entrypoint)
+    if func is None:
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"status": "error", "message": err}))
+        except OSError:
+            pass
+        return
+
+    # Execute the test case
+    try:
+        if multi:
+            result = func(*test_input)
+        else:
+            result = func(test_input)
+        
+        # Write the candidate's answer to output file
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"status": "ok", "result": result}))
+    except Exception as exc:  # noqa: BLE001
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"status": "error", "message": f"Test raised: {exc}"}))
+        except OSError:
+            pass
+
+
+def _kill_process_tree(pid):
+    """Kill a process and all its descendants.
+    
+    MAJOR FIX #3: Kill the entire process tree, not just the parent.
+    """
+    if sys.platform == "win32":
+        # Windows: Use taskkill /F /T to kill tree
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+        except Exception:
+            pass
+    else:
+        # Unix: Kill process group
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except Exception:
+            pass
+
+
+def supervisor_main(verdict_path):
+    """SUPERVISOR: Spawn candidate workers, compare outputs to gold, write verdict.
+    
+    The supervisor holds the expected outputs (gold) and verdict path. For each
+    test case, it spawns a candidate worker that receives ONLY the input, gets
+    back only the candidate's output, and compares that to gold.
+    
+    The candidate never sees expected outputs, so it cannot forge a pass by
+    reading them or by printing forged results.
     """
     try:
         job = json.loads(sys.stdin.read())
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"status": "error", "message": f"bad job: {exc}"}))
+        _emit_verdict(verdict_path, "error", f"bad job: {exc}")
         return
 
     candidate = job["candidate"]
     entrypoint = job["entrypoint"]
     test_cases = job["test_cases"]
 
-    namespace = {"__name__": "__main__"}
-    try:
-        exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
-    except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"status": "error", "message": f"Execution error: {exc}"}))
-        return
-
-    func, err = _resolve_entrypoint(namespace, entrypoint)
-    if func is None:
-        print(json.dumps({"status": "error", "message": err}))
-        return
-
-    # Execute all test cases and collect results
-    results = []
-    for i, tc in enumerate(test_cases):
-        inp = tc["input"]
-        try:
-            if tc["multi"]:
-                result = func(*inp)
-            else:
-                result = func(inp)
-            # Convert result to JSON-serializable form
-            results.append({"test": i + 1, "result": result, "input": inp})
-        except Exception as exc:  # noqa: BLE001
-            print(json.dumps({
-                "status": "error",
-                "message": f"Test {i + 1} raised: {exc}",
-                "test": i + 1
-            }))
-            return
-
-    # Return all test results for the supervisor to judge
-    print(json.dumps({"status": "results", "results": results}))
-
-
-def supervisor_main(verdict_path):
-    """SUPERVISOR MODE: spawn worker, compare results to gold, write verdict.
-    
-    The supervisor makes the pass/fail decision and is the ONLY code that
-    writes to the verdict file. The candidate code never sees the verdict path.
-    """
-    try:
-        job_input = sys.stdin.read()
-        job = json.loads(job_input)
-    except Exception as exc:  # noqa: BLE001
-        _emit_verdict(verdict_path, "error", f"bad job: {exc}")
-        return
-
-    test_cases = job["test_cases"]
-
-    # Spawn worker subprocess (no verdict path in args!)
-    try:
-        result = subprocess.run(
-            [sys.executable, __file__],  # Worker mode (no args)
-            input=job_input,
-            text=True,
-            capture_output=True,
-            timeout=TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        _emit_verdict(verdict_path, "fail", "Execution timeout (infinite loop or too slow)")
-        return
-    except Exception as exc:  # noqa: BLE001
-        _emit_verdict(verdict_path, "error", f"Worker subprocess failed: {exc}")
-        return
-
-    # Parse worker output
-    try:
-        worker_result = json.loads(result.stdout)
-    except Exception as exc:  # noqa: BLE001
-        _emit_verdict(verdict_path, "error", f"Invalid worker output: {exc}")
-        return
-
-    if worker_result.get("status") == "error":
-        _emit_verdict(verdict_path, "error", worker_result.get("message", "Unknown error"))
-        return
-
-    if worker_result.get("status") != "results":
-        _emit_verdict(verdict_path, "error", "Worker did not return results")
-        return
-
-    # Compare worker results to expected values (SUPERVISOR DECIDES, not worker)
-    results = worker_result.get("results", [])
-    if len(results) != len(test_cases):
-        _emit_verdict(verdict_path, "error",
-                     f"Expected {len(test_cases)} results, got {len(results)}")
-        return
-
-    for i, (res, tc) in enumerate(zip(results, test_cases)):
-        expected = tc["expected"]
-        actual = res["result"]
+    # Run ONE candidate worker per test case (no multiplexing)
+    for test_num, tc in enumerate(test_cases, 1):
+        # Create temp files for input/output communication
+        fd_in, input_file = tempfile.mkstemp(prefix=f"codespec_input_{test_num}_", suffix=".json")
+        os.close(fd_in)
+        fd_out, output_file = tempfile.mkstemp(prefix=f"codespec_output_{test_num}_", suffix=".json")
+        os.close(fd_out)
         
-        if not _compare(actual, expected):
-            _emit_verdict(verdict_path, "fail",
-                         f"Test {i + 1} failed: input={res['input']!r}, "
-                         f"expected={expected!r}, got={actual!r}")
-            return
-
+        try:
+            # Write input for this test case (NO expected output!)
+            worker_input = {
+                "candidate": candidate,
+                "entrypoint": entrypoint,
+                "input": tc["input"],
+                "multi": tc["multi"],
+            }
+            with open(input_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps(worker_input))
+            
+            # Spawn candidate worker subprocess
+            # MAJOR FIX #3: Put candidate in process group for tree killing
+            try:
+                if sys.platform == "win32":
+                    CREATE_NEW_PROCESS_GROUP = 0x00000200
+                    process = subprocess.Popen(
+                        [sys.executable, __file__, input_file, output_file],
+                        creationflags=CREATE_NEW_PROCESS_GROUP,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    process = subprocess.Popen(
+                        [sys.executable, __file__, input_file, output_file],
+                        start_new_session=True,  # New process group
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                
+                # Wait with timeout
+                try:
+                    process.wait(timeout=TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    # Kill the entire process tree
+                    _kill_process_tree(process.pid)
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    _emit_verdict(verdict_path, "fail", 
+                                f"Test {test_num} timeout (infinite loop or too slow)")
+                    return
+                
+            except Exception as exc:  # noqa: BLE001
+                _emit_verdict(verdict_path, "error", f"Worker spawn failed: {exc}")
+                return
+            
+            # Read candidate's output
+            try:
+                with open(output_file, "r", encoding="utf-8") as f:
+                    output = json.load(f)
+            except Exception as exc:  # noqa: BLE001
+                _emit_verdict(verdict_path, "error", 
+                            f"Test {test_num}: No/invalid output: {exc}")
+                return
+            
+            if output.get("status") == "error":
+                _emit_verdict(verdict_path, "error", 
+                            f"Test {test_num}: {output.get('message', 'Unknown error')}")
+                return
+            
+            if output.get("status") != "ok":
+                _emit_verdict(verdict_path, "error", 
+                            f"Test {test_num}: Invalid output status")
+                return
+            
+            # Compare candidate's result to expected (SUPERVISOR DECIDES)
+            result = output.get("result")
+            expected = tc["expected"]
+            
+            if not _compare(result, expected):
+                _emit_verdict(verdict_path, "fail",
+                            f"Test {test_num} failed: input={tc['input']!r}, "
+                            f"expected={expected!r}, got={result!r}")
+                return
+                
+        finally:
+            # Clean up temp files
+            try:
+                os.unlink(input_file)
+            except OSError:
+                pass
+            try:
+                os.unlink(output_file)
+            except OSError:
+                pass
+    
+    # All tests passed
     _emit_verdict(verdict_path, "pass", f"All {len(test_cases)} tests passed")
 
 
 def main():
-    # Worker mode: no command-line args (spawned by supervisor)
-    if len(sys.argv) == 1:
-        worker_main()
+    # Candidate worker mode: input_file output_file args
+    if len(sys.argv) == 3:
+        input_file = sys.argv[1]
+        output_file = sys.argv[2]
+        candidate_worker_main(input_file, output_file)
         return
 
-    # Supervisor mode: verdict path provided
+    # Supervisor mode: verdict_path arg
     if len(sys.argv) < 2:
         sys.stderr.write("runner: missing verdict path argument\n")
         return
