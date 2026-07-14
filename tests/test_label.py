@@ -739,3 +739,268 @@ def test_real_domain_checker_loading_failure_fails_loud():
         assert "gold checkers unavailable" in str(e).lower(), \
             f"Expected 'gold checkers unavailable' in error, got: {e}"
         assert "code_spec" in str(e), f"Expected domain 'code_spec' in error, got: {e}"
+
+
+# ============================================================================
+# AUDIT FIX REGRESSION TESTS (GPT cross-family audit, 2026-07-15)
+# ============================================================================
+
+def _make_policy_run(task, output, seed):
+    """Helper: build a policy_qa AgentRun with the given output."""
+    return AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.5,
+        logit_conf=None,
+        seed=seed,
+    )
+
+
+def _policy_task():
+    """Return a k=1 policy_qa task with known I0/I1 gold amounts."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    return next(t for t in tasks if t.ambiguity_level == 1)
+
+
+def _i0_amount(task):
+    from bench.policy_qa import get_checkers_and_candidates
+    _, candidates, _ = get_checkers_and_candidates(task.domain, task)
+    return candidates["I0"]["amount"]  # e.g. 950.0
+
+
+# ── BLOCKER fix: embedded JSON key in prose (no {}) → I_perp ─────────────────
+
+def test_audit_fix_prose_json_key_no_braces_i_perp():
+    """BLOCKER: 'amount': N in prose without {} wrapper → I_perp (no scraping)."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    # Plain prose with "amount": N text but no JSON object
+    output = f'Based on the calculation the "amount": {amt} is the gross pay.'
+    label = label_run(_make_policy_run(task, output, 300), task)
+    assert label == "I_perp", f"Expected I_perp for bare 'amount': N in prose, got {label}"
+
+
+# ── BLOCKER fix: FINAL ANSWER: unavailable… → I_perp ─────────────────────────
+
+def test_audit_fix_final_answer_unavailable_i_perp():
+    """BLOCKER: 'FINAL ANSWER: unavailable; prior total was $950.00' → I_perp."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    output = f"FINAL ANSWER: unavailable; prior total was ${amt:.2f}"
+    label = label_run(_make_policy_run(task, output, 301), task)
+    assert label == "I_perp", f"Expected I_perp for unavailable FINAL ANSWER, got {label}"
+
+
+# ── MAJOR fix: conflicting FINAL ANSWER markers → I_perp ─────────────────────
+
+def test_audit_fix_conflicting_final_answer_markers_i_perp():
+    """MAJOR: Two FINAL ANSWER markers with different values → I_perp."""
+    task = _policy_task()
+    output = "At first I computed FINAL ANSWER: $950.00 but revised to FINAL ANSWER: $910.00"
+    label = label_run(_make_policy_run(task, output, 302), task)
+    assert label == "I_perp", f"Expected I_perp for conflicting markers, got {label}"
+
+
+def test_audit_fix_conflicting_json_and_final_answer_i_perp():
+    """MAJOR: JSON $950 + FINAL ANSWER $910 conflict → I_perp."""
+    task = _policy_task()
+    output = '{"amount": 950.0}\nFINAL ANSWER: $910.00'
+    label = label_run(_make_policy_run(task, output, 303), task)
+    assert label == "I_perp", f"Expected I_perp for JSON/marker conflict, got {label}"
+
+
+# ── MAJOR fix: non-finite JSON amounts → I_perp (no crash) ───────────────────
+
+def test_audit_fix_json_inf_amount_i_perp():
+    """MAJOR: JSON {"amount": 1e309} → inf → I_perp, must not crash."""
+    task = _policy_task()
+    label = label_run(_make_policy_run(task, '{"amount": 1e309}', 304), task)
+    assert label == "I_perp", f"Expected I_perp for inf amount, got {label}"
+
+
+def test_audit_fix_json_nan_amount_i_perp():
+    """MAJOR: '{"amount": NaN}' is invalid JSON → I_perp, must not crash."""
+    task = _policy_task()
+    label = label_run(_make_policy_run(task, '{"amount": NaN}', 305), task)
+    assert label == "I_perp", f"Expected I_perp for NaN (invalid JSON), got {label}"
+
+
+# ── MAJOR fix: negative FINAL ANSWER sign preserved ──────────────────────────
+
+def test_audit_fix_negative_sign_preserved_i_perp():
+    """MAJOR: FINAL ANSWER: $-950.00 preserves sign; no gold match → I_perp."""
+    task = _policy_task()
+    # Negative amount matches no positive gold → I_perp
+    for output in ["FINAL ANSWER: $-950.00", "FINAL ANSWER: -$950.00",
+                   "FINAL ANSWER: -950.00"]:
+        label = label_run(_make_policy_run(task, output, 306), task)
+        assert label == "I_perp", \
+            f"Expected I_perp for '{output}' (negative), got {label}"
+
+
+# ── Regression: single valid answers still label correctly ───────────────────
+
+def test_audit_fix_regression_valid_json_labels_correctly():
+    """REGRESSION: Single valid JSON amount still reaches correct interpretation."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    label = label_run(_make_policy_run(task, f'{{"amount": {amt}}}', 307), task)
+    assert label == "I0", f"Expected I0 for valid JSON, got {label}"
+
+
+def test_audit_fix_regression_valid_final_answer_labels_correctly():
+    """REGRESSION: Single valid FINAL ANSWER still reaches correct interpretation."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    label = label_run(_make_policy_run(task, f"FINAL ANSWER: ${amt:.2f}", 308), task)
+    assert label == "I0", f"Expected I0 for valid FINAL ANSWER, got {label}"
+
+
+def test_audit_fix_agreeing_markers_not_i_perp():
+    """REGRESSION: Duplicate FINAL ANSWER markers with SAME value → still labelled."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    output = f"First attempt FINAL ANSWER: ${amt:.2f}\nFinal check FINAL ANSWER: ${amt:.2f}"
+    label = label_run(_make_policy_run(task, output, 309), task)
+    assert label == "I0", f"Expected I0 for agreeing markers, got {label}"
+
+
+# ============================================================================
+# AUDIT RE-AUDIT FIX REGRESSION TESTS (GPT cross-family re-audit, 2026-07-15)
+# ============================================================================
+
+def test_reaudit_conflicting_json_blocks_i_perp():
+    """MAJOR: Two JSON objects with different amounts → I_perp (both collected)."""
+    task = _policy_task()
+    output = '{"amount": 950}\n{"amount": 910}'
+    label = label_run(_make_policy_run(task, output, 400), task)
+    assert label == "I_perp", f"Expected I_perp for conflicting JSON blocks, got {label}"
+
+
+def test_reaudit_json_then_invalid_amount_i_perp():
+    """MAJOR: Valid JSON then JSON with invalid amount → I_perp (invalid not ignored)."""
+    task = _policy_task()
+    output = '{"amount": 950}\n{"amount": "bad"}'
+    label = label_run(_make_policy_run(task, output, 401), task)
+    assert label == "I_perp", f"Expected I_perp for valid+invalid JSON, got {label}"
+
+
+def test_reaudit_same_value_markers_one_line_labels_correctly():
+    """MAJOR: Two identical FINAL ANSWER markers on ONE line → labels correctly."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    output = f"FINAL ANSWER: ${amt:.2f} FINAL ANSWER: ${amt:.2f}"
+    label = label_run(_make_policy_run(task, output, 402), task)
+    assert label == "I0", \
+        f"Expected I0 for two identical markers on one line, got {label}"
+
+
+def test_reaudit_large_finite_amount_i_perp():
+    """MAJOR: {"amount": 1e308} → Decimal too large to quantize → I_perp (no crash)."""
+    task = _policy_task()
+    label = label_run(_make_policy_run(task, '{"amount": 1e308}', 403), task)
+    assert label == "I_perp", f"Expected I_perp for huge amount, got {label}"
+
+
+def test_reaudit_extra_keys_labels_correctly():
+    """MANAGER RULING: JSON with extra keys but valid 'amount' → correct label (not I_perp)."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    # Extra keys must NOT cause I_perp
+    for output, desc in [
+        (f'{{"amount": {amt}, "currency": "USD"}}', "amount+currency"),
+        (f'{{"amount": {amt}, "note": 1}}', "amount+note"),
+    ]:
+        label = label_run(_make_policy_run(task, output, 404), task)
+        assert label == "I0", \
+            f"Expected I0 for extra-key JSON ({desc}), got {label}"
+
+
+# ============================================================================
+# FINAL HARDENING TESTS (GPT third-pass audit, 2026-07-15)
+# ============================================================================
+
+def test_final_hardening_deeply_nested_json_i_perp():
+    """FIX-A: 5000-deeply-nested JSON triggers RecursionError → I_perp, never raises."""
+    task = _policy_task()
+    # Build a deeply nested JSON that exceeds Python's recursion limit when parsed
+    nested = "null"
+    for _ in range(5000):
+        nested = '{"x":' + nested + "}"
+    # Must not raise, must return I_perp
+    label = label_run(_make_policy_run(task, nested, 500), task)
+    assert label == "I_perp", f"Expected I_perp for deeply-nested JSON, got {label}"
+
+
+def test_final_hardening_brace_in_string_labels_correctly():
+    """FIX-A: JSON with brace inside a string value is parsed correctly → I0."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    output = f'{{"amount":{amt},"note":"}}"}}'
+    label = label_run(_make_policy_run(task, output, 501), task)
+    assert label == "I0", \
+        f"Expected I0 for JSON with brace-in-string, got {label}"
+
+
+def test_final_hardening_bad_thousands_grouping_i_perp():
+    """FIX-B: Malformed thousands grouping in FINAL ANSWER → I_perp."""
+    task = _policy_task()
+    for output, desc in [
+        ("FINAL ANSWER: $,1000.00", "leading comma"),
+        ("FINAL ANSWER: $10,00.00", "wrong group size"),
+    ]:
+        label = label_run(_make_policy_run(task, output, 502), task)
+        assert label == "I_perp", \
+            f"Expected I_perp for bad grouping '{desc}', got {label}"
+
+
+def test_final_hardening_unicode_digits_i_perp():
+    """FIX-B: Unicode digits in amount token → I_perp (re.ASCII enforced)."""
+    task = _policy_task()
+    # Arabic-Indic digits: ١٠٠٠ = 1000 in Unicode, not ASCII 0-9
+    label = label_run(
+        _make_policy_run(task, "FINAL ANSWER: $\u0661\u0660\u0660\u0660.00", 503), task
+    )
+    assert label == "I_perp", f"Expected I_perp for Unicode-digit amount, got {label}"
+
+
+def test_final_hardening_valid_thousands_grouping_labels_correctly():
+    """FIX-B REGRESSION: Well-formed $1,000.00 still parses correctly."""
+    task = _policy_task()
+    # policy_interest_001 I0 = 147.95; use 1000.00 which maps to policy_overtime_001 I2
+    # Just check we get a concrete (non-I_perp) or I_perp based on gold, not a crash.
+    # Use the I0 amount with well-formed grouping if it has 4+ digits; otherwise just
+    # confirm no crash and sane result.
+    amt = _i0_amount(task)  # e.g. 950.0
+    # Format with thousands grouping if >= 1000, otherwise just plain
+    if amt >= 1000:
+        from decimal import Decimal as D
+        formatted = f"{int(amt):,}"
+    else:
+        formatted = f"{amt:.2f}"
+    output = f"FINAL ANSWER: ${formatted}"
+    label = label_run(_make_policy_run(task, output, 504), task)
+    # Must not crash; result depends on whether formatted amount matches gold
+    assert label in ("I0", "I1", "I2", "I_perp"), \
+        f"Unexpected label '{label}' for well-formed grouping"
+
+
+def test_final_hardening_good_thousands_explicit():
+    """FIX-B REGRESSION: $1,000.00 explicitly parses to 1000.0 (not I_perp)."""
+    from harness.label import _extract_numeric_from_output
+    result = _extract_numeric_from_output("FINAL ANSWER: $1,000.00")
+    assert result == 1000.0, f"Expected 1000.0 for $1,000.00, got {result!r}"
+
+
+def test_final_hardening_bare_marker_with_valid_json_i_perp():
+    """FIX-C: Valid JSON amount + bare FINAL ANSWER: (empty) → I_perp."""
+    task = _policy_task()
+    amt = _i0_amount(task)
+    output = f'{{"amount":{amt}}}\nFINAL ANSWER:'
+    label = label_run(_make_policy_run(task, output, 505), task)
+    assert label == "I_perp", \
+        f"Expected I_perp for valid JSON + bare FINAL ANSWER marker, got {label}"

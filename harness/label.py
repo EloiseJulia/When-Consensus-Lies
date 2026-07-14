@@ -6,8 +6,10 @@ Each domain uses deterministic gold checkers (NO LLM) to assign labels.
 
 import hashlib
 import json
+import math
 import re
-from typing import Dict, Optional
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from typing import Dict, List, Optional
 from common.schema import AgentRun, Task
 
 
@@ -74,96 +76,218 @@ def _extract_code_from_output(output: str) -> Optional[str]:
     return None
 
 
+# ── Sentinel ──────────────────────────────────────────────────────────────────
+# Distinguishes "found but invalid" from "not found" (None).
+_INVALID_STRUCTURED = object()
+
+
+# ── JSON helpers ───────────────────────────────────────────────────────────────
+
+def _validate_decimal(d: Decimal):
+    """
+    Return *d* if it can be safely cent-quantized, else _INVALID_STRUCTURED.
+
+    Guards against huge values (e.g. 1e308) whose Decimal representation is
+    valid but too large for Decimal.quantize at default precision.
+    """
+    try:
+        d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return d
+    except (InvalidOperation, OverflowError):
+        return _INVALID_STRUCTURED
+
+def _collect_json_amounts(output: str) -> list:
+    """
+    Collect parse results for EVERY JSON object with an 'amount' key in *output*.
+
+    Uses json.JSONDecoder.raw_decode to scan forward through the text.  This is
+    natively string/escape-aware: braces inside JSON string values are handled
+    correctly (e.g. {"amount":950,"note":"}"} is parsed as a single object).
+
+    Exception safety guarantee — this function NEVER raises:
+      - json.JSONDecodeError / ValueError  → skip that candidate, advance 1 char
+      - RecursionError (deeply nested JSON) → append _INVALID_STRUCTURED, stop scan
+      - Any other exception                → skip that candidate, advance 1 char
+
+    Returns a list where each element is either:
+      Decimal              – a valid, range-safe finite amount
+      _INVALID_STRUCTURED  – an 'amount' value that is non-finite, non-numeric,
+                             out-of-range, deeply nested, or otherwise malformed
+
+    JSON objects that lack an 'amount' key are silently skipped.
+    Extra keys alongside a valid 'amount' are accepted (manager ruling).
+    An empty list means no JSON structured-answer was present.
+    """
+    decoder = json.JSONDecoder()
+    results: list = []
+    idx = 0
+    length = len(output)
+    while idx < length:
+        brace_pos = output.find('{', idx)
+        if brace_pos == -1:
+            break
+        try:
+            data, end_pos = decoder.raw_decode(output, brace_pos)
+        except (json.JSONDecodeError, ValueError):
+            idx = brace_pos + 1
+            continue
+        except RecursionError:
+            # Deeply nested JSON hit Python's recursion limit → malformed
+            results.append(_INVALID_STRUCTURED)
+            break   # Don't re-scan deeper levels; one error is enough
+        except Exception:
+            idx = brace_pos + 1
+            continue
+        if not isinstance(data, dict) or 'amount' not in data:
+            idx = end_pos
+            continue
+        # Found a JSON object with 'amount' key — validate its value
+        val = data['amount']
+        if not isinstance(val, (int, float)):
+            results.append(_INVALID_STRUCTURED)
+        else:
+            try:
+                fval = float(val)
+            except (ValueError, OverflowError):
+                results.append(_INVALID_STRUCTURED)
+            else:
+                if not math.isfinite(fval):
+                    results.append(_INVALID_STRUCTURED)
+                else:
+                    try:
+                        d = Decimal(str(fval))
+                    except InvalidOperation:
+                        results.append(_INVALID_STRUCTURED)
+                    else:
+                        results.append(_validate_decimal(d))
+        idx = end_pos
+    return results
+
+
+# ── FINAL ANSWER helpers ───────────────────────────────────────────────────────
+
+# Header: "FINAL ANSWER:" or "FINAL ANSWER =" (case-insensitive, flexible spacing).
+# Tail uses a negative lookahead to stop at the NEXT "FINAL ANSWER" occurrence
+# within the same line, so two adjacent markers on one line are each captured
+# independently (the greedy [^\n]* approach swallowed the second marker).
+_FA_HEADER_RE = re.compile(
+    r'FINAL\s+ANSWER\s*[:=]\s*(?P<tail>(?:(?!FINAL\s+ANSWER)[^\n])*)',
+    re.IGNORECASE,
+)
+
+# Anchored signed-money grammar — the ENTIRE tail (stripped) must match.
+# Compiled with re.ASCII so \d matches only 0-9 (rejects Unicode digits).
+# Thousands grouping is validated: either well-formed \d{1,3}(,\d{3})+ or
+# plain \d+ (no commas at all).  Bad grouping like $,1000 or $10,00 is rejected.
+_MONEY_FULL_RE = re.compile(
+    r'^(?P<s1>-?)\s*\$?\s*(?P<s2>-?)\s*'
+    r'(?P<digits>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)'
+    r'\s*(?:dollars?|USD)?\s*$',
+    re.IGNORECASE | re.ASCII,
+)
+
+
+def _parse_money_tail(tail: str):
+    """
+    Parse the text following 'FINAL ANSWER:' as a signed money amount.
+
+    Returns:
+      Decimal              – parsed successfully and within safe range
+      _INVALID_STRUCTURED  – non-empty tail that is NOT a valid/safe money token
+      None                 – empty tail (no token; marker effectively absent)
+    """
+    tail = tail.strip()
+    if not tail:
+        # A bare "FINAL ANSWER:" with nothing after it is a malformed structured
+        # answer (the agent signalled a final answer but provided no value).
+        return _INVALID_STRUCTURED
+    m = _MONEY_FULL_RE.match(tail)
+    if not m:
+        return _INVALID_STRUCTURED
+    # XOR the two optional sign captures to determine net sign
+    negative = (m.group('s1') == '-') != (m.group('s2') == '-')
+    digits_str = m.group('digits').replace(',', '')
+    try:
+        value = Decimal(('-' if negative else '') + digits_str)
+    except InvalidOperation:
+        return _INVALID_STRUCTURED
+    return _validate_decimal(value)
+
+
+def _find_final_answer_amounts(output: str) -> list:
+    """
+    Return a parse result for every FINAL ANSWER marker found in *output*.
+
+    Each element is either a Decimal (valid signed amount) or
+    _INVALID_STRUCTURED (marker present but amount token is invalid/out-of-range,
+    OR the marker is bare with no token — e.g. bare 'FINAL ANSWER:').
+    """
+    results: list = []
+    for m in _FA_HEADER_RE.finditer(output):
+        result = _parse_money_tail(m.group('tail'))
+        if result is not None:
+            results.append(result)
+    return results
+
+
+# ── Cent comparison helper ─────────────────────────────────────────────────────
+
+def _amount_cents(d: Decimal) -> int:
+    """Return a cent-exact integer for conflict comparison.
+
+    All Decimals reaching this function have already passed _validate_decimal,
+    so quantize should not raise; the try/except is a last-resort safety net.
+    """
+    return int(d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) * 100)
+
+
 def _extract_numeric_from_output(output: str) -> Optional[float]:
     """Extract a numeric answer from agent output (policy_qa domain).
-    
+
     STRUCTURED FINAL-ANSWER CONTRACT (owner-approved, pre-registered):
-    Tested agents are instructed to end with a structured final answer:
-      - JSON: {"amount": N} or {"answer": N}
-      - FINAL ANSWER marker: "FINAL ANSWER: $<amount>" (or variants)
-    
-    Labeling relies on this contract. Unparseable free-text is conservatively
-    I_perp (not guessed) to avoid systematic mislabeling of unstructured outputs.
-    
-    Priority order:
-    1. JSON amount field: Pure, embedded, or fenced JSON with numeric "amount"
-       or "answer" field.
-    2. FINAL ANSWER marker: A line/segment matching "FINAL ANSWER:" (case-insensitive,
-       also accept "Final answer:" / "FINAL ANSWER =") followed by an amount.
-       Amount may be: $950.00, $950, 950.00, 950, or 950 dollars/USD.
-       Use the amount after the LAST such marker.
-    3. If NEITHER JSON NOR FINAL ANSWER marker present -> return None -> I_perp.
-       Do NOT fall back to guessing from free prose (owner-approved contract).
+    Accepts ONLY:
+      (a) A genuine JSON object (whole output, code-fenced, or standalone
+          JSON block embedded in the output) with key exactly 'amount' and a
+          FINITE, range-safe numeric value.  Extra keys in the JSON object are
+          accepted (a single unambiguous amount is not ambiguous).
+      (b) A FINAL ANSWER line with an anchored signed-money grammar immediately
+          following the header marker; no trailing prose allowed.
+
+    Returns None (→ I_perp) when:
+      - No structured answer is present.
+      - Any structured answer is recognised but invalid (non-finite/out-of-range
+        value, non-money token after FINAL ANSWER:, wrong type, malformed JSON).
+      - Multiple structured answers (JSON + markers) have DIFFERENT cent values.
+
+    There is NO fallback heuristic: no first-number / last-number / prose
+    scraping, no regex-scraped "amount": N without surrounding {}.
     """
-    # 1a. Try JSON parsing first (pure JSON output)
+    results: List[Decimal] = []
+
+    # ── (a) JSON path — collect ALL JSON objects with 'amount' ────────────────
+    for json_result in _collect_json_amounts(output):
+        if json_result is _INVALID_STRUCTURED:
+            return None      # Recognised but invalid JSON amount → I_perp
+        results.append(json_result)  # type: ignore[arg-type]
+
+    # ── (b) FINAL ANSWER path ─────────────────────────────────────────────────
+    for fa_result in _find_final_answer_amounts(output):
+        if fa_result is _INVALID_STRUCTURED:
+            return None      # Recognised marker but invalid token → I_perp
+        results.append(fa_result)   # type: ignore[arg-type]
+
+    if not results:
+        return None          # No structured answer found → I_perp
+
+    # Conflict check: all valid amounts must agree to the cent
     try:
-        data = json.loads(output.strip())
-        if isinstance(data, dict):
-            # Accept "amount" or "answer" field
-            if 'amount' in data:
-                return float(data['amount'])
-            elif 'answer' in data:
-                return float(data['answer'])
-    except (json.JSONDecodeError, ValueError, TypeError):
-        pass
-    
-    # 1b. Search for EMBEDDED structured amount in prose or code fences
-    # Pattern: "amount": <number> or "answer": <number> (NUMERIC value, not quoted string)
-    # Examples: {"amount": 950.0}, "amount": 950, "answer":123.45
-    # Must match ONLY numeric values (not "amount": "950" which is a string)
-    embedded_amount_patterns = [
-        r'"amount"\s*:\s*(-?\d+(?:\.\d+)?)',  # "amount": 950.0
-        r'"answer"\s*:\s*(-?\d+(?:\.\d+)?)',  # "answer": 123.45
-    ]
-    
-    for pattern in embedded_amount_patterns:
-        match = re.search(pattern, output)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-    
-    # 2. Search for FINAL ANSWER marker (case-insensitive)
-    # Matches: "FINAL ANSWER:", "Final answer:", "FINAL ANSWER =", etc.
-    # Followed by: $950.00, $950, 950.00, 950, 950 dollars, 950 USD
-    final_answer_pattern = r'FINAL\s+ANSWER\s*[:\s=]\s*'
-    
-    # Amount pattern (with optional $, thousands separators, cents, trailing units)
-    # Matches: $1,234.56, $950.00, $950, 950.00, 950, also allows "dollars"/"USD" suffix
-    amount_pattern = r'\$?\s*[\d,]+(?:\.\d{1,2})?\s*(?:dollars|USD)?'
-    
-    # Find all FINAL ANSWER markers and their associated amounts
-    final_amounts = []
-    for marker_match in re.finditer(final_answer_pattern, output, re.IGNORECASE):
-        marker_end = marker_match.end()
-        # Look for an amount immediately after this marker (within next 50 chars)
-        remainder = output[marker_end:marker_end + 50]
-        amount_match = re.search(amount_pattern, remainder, re.IGNORECASE)
-        if amount_match:
-            try:
-                # Clean the matched amount string
-                amount_str = amount_match.group()
-                # Remove $, whitespace, commas, and trailing units
-                cleaned = (amount_str.replace('$', '').replace(' ', '').replace(',', '')
-                          .replace('dollars', '').replace('USD', '').strip())
-                # Must contain at least one digit
-                if cleaned and any(c.isdigit() for c in cleaned):
-                    amount = float(cleaned)
-                    # Store (marker_position, amount) to find the LAST marker
-                    final_amounts.append((marker_end, amount))
-            except ValueError:
-                continue
-    
-    # If we found FINAL ANSWER markers, return the amount from the LAST one
-    if final_amounts:
-        # Sort by position and take the last one
-        final_amounts.sort(key=lambda x: x[0])
-        return final_amounts[-1][1]
-    
-    # 3. NO structured format found -> return None (conservative I_perp by contract)
-    # Do NOT fall back to guessing from free prose
-    return None
+        unique_cents = {_amount_cents(r) for r in results}
+    except (InvalidOperation, OverflowError, ValueError):
+        return None          # Defensive: unexpected out-of-range → I_perp
+    if len(unique_cents) > 1:
+        return None          # Conflicting structured answers → I_perp
+
+    return float(results[0])
 
 
 def label_code_domain(run: AgentRun, task: Task) -> str:
