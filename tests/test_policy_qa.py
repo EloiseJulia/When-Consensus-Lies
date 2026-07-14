@@ -54,7 +54,7 @@ def test_amounts_pairwise_distinct():
     # Directly verify the REFERENCE_ANSWERS against the Manager's design
     problems_expected = [
         ("overtime", [950.00, 910.00, 1000.00]),
-        ("interest", [147.95, 150.00, 150.75]),
+        ("interest", [147.95, 150.00, 149.03]),
         ("tip", [7.50, 8.10, 8.00]),
         ("refund", [271.23, 270.00, 272.22]),
         ("discount", [74.80, 73.00, 75.00]),
@@ -112,6 +112,9 @@ def test_target_is_natural_default():
     
     # Interest: 365-day, simple
     assert abs(REFERENCE_ANSWERS["interest_365_simple"]["amount"] - 147.95) < 0.01
+    # Interest compounding alt must be DAILY (consistent with the 365-day rate),
+    # not monthly -> 149.03, not 150.75.
+    assert abs(REFERENCE_ANSWERS["interest_compound"]["amount"] - 149.03) < 0.01
     
     # Tip: pre-tax, cent rounding
     assert REFERENCE_ANSWERS["tip_pretax"]["amount"] == 7.50
@@ -124,14 +127,67 @@ def test_target_is_natural_default():
 
 
 def test_foils_mandatory():
-    """Verify foils are provided and match at most one checker."""
+    """Verify foils are provided and match at most one checker (ALL tasks)."""
     tasks = generate_tasks()
-    
-    for task in tasks[:3]:
+
+    for task in tasks:
         checkers, candidates, foils = get_checkers_and_candidates("policy_qa", task)
-        
+
         assert len(foils) > 0, f"Task {task.id} has no foils (MANDATORY)"
-        
+
         for i, foil in enumerate(foils):
             matches = sum(1 for c in checkers.values() if c.check(foil).passed)
             assert matches <= 1, f"Foil #{i} in {task.id} matches {matches} checkers"
+
+
+def _all_base_clauses():
+    """Map task_id prefix -> list of every requirement clause string."""
+    from bench.policy_qa import (
+        problem_overtime_001, problem_interest_001, problem_tip_001,
+        problem_refund_001, problem_discount_001,
+    )
+    specs = [
+        problem_overtime_001(), problem_interest_001(), problem_tip_001(),
+        problem_refund_001(), problem_discount_001(),
+    ]
+    out = {}
+    for s in specs:
+        out[s.task_id] = [c for rc in s.requirement_classes for c in rc.clauses]
+    return out
+
+
+def test_deleted_clause_absent_from_prompt():
+    """Deleting an axis must actually remove its clause from the shown prompt.
+
+    Guards the audit finding where a 'deleted' convention was still present in
+    the prompt: for every task, the count of base clauses missing from the
+    emitted prompt must equal the ambiguity level (k clauses deleted), and all
+    clauses must survive verbatim in the latent_spec.
+    """
+    base_clauses = _all_base_clauses()
+    for t in generate_tasks():
+        prefix = t.id.split("_k")[0]
+        clauses = base_clauses[prefix]
+        missing = [c for c in clauses if c not in t.prompt]
+        assert len(missing) == t.ambiguity_level, (
+            f"{t.id}: {len(missing)} clauses absent from prompt but k={t.ambiguity_level}"
+        )
+        for c in clauses:
+            assert c in t.latent_spec, f"{t.id}: clause missing from latent_spec: {c!r}"
+
+
+def test_rounding_axis_not_pinned_in_core():
+    """Anti-regression: when rounding IS an axis, the core must not pin it.
+
+    tip and discount carry a *_rounding requirement class, so their prompt_core
+    must not state the cent-rounding convention (that would contradict the
+    deletable clause and make the round-to-dollar interpretation impossible).
+    """
+    from bench.policy_qa import problem_tip_001, problem_discount_001
+    for spec in (problem_tip_001(), problem_discount_001()):
+        axis_ids = {rc.id for rc in spec.requirement_classes}
+        assert any(a.endswith("rounding") for a in axis_ids), \
+            f"{spec.task_id}: expected a rounding axis"
+        core = spec.prompt_core.lower()
+        assert "nearest cent" not in core and "rounded to" not in core, \
+            f"{spec.task_id}: core pins rounding despite it being an axis: {spec.prompt_core!r}"

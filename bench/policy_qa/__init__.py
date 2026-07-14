@@ -224,10 +224,12 @@ def problem_interest_001():
                 gold_check="interest_360",
                 opened_by="day_count"
             ),
-            # Non-target (I2): monthly compounding -> 10000 * ((1+0.06/12)^3 - 1) = 150.75
+            # Non-target (I2): daily compounding at the SAME 365-day daily rate
+            # (consistent with the surviving day_count clause), not monthly:
+            # 10000 * ((1+0.06/365)^90 - 1) = 149.03
             InterpretationBranch(
                 id="I2",
-                description="If monthly compounding: 10000 * ((1.005)^3 - 1) = 150.75.",
+                description="If compounded daily at the 365-day rate: 10000 * ((1+0.06/365)^90 - 1) = 149.03.",
                 is_target=False,
                 gold_check="interest_compound",
                 opened_by="compounding"
@@ -252,7 +254,9 @@ def problem_tip_001():
     spec = FullSpec(
         domain="policy_qa",
         task_id="policy_tip_001",
-        prompt_core="""A restaurant bill totals $54.00, consisting of $50.00 for food and $4.00 in tax. Compute a 15% tip. Answer in dollars, rounded to the nearest cent.""",
+        # NOTE: rounding is an AXIS here, so the core must NOT pin it to the cent
+        # (that would contradict the deletable tip_rounding clause).
+        prompt_core="""A restaurant bill totals $54.00, consisting of $50.00 for food and $4.00 in tax. Compute a 15% tip. Answer in dollars.""",
         requirement_classes=[
             RequirementClass(
                 id="tip_base",
@@ -309,7 +313,10 @@ def problem_refund_001():
     spec = FullSpec(
         domain="policy_qa",
         task_id="policy_refund_001",
-        prompt_core="""A customer paid $360.00 for a 12-month subscription. 90 days have elapsed since activation when they cancel. Compute the refund for the unused portion. Answer in dollars, rounded to the nearest cent.""",
+        # NOTE: "cancels on day 90" (not "90 days have elapsed") leaves genuinely
+        # ambiguous whether day 90 itself counts as used; the include_cancel_day
+        # clause states the inclusive default (90 used).
+        prompt_core="""A customer paid $360.00 for a 12-month subscription and cancels on day 90 after activation. Compute the refund for the unused portion. Answer in dollars, rounded to the nearest cent.""",
         requirement_classes=[
             RequirementClass(
                 id="year_basis",
@@ -366,7 +373,9 @@ def problem_discount_001():
     spec = FullSpec(
         domain="policy_qa",
         task_id="policy_discount_001",
-        prompt_core="""An item is priced at $100.00 and has two promotional discounts of 15% and 12%. Compute the final price. Answer in dollars, rounded to the nearest cent.""",
+        # NOTE: rounding is an AXIS here, so the core must NOT pin it to the cent
+        # (that would contradict the deletable price_rounding clause).
+        prompt_core="""An item is priced at $100.00 and has two promotional discounts of 15% and 12%. Compute the final price. Answer in dollars.""",
         requirement_classes=[
             RequirementClass(
                 id="stacking",
@@ -426,7 +435,7 @@ REFERENCE_ANSWERS = {
     # Interest owed (policy_interest_001)
     "interest_365_simple": {"amount": 147.95},
     "interest_360": {"amount": 150.00},
-    "interest_compound": {"amount": 150.75},
+    "interest_compound": {"amount": 149.03},
     
     # Restaurant tip (policy_tip_001)
     "tip_pretax": {"amount": 7.50},
