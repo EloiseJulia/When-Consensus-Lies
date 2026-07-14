@@ -13,6 +13,22 @@ from harness.label import label_run
 from bench.build import load_tasks
 
 
+@pytest.fixture(autouse=True)
+def clear_domain_caches():
+    """Clear domain result caches before each test to avoid pollution."""
+    try:
+        from bench.data_analysis import _RESULT_CACHE as data_cache
+        data_cache.clear()
+    except ImportError:
+        pass
+    try:
+        from bench.code_spec import _RESULT_CACHE as code_cache
+        code_cache.clear()
+    except ImportError:
+        pass
+    yield
+
+
 # ============================================================================
 # CODE_SPEC DOMAIN TESTS
 # ============================================================================
@@ -24,10 +40,10 @@ def test_label_code_spec_i0_match():
     # Pick the first k=1 task (has I0 and I1)
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference implementation
-    from bench.code_spec import REFERENCE_IMPLEMENTATIONS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_code = REFERENCE_IMPLEMENTATIONS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.code_spec import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
     
     # Create a run with I0 code in a code fence
     run = AgentRun(
@@ -54,10 +70,10 @@ def test_label_code_spec_i1_match():
     # Pick the first k=1 task (has I0 and I1)
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I1 reference implementation
-    from bench.code_spec import REFERENCE_IMPLEMENTATIONS
-    i1_interp = next(interp for interp in task.interpretations if interp.id == "I1")
-    i1_code = REFERENCE_IMPLEMENTATIONS[i1_interp.gold_check]
+    # Get the canonical I1 reference from domain
+    from bench.code_spec import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i1_code = candidates["I1"]
     
     # Create a run with I1 code in a code fence
     run = AgentRun(
@@ -132,10 +148,10 @@ def test_label_code_spec_raw_code():
     tasks = load_tasks("bench/data/code_spec.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference implementation
-    from bench.code_spec import REFERENCE_IMPLEMENTATIONS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_code = REFERENCE_IMPLEMENTATIONS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.code_spec import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
     
     # Create a run with raw code (no fence)
     run = AgentRun(
@@ -161,15 +177,22 @@ def test_label_code_spec_raw_code():
 
 def test_label_data_analysis_i0_match():
     """data_analysis: Reference I0 solution should label as I0."""
+    # CRITICAL: Clear cache first to avoid pollution from test_data_analysis.py
+    try:
+        from bench.data_analysis import _RESULT_CACHE
+        _RESULT_CACHE.clear()
+    except ImportError:
+        pass
+    
     # Load a real data_analysis task
     tasks = load_tasks("bench/data/data_analysis.jsonl")
     # Pick the first k=1 task (has I0 and I1)
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference implementation
-    from bench.data_analysis import REFERENCE_IMPLEMENTATIONS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_code = REFERENCE_IMPLEMENTATIONS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.data_analysis import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
     
     # Create a run with I0 code in a code fence
     run = AgentRun(
@@ -191,14 +214,21 @@ def test_label_data_analysis_i0_match():
 
 def test_label_data_analysis_i1_match():
     """data_analysis: Reference I1 solution should label as I1."""
+    # CRITICAL: Clear cache first to avoid pollution from test_data_analysis.py
+    try:
+        from bench.data_analysis import _RESULT_CACHE
+        _RESULT_CACHE.clear()
+    except ImportError:
+        pass
+    
     # Load a real data_analysis task
     tasks = load_tasks("bench/data/data_analysis.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I1 reference implementation
-    from bench.data_analysis import REFERENCE_IMPLEMENTATIONS
-    i1_interp = next(interp for interp in task.interpretations if interp.id == "I1")
-    i1_code = REFERENCE_IMPLEMENTATIONS[i1_interp.gold_check]
+    # Get the canonical I1 reference from domain
+    from bench.data_analysis import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i1_code = candidates["I1"]
     
     # Create a run with I1 code in a code fence
     run = AgentRun(
@@ -278,10 +308,10 @@ def test_label_policy_qa_i0_match():
     # Pick the first k=1 task (has I0 and I1)
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference answer
-    from bench.policy_qa import REFERENCE_ANSWERS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_answer = REFERENCE_ANSWERS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_answer = candidates["I0"]
     
     # Create a run with I0 answer as JSON
     import json
@@ -308,10 +338,10 @@ def test_label_policy_qa_i1_match():
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I1 reference answer
-    from bench.policy_qa import REFERENCE_ANSWERS
-    i1_interp = next(interp for interp in task.interpretations if interp.id == "I1")
-    i1_answer = REFERENCE_ANSWERS[i1_interp.gold_check]
+    # Get the canonical I1 reference from domain
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i1_answer = candidates["I1"]
     
     # Create a run with I1 answer as dollar amount
     amount = i1_answer["amount"]
@@ -386,10 +416,10 @@ def test_label_policy_qa_json_format():
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference answer
-    from bench.policy_qa import REFERENCE_ANSWERS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_answer = REFERENCE_ANSWERS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_answer = candidates["I0"]
     
     # Create a run with JSON answer
     import json
@@ -473,10 +503,10 @@ def test_label_code_fence_variations():
     tasks = load_tasks("bench/data/code_spec.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference implementation
-    from bench.code_spec import REFERENCE_IMPLEMENTATIONS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_code = REFERENCE_IMPLEMENTATIONS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.code_spec import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
     
     # Test different fence formats
     fence_formats = [
@@ -508,10 +538,10 @@ def test_label_determinism():
     tasks = load_tasks("bench/data/code_spec.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     
-    # Get the I0 reference implementation
-    from bench.code_spec import REFERENCE_IMPLEMENTATIONS
-    i0_interp = next(interp for interp in task.interpretations if interp.is_target)
-    i0_code = REFERENCE_IMPLEMENTATIONS[i0_interp.gold_check]
+    # Get the canonical I0 reference from domain
+    from bench.code_spec import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_code = candidates["I0"]
     
     # Create two runs with identical output
     run1 = AgentRun(
