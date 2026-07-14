@@ -936,8 +936,10 @@ def test_stress_reference_candidate_deterministic():
     checker = checkers[checker_id]
     
     # Run 50 iterations - ALL must pass
+    # Clear cache before each iteration to force real worker execution
     iterations = 50
     for i in range(iterations):
+        _RESULT_CACHE.clear()  # Force cache miss → real subprocess execution
         result = checker.check(candidate_code)
         assert result.passed, (
             f"Iteration {i+1}/{iterations} FAILED for {checker_id}: {result.details}\n"
