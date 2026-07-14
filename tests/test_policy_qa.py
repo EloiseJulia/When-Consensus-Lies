@@ -34,19 +34,100 @@ def test_key_questions_invariant():
     and that the k=0 control carries ZERO key_questions. key_questions is the
     gold for the Direction-B (false-surfacing) detector; a stale question would
     invert that metric and destroy the unambiguous control.
+    
+    STRENGTHENED: Now checks exact identity of key_question strings, not just counts.
     """
+    # Golden mapping: task_id -> expected key_questions (exact strings)
+    # Derived from the generator's axis<->question map, matching deleted axes per variant
+    EXPECTED_KEY_QUESTIONS = {
+        # Overtime (2 axes: threshold, rate)
+        "policy_overtime_001_k0": [],
+        "policy_overtime_001_k1_overtime_threshold": [
+            "After how many hours per week does overtime begin (40, or another threshold)?"
+        ],
+        "policy_overtime_001_k1_overtime_rate": [
+            "What multiplier applies to overtime hours (1.5x, or another rate)?"
+        ],
+        "policy_overtime_001_k2_all": [
+            "After how many hours per week does overtime begin (40, or another threshold)?",
+            "What multiplier applies to overtime hours (1.5x, or another rate)?"
+        ],
+        
+        # Interest (2 axes: day_count, compounding)
+        "policy_interest_001_k0": [],
+        "policy_interest_001_k1_day_count": [
+            "Should the daily rate use a 365-day or 360-day year?"
+        ],
+        "policy_interest_001_k1_compounding": [
+            "Is the interest simple, or compounded?"
+        ],
+        "policy_interest_001_k2_all": [
+            "Should the daily rate use a 365-day or 360-day year?",
+            "Is the interest simple, or compounded?"
+        ],
+        
+        # Tip (2 axes: base, rounding)
+        "policy_tip_001_k0": [],
+        "policy_tip_001_k1_tip_base": [
+            "Is the tip computed on the pre-tax amount or the after-tax total?"
+        ],
+        "policy_tip_001_k1_tip_rounding": [
+            "Round the tip to the nearest cent, or up to the next whole dollar?"
+        ],
+        "policy_tip_001_k2_all": [
+            "Is the tip computed on the pre-tax amount or the after-tax total?",
+            "Round the tip to the nearest cent, or up to the next whole dollar?"
+        ],
+        
+        # Refund (2 axes: year_basis, include_cancel_day)
+        "policy_refund_001_k0": [],
+        "policy_refund_001_k1_year_basis": [
+            "Should proration treat the term as 365 or 360 days?"
+        ],
+        "policy_refund_001_k1_include_cancel_day": [
+            "Does the cancellation day count as a used day?"
+        ],
+        "policy_refund_001_k2_all": [
+            "Should proration treat the term as 365 or 360 days?",
+            "Does the cancellation day count as a used day?"
+        ],
+        
+        # Discount (2 axes: stacking, price_rounding)
+        "policy_discount_001_k0": [],
+        "policy_discount_001_k1_stacking": [
+            "Are the discounts applied sequentially or added together?"
+        ],
+        "policy_discount_001_k1_price_rounding": [
+            "Round the final price to the nearest cent, or the nearest whole dollar?"
+        ],
+        "policy_discount_001_k2_all": [
+            "Are the discounts applied sequentially or added together?",
+            "Round the final price to the nearest cent, or the nearest whole dollar?"
+        ],
+    }
+    
     tasks = generate_tasks()
     assert tasks, "no tasks generated"
+    assert len(tasks) == 20, f"Expected 20 tasks, got {len(tasks)}"
+    
     for t in tasks:
+        # Invariant checks (keep existing)
         assert len(t.key_questions) == t.ambiguity_level, \
             f"{t.id}: {len(t.key_questions)} questions != k={t.ambiguity_level}"
         assert t.ambiguity_level == len(t.interpretations) - 1, \
             f"{t.id}: k={t.ambiguity_level} != interpretations-1={len(t.interpretations) - 1}"
         if t.ambiguity_level == 0:
             assert t.key_questions == [], f"{t.id}: control must have no key_questions"
-        # No duplicate questions within a variant.
+        # No duplicate questions within a variant
         assert len(set(t.key_questions)) == len(t.key_questions), \
             f"{t.id}: duplicate key_questions"
+        
+        # NEW: Exact identity check (GOLDEN)
+        assert t.id in EXPECTED_KEY_QUESTIONS, \
+            f"{t.id}: missing from golden mapping (generation changed?)"
+        expected = EXPECTED_KEY_QUESTIONS[t.id]
+        assert t.key_questions == expected, \
+            f"{t.id}: key_questions mismatch.\n  Expected: {expected}\n  Got: {t.key_questions}"
 
 
 def test_amounts_pairwise_distinct():

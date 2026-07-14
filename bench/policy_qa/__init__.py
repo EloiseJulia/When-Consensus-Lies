@@ -6,7 +6,7 @@ This domain features numeric policy calculations where deleting a requirement CL
 checkers are deterministic (structured equality with numeric tolerance, NO LLM)
 because answers are STRUCTURED numeric values (dict with float), not free-form prose.
 
-All answers are {"amount": <float>} with 0.01 tolerance comparison.
+All answers are {"amount": <float>} with exact cent-precision comparison.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -78,10 +78,13 @@ class StructuredAnswerChecker(GoldChecker):
         elif isinstance(expected, (int, float)):
             if not isinstance(candidate, (int, float)):
                 return False, f"Expected number, got {type(candidate).__name__}"
-            # Numeric tolerance for floats
+            # Exact cent-precision comparison for monetary amounts (floats)
+            # Compare as integer cents to avoid floating-point errors
             if isinstance(expected, float):
-                if abs(candidate - expected) > 0.01:
-                    return False, f"Expected {expected}, got {candidate} (diff > 0.01)"
+                candidate_cents = round(candidate * 100)
+                expected_cents = round(expected * 100)
+                if candidate_cents != expected_cents:
+                    return False, f"Expected {expected}, got {candidate} (off by {abs(candidate - expected):.4f})"
             else:
                 if candidate != expected:
                     return False, f"Expected {expected}, got {candidate}"
