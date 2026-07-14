@@ -9,6 +9,7 @@ from bench.data_analysis import (
     get_checkers_and_candidates,
     generate_tasks,
     _TIMEOUT_SECONDS,
+    _RESULT_CACHE,  # FLAKINESS FIX D: Access cache for test isolation
     problem_compute_mean,
     problem_compute_variance,
     problem_compute_median,
@@ -18,6 +19,15 @@ from bench.data_analysis import (
 from bench.validate import validate_task, validate_domain
 from bench.build import load_tasks
 from pathlib import Path
+
+
+# FLAKINESS FIX D: Test isolation - clear cache before and after each test
+@pytest.fixture(autouse=True)
+def clear_result_cache():
+    """Clear _RESULT_CACHE before and after each test for isolation."""
+    _RESULT_CACHE.clear()
+    yield
+    _RESULT_CACHE.clear()
 
 
 def test_checkers_exist():
@@ -898,3 +908,41 @@ def compute_mean(numbers):
     if found_marker:
         # This is the key assertion: no descendant should survive
         assert False, f"Descendant process with marker {marker} survived timeout!"
+
+
+# FLAKINESS FIX E: Stress test to verify deterministic execution (no flakiness)
+def test_stress_reference_candidate_deterministic():
+    """STRESS TEST: Run a canonical valid reference candidate 50 times.
+    
+    Verifies that the harness fix eliminates flakiness. A valid reference
+    candidate MUST pass every single iteration. Any failure indicates either:
+    1. Residual infrastructure race (retry logic failed)
+    2. Non-deterministic candidate execution (shouldn't happen for references)
+    
+    This test catches the bug where infra errors were cached and propagated.
+    """
+    tasks = generate_tasks()
+    # Pick the first task (k=0 control)
+    task = [t for t in tasks if t.ambiguity_level == 0][0]
+    
+    # Get checkers and candidates for this task
+    checkers, candidates, _ = get_checkers_and_candidates("data_analysis", task)
+    
+    # Pick the first canonical reference implementation
+    # (All references are valid, so any one works for this stress test)
+    assert len(candidates) > 0, "No reference candidates found"
+    checker_id = list(checkers.keys())[0]
+    candidate_code = candidates[checker_id]
+    checker = checkers[checker_id]
+    
+    # Run 50 iterations - ALL must pass
+    # Clear cache before each iteration to force real worker execution
+    iterations = 50
+    for i in range(iterations):
+        _RESULT_CACHE.clear()  # Force cache miss → real subprocess execution
+        result = checker.check(candidate_code)
+        assert result.passed, (
+            f"Iteration {i+1}/{iterations} FAILED for {checker_id}: {result.details}\n"
+            f"This indicates harness flakiness or non-deterministic candidate execution."
+        )
+
