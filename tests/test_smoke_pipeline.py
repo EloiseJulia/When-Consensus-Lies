@@ -47,8 +47,8 @@ def test_smoke_pipeline():
     # Label runs (mock deterministic)
     labels = [label_run(run, task) for run in runs]
     
-    # Verify labels are valid
-    valid_labels = {interp.id for interp in task.interpretations}
+    # Verify labels are valid (including I_perp for garbage outputs)
+    valid_labels = {interp.id for interp in task.interpretations} | {"I_perp"}
     assert all(label in valid_labels for label in labels)
     
     # Compute convergent_delusion
