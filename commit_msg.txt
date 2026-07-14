@@ -1,39 +1,37 @@
-fix(label): Re-audit BLOCKER - prefer final answer over intermediate values
+fix(label): Handle embedded JSON in prose (structured amount priority gap)
 
-PERSISTING BLOCKER FIX - Multi-step reasoning extraction:
-Real LLM policy_qa answers routinely show their work with multiple dollar
-amounts, but the FINAL answer appears last. The previous fix returned the
-FIRST parseable amount, systematically mislabeling multi-step answers.
+EMBEDDED JSON FIX - Structured amount in prose should win:
+The previous JSON step only tried `json.loads(output.strip())` on the WHOLE
+output, which fails when JSON is embedded in prose. Example failure:
+  '{"amount": 950.0} but earlier I wrote $800' → extracted 800 (WRONG)
 
-NEW EXTRACTION PRIORITY ORDER:
-1. STRUCTURED JSON: {"amount": X} or {"answer": X} takes precedence (unchanged)
-2. ANSWER-CUE preference: Search for explicit final-answer markers and take
-   the amount after the LAST such marker:
-   - "final answer", "the answer is", "answer:", "answer is"
-   - "total is", "total:", "gross pay is", "final ... is"
-   - "= $X" patterns
-3. FALLBACK - LAST amount: If no cues found, return the LAST parseable
-   dollar/decimal amount (final answers appear last in multi-step reasoning),
-   NOT the first
+The structured amount MUST win over any prose number, even when wrapped in
+prose or a code fence. This ensures explicit structured answers take precedence
+over incidental prose numbers.
 
-VERIFIED - All 5 audit cases now extract FINAL amounts correctly:
-  Case 1: "$1000 ... the answer is $900" → extracts $900.00 (was $1000)
-  Case 2: "$800 and $150, so the answer is $950" → extracts $950.00 (was $800)
-  Case 3: "$1000, but the final answer is $950" → extracts $950.00 (was $1000)
-  Case 4: "910.00, but the final answer is $950" → extracts $950.00 (was 910)
-  Case 5: "$20.00/hour; final gross pay is $950" → extracts $950.00 (was $20)
+NEW JSON EXTRACTION (two-step):
+1a. Try `json.loads(output.strip())` for pure JSON output (unchanged)
+1b. If that fails, search for EMBEDDED structured amount via regex:
+    - Pattern: "amount"\s*:\s*(-?\d+(?:\.\d+)?)
+    - Pattern: "answer"\s*:\s*(-?\d+(?:\.\d+)?)
+    - Requires NUMERIC value (not quoted string like "amount": "950")
+    - Handles: {"amount": 950.0} in prose, code fences, mid-sentence
 
-ADDED 8 GOLDEN TESTS:
-- All 5 audit cases (assert correct interpretation labels, e.g., I0 for $950)
-- JSON overrides prose (even if prose has other numbers)
-- Single-amount answer still works (fallback to last)
-- Pure garbage with no number → I_perp
+VERIFIED - Embedded JSON cases now extract correctly:
+  '{"amount": 950.0} but earlier I wrote $800' → extracts 950.0 ✓ (was 800)
+  '```json\n{"amount": 950.0}\n```' → extracts 950.0 ✓
+  'The answer is {"amount": 950.0} and not $800' → extracts 950.0 ✓
 
-Full suite: 174 passed (×2 runs, 0 failures)
+ADDED 2 GOLDEN TESTS:
+- Embedded JSON in prose (with conflicting prose number)
+- Fenced JSON (```json ... ```)
+Both assert correct interpretation label (I0 for canonical amount).
+
+Full suite: 176 passed (×2 runs, 0 failures)
 Canonical-reference invariant: ALL 6 interpretations still label correctly
   (I0→I0, I1→I1 for code_spec, data_analysis, policy_qa)
 
-This fixes systematic mislabeling of realistic multi-step policy_qa answers
-and prevents corruption of the convergent-delusion metric.
+This completes the policy_qa extraction robustness: JSON (pure or embedded) →
+answer-cues → last-amount fallback. Structured amounts now reliably win.
 
 Co-authored-by: copilot <copilot@users.noreply.github.com>

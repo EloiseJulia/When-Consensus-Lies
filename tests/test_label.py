@@ -935,3 +935,71 @@ def test_policy_qa_garbage_no_number_i_perp():
     
     label = label_run(run, task)
     assert label == "I_perp", f"Expected I_perp for no-number garbage, got {label}"
+
+
+def test_policy_qa_embedded_json_in_prose():
+    """EMBEDDED JSON FIX: Structured amount in prose should win over prose numbers.
+    
+    Case: '{"amount": 950.0} but earlier I wrote $800'
+    Should extract 950 (structured), not 800 (prose).
+    """
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # Embedded JSON with I0 amount, followed by prose with different number
+    import json
+    output = f'{json.dumps({"amount": i0_amount})} but earlier I wrote $800'
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=118
+    )
+    
+    label = label_run(run, task)
+    # Should extract 950 from structured amount, not 800 from prose
+    assert label == "I0", f"Expected I0 (structured amount should win), got {label}"
+
+
+def test_policy_qa_fenced_json():
+    """EMBEDDED JSON FIX: Structured amount in code fence should be extracted.
+    
+    Case: '```json\n{"amount": 950.0}\n```'
+    Should extract 950 from the fenced JSON.
+    """
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    
+    from bench.policy_qa import get_checkers_and_candidates
+    checkers, candidates, foils = get_checkers_and_candidates(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    
+    # JSON in a code fence
+    import json
+    output = f'```json\n{json.dumps({"amount": i0_amount})}\n```'
+    
+    run = AgentRun(
+        task_id=task.id,
+        config="single",
+        model_role="tested_agents",
+        model_id="test-model",
+        output=output,
+        label="",
+        verbalized_conf=0.9,
+        logit_conf=None,
+        seed=119
+    )
+    
+    label = label_run(run, task)
+    # Should extract from fenced JSON
+    assert label == "I0", f"Expected I0 (fenced JSON amount), got {label}"

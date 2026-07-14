@@ -79,6 +79,8 @@ def _extract_numeric_from_output(output: str) -> Optional[float]:
     
     Priority order (to handle multi-step reasoning with intermediate values):
     1. STRUCTURED JSON: {"amount": X} or {"answer": X} takes precedence
+       - First try parsing the whole output as JSON
+       - If that fails, search for EMBEDDED structured amount fields in prose or fences
     2. ANSWER-CUE preference: Search for explicit final-answer markers and take
        the amount after the LAST such marker. Markers: "final answer", "the answer is",
        "answer:", "answer is", "total is", "total:", "gross pay is", "final ... is",
@@ -89,7 +91,7 @@ def _extract_numeric_from_output(output: str) -> Optional[float]:
     This priority fixes mislabeling when answers show work (e.g., "base is $1000,
     after fee the answer is $900" correctly extracts 900, not 1000).
     """
-    # 1. Try JSON parsing first (most structured)
+    # 1a. Try JSON parsing first (pure JSON output)
     try:
         data = json.loads(output.strip())
         if isinstance(data, dict):
@@ -100,6 +102,23 @@ def _extract_numeric_from_output(output: str) -> Optional[float]:
                 return float(data['answer'])
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
+    
+    # 1b. Search for EMBEDDED structured amount in prose or code fences
+    # Pattern: "amount": <number> or "answer": <number> (NUMERIC value, not quoted string)
+    # Examples: {"amount": 950.0}, "amount": 950, "answer":123.45
+    # Must match ONLY numeric values (not "amount": "950" which is a string)
+    embedded_amount_patterns = [
+        r'"amount"\s*:\s*(-?\d+(?:\.\d+)?)',  # "amount": 950.0
+        r'"answer"\s*:\s*(-?\d+(?:\.\d+)?)',  # "answer": 123.45
+    ]
+    
+    for pattern in embedded_amount_patterns:
+        match = re.search(pattern, output)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
     
     # Pattern for dollar amounts or plain decimal numbers
     # Matches: $1,234.56, $950.00, 950.00, $950, 1234.56
