@@ -36,9 +36,9 @@ def test_online_client_not_served_offline_mock(tmp_path):
 def test_cache_key_is_mode_and_model_aware(tmp_path):
     cfg = load_config()
     client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
-    offline_key = client._cache_key("tested_agents", "p", 1)
+    offline_key = client._cache_key("tested_agents", "p", 1, None, None)
     client.offline = False
-    online_key = client._cache_key("tested_agents", "p", 1)
+    online_key = client._cache_key("tested_agents", "p", 1, None, None)
     assert offline_key != online_key
 
 

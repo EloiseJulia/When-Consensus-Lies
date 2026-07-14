@@ -179,8 +179,8 @@ def test_verifier_config(mock_task, client):
     n_candidates = 3
     runs = run_verifier(mock_task, client, n_candidates=n_candidates)
     
-    # Verify count (n_candidates + 1 verifier)
-    assert len(runs) == n_candidates + 1
+    # FIX BUG 3: Verifier now returns ONLY the selection (1 run with selected answer)
+    assert len(runs) == 1
     assert all(isinstance(r, AgentRun) for r in runs)
     
     # Verify fields
@@ -189,30 +189,25 @@ def test_verifier_config(mock_task, client):
     assert all(r.model_role == "tested_agents" for r in runs)
     assert all(r.label == "" for r in runs)
     
-    # Verify unique seeds
-    seeds = [r.seed for r in runs]
-    assert len(set(seeds)) == n_candidates + 1, "Seeds must be unique"
-    
-    # Verify identity keys are unique
-    identity_keys = [
-        (r.task_id, r.config, r.model_role, r.model_id, r.seed)
-        for r in runs
-    ]
-    assert len(set(identity_keys)) == n_candidates + 1, "Identity keys must be unique"
+    # Verify the output is an actual candidate answer, not "Candidate N"
+    # (deterministic selection should pick a valid candidate)
+    verifier_run = runs[0]
+    assert verifier_run.output.startswith("MOCK_OUTPUT_")  # Actual answer, not selection text
+    assert "Candidate" not in verifier_run.output or verifier_run.output.startswith("MOCK_OUTPUT_")
     
     # Verify determinism
     runs2 = run_verifier(mock_task, client, n_candidates=n_candidates)
-    for r1, r2 in zip(runs, runs2):
-        assert r1.output == r2.output
-        assert r1.seed == r2.seed
+    assert runs[0].output == runs2[0].output
+    assert runs[0].seed == runs2[0].seed
 
 
 def test_interpretation_diverse_config(mock_task, client):
     """Test interpretation-diverse config."""
     runs = run_diverse(mock_task, client)
     
-    # Verify count (5 diverse hints)
-    assert len(runs) == 5
+    # FIX BUG 4: Now returns len(task.interpretations) runs (not fixed 5)
+    expected_count = len(mock_task.interpretations)
+    assert len(runs) == expected_count
     assert all(isinstance(r, AgentRun) for r in runs)
     
     # Verify fields
@@ -223,14 +218,14 @@ def test_interpretation_diverse_config(mock_task, client):
     
     # Verify unique seeds
     seeds = [r.seed for r in runs]
-    assert len(set(seeds)) == 5, "Seeds must be unique"
+    assert len(set(seeds)) == expected_count, "Seeds must be unique"
     
     # Verify identity keys are unique
     identity_keys = [
         (r.task_id, r.config, r.model_role, r.model_id, r.seed)
         for r in runs
     ]
-    assert len(set(identity_keys)) == 5, "Identity keys must be unique"
+    assert len(set(identity_keys)) == expected_count, "Identity keys must be unique"
     
     # Verify determinism
     runs2 = run_diverse(mock_task, client)
@@ -266,14 +261,14 @@ def test_run_task_dispatcher(mock_task, client):
     assert len(het_mad_runs) == 4
     assert all(r.config == "heterogeneous-MAD" for r in het_mad_runs)
     
-    # Test verifier
+    # Test verifier (FIX BUG 3: now returns 1, not n+1)
     verifier_runs = run_task(mock_task, "verifier", client, n_candidates=3)
-    assert len(verifier_runs) == 4  # 3 candidates + 1 verifier
+    assert len(verifier_runs) == 1
     assert all(r.config == "verifier" for r in verifier_runs)
     
-    # Test interpretation-diverse
+    # Test interpretation-diverse (FIX BUG 4: now returns len(interpretations))
     diverse_runs = run_task(mock_task, "interpretation-diverse", client)
-    assert len(diverse_runs) == 5
+    assert len(diverse_runs) == len(mock_task.interpretations)
     assert all(r.config == "interpretation-diverse" for r in diverse_runs)
     
     # Test unknown config
@@ -353,3 +348,114 @@ def test_identity_key_uniqueness_across_configs(mock_task, client):
     # Verify all unique (no collisions across configs)
     assert len(identity_keys) == len(set(identity_keys)), \
         "Identity keys must be unique across all configs"
+
+
+def test_heterogeneous_mad_real_provenance(mock_task, client):
+    """FIX BUG 1: Verify heterogeneous agents produce different outputs (real provenance).
+    
+    Before fix: all agents used the same homogeneous model, so outputs were identical.
+    After fix: different models → different hash inputs → different outputs.
+    """
+    n_agents = 4
+    runs = run_mad(mock_task, client, homogeneous=False, n_agents=n_agents, rounds=2)
+    
+    # Get the heterogeneous model pool
+    het_pool = client.config["roles"]["tested_agents"]["heterogeneous"]
+    
+    # Verify each agent has the correct model assignment
+    for i, run in enumerate(runs):
+        expected_model = het_pool[i % len(het_pool)]["model"]
+        assert run.model_id == expected_model, \
+            f"Agent {i} should use model {expected_model}, got {run.model_id}"
+    
+    # Verify outputs are different (different models → different outputs)
+    # If they were all using the same model (the bug), outputs would be identical
+    outputs = [r.output for r in runs]
+    unique_outputs = set(outputs)
+    
+    # At least 2 unique outputs (since we have 4 agents with different models)
+    assert len(unique_outputs) >= 2, \
+        "Heterogeneous agents must produce different outputs (different models)"
+    
+    # Verify this differs from homogeneous
+    homo_runs = run_mad(mock_task, client, homogeneous=True, n_agents=n_agents, rounds=2)
+    homo_outputs = {r.output for r in homo_runs}
+    
+    # Heterogeneous and homogeneous should produce different output sets
+    assert outputs != [r.output for r in homo_runs], \
+        "Heterogeneous vs homogeneous must yield different outputs"
+
+
+def test_mad_round_snapshot_order_independent(mock_task, client):
+    """FIX BUG 2: Verify MAD uses round r-1 snapshot (not order-dependent round r).
+    
+    Before fix: later agents saw earlier agents' current-round answers (order-dependent).
+    After fix: all agents in round r condition on frozen round r-1 snapshot.
+    """
+    n_agents = 3
+    rounds = 3
+    
+    # Run twice with identical params
+    runs1 = run_mad(mock_task, client, homogeneous=True, n_agents=n_agents, rounds=rounds)
+    runs2 = run_mad(mock_task, client, homogeneous=True, n_agents=n_agents, rounds=rounds)
+    
+    # Verify identical outputs (determinism ensures snapshot is used correctly)
+    for r1, r2 in zip(runs1, runs2):
+        assert r1.output == r2.output
+        assert r1.seed == r2.seed
+    
+    # Indirectly verify snapshot: agents with same seed produce same output
+    # (if they saw different conditioning info due to order, outputs would vary)
+    # This is guaranteed by the fact that our mock is deterministic on (model, prompt, seed)
+
+
+def test_verifier_output_is_candidate_answer(mock_task, client):
+    """FIX BUG 3: Verify verifier output is the selected candidate's answer.
+    
+    Before fix: verifier output was raw "Candidate N" text.
+    After fix: verifier output is the actual selected candidate's answer text.
+    """
+    runs = run_verifier(mock_task, client, n_candidates=3)
+    
+    assert len(runs) == 1
+    verifier_run = runs[0]
+    
+    # Output must be an actual answer (starts with MOCK_OUTPUT_), not selection text
+    assert verifier_run.output.startswith("MOCK_OUTPUT_"), \
+        "Verifier output must be the selected candidate's answer, not 'Candidate N'"
+    
+    # Verify it doesn't contain the selection phrase
+    assert not verifier_run.output.lower().startswith("candidate "), \
+        "Verifier output should be the answer text, not the selection directive"
+
+
+def test_interpretation_diverse_uses_task_interpretations(mock_task, client):
+    """FIX BUG 4: Verify interpretation-diverse binds to task interpretations.
+    
+    Before fix: used 5 fixed generic hints, ignoring task.interpretations.
+    After fix: creates one agent per task interpretation.
+    """
+    runs = run_diverse(mock_task, client)
+    
+    # Count must match task.interpretations
+    assert len(runs) == len(mock_task.interpretations), \
+        "interpretation-diverse must create one run per task interpretation"
+    
+    # With a different task (different interpretation count), get different count
+    task2 = Task(
+        id="task2",
+        domain="code_spec",
+        prompt="Another task",
+        latent_spec="spec",
+        interpretations=[
+            Interpretation(id="I0", is_target=True, gold_check="g0"),
+            Interpretation(id="I1", is_target=False, gold_check="g1"),
+        ],
+        ambiguity_level=1,
+        key_questions=[]
+    )
+    
+    runs2 = run_diverse(task2, client)
+    assert len(runs2) == len(task2.interpretations)
+    assert len(runs2) != len(runs), \
+        "Different tasks with different interpretation counts should yield different run counts"

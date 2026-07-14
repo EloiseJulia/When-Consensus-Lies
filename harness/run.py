@@ -203,6 +203,14 @@ def run_mad(
     
     # Run debate rounds
     for round_idx in range(rounds):
+        # FIX BUG 2: Snapshot ALL agents' previous-round answers BEFORE starting this round
+        # (prevents order-dependent debate where later agents see earlier agents' current-round answers)
+        if round_idx > 0:
+            prev_round_snapshot = [
+                (a["idx"], a["history"][-1][1])  # (agent_idx, round r-1 answer)
+                for a in agents
+            ]
+        
         for agent in agents:
             if round_idx == 0:
                 # Initial round
@@ -211,10 +219,10 @@ def run_mad(
                     agent_idx=agent["idx"]
                 )
             else:
-                # Subsequent rounds: show previous round answers
+                # Subsequent rounds: show FROZEN previous round answers (from snapshot)
                 prev_answers = "\n".join([
-                    f"Agent {a['idx']}: {a['history'][-1][1]}"
-                    for a in agents
+                    f"Agent {idx}: {answer}"
+                    for idx, answer in prev_round_snapshot
                 ])
                 prompt = PROMPT_MAD_ROUND_V1.format(
                     task_prompt=task.prompt,
@@ -225,12 +233,14 @@ def run_mad(
             # Get completion with round-specific seed
             round_seed = agent["seed"] + round_idx * 1000
             
-            # Create a temporary client with the specific agent's model
-            # For offline mode, the role determines the model family
+            # FIX BUG 1: Pass explicit family/model to ensure heterogeneous agents
+            # produce genuinely different outputs (not all from homogeneous baseline)
             completion = client.complete(
                 role="tested_agents",
                 prompt=prompt,
-                seed=round_seed
+                seed=round_seed,
+                family=agent["family"],
+                model=agent["model"]
             )
             
             agent["history"].append((round_idx, completion.text))
@@ -242,13 +252,11 @@ def run_mad(
         final_seed = agent["seed"] + final_round * 1000
         verbalized_conf = 0.5 + (final_seed % 50) / 100.0
         
-        # Note: In offline mode, all agents use the same model (first in pool)
-        # In online mode, each would use their assigned model
         run = AgentRun(
             task_id=task.id,
             config=config_name,
             model_role="tested_agents",
-            model_id=agent["model"],
+            model_id=agent["model"],  # Provenance now matches the actual generating model
             output=final_answer,
             label="",
             verbalized_conf=verbalized_conf,
@@ -263,18 +271,22 @@ def run_mad(
 def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[AgentRun]:
     """Verifier-based selection: candidates generate, verifier selects.
     
+    FIX BUG 3: Returns only the verifier's AgentRun with the SELECTED candidate's
+    answer as output (not the verifier's raw "Candidate N" text), so downstream
+    labeling measures the verifier mechanism's chosen answer.
+    
     Args:
         task: Task to execute
         client: LLMClient instance
         n_candidates: Number of candidate answers to generate
     
     Returns:
-        List of AgentRuns (candidates + verifier selection)
+        Single-element list containing the verifier's selection AgentRun
     """
     base_seed = client.config["seeds"]["global"]
-    runs = []
     
     # Generate candidate answers
+    candidates = []
     candidates_text = []
     for i in range(n_candidates):
         seed = base_seed + i
@@ -286,21 +298,13 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
             seed=seed
         )
         
-        verbalized_conf = 0.5 + (seed % 50) / 100.0
+        candidates.append({
+            "idx": i,
+            "answer": completion.text,
+            "model": completion.model,
+            "seed": seed
+        })
         candidates_text.append(f"Candidate {i}: {completion.text}")
-        
-        run = AgentRun(
-            task_id=task.id,
-            config="verifier",
-            model_role="tested_agents",
-            model_id=completion.model,
-            output=completion.text,
-            label="",
-            verbalized_conf=verbalized_conf,
-            logit_conf=None,
-            seed=seed
-        )
-        runs.append(run)
     
     # Verifier selects from candidates
     verifier_seed = base_seed + n_candidates
@@ -315,50 +319,69 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
         seed=verifier_seed
     )
     
+    # Parse verifier's selection to resolve the chosen candidate's answer
+    # Deterministic fallback: if parse fails, select candidate 0
+    selected_answer = None
+    selected_idx = None
+    
+    verifier_text = verifier_completion.text.lower()
+    for i in range(n_candidates):
+        if f"candidate {i}" in verifier_text:
+            selected_idx = i
+            selected_answer = candidates[i]["answer"]
+            break
+    
+    # Fallback: if no valid selection, deterministically choose candidate 0
+    if selected_answer is None:
+        selected_idx = 0
+        selected_answer = candidates[0]["answer"]
+    
     verifier_conf = 0.5 + (verifier_seed % 50) / 100.0
     
+    # Return the verifier's AgentRun with the SELECTED candidate's answer
+    # (not the raw verifier selection text)
     verifier_run = AgentRun(
         task_id=task.id,
         config="verifier",
         model_role="tested_agents",
         model_id=verifier_completion.model,
-        output=verifier_completion.text,
+        output=selected_answer,  # The actual selected candidate answer, not "Candidate N"
         label="",
         verbalized_conf=verifier_conf,
         logit_conf=None,
         seed=verifier_seed
     )
-    runs.append(verifier_run)
     
-    return runs
+    return [verifier_run]
 
 
 def run_diverse(task: Task, client: LLMClient) -> List[AgentRun]:
     """Interpretation-diverse ensemble prompting.
     
-    Prompts agents with different interpretation hints to encourage diversity.
+    FIX BUG 4: Binds each prompt to an ACTUAL task interpretation (from
+    task.interpretations), creating one agent per interpretation to produce
+    genuinely interpretation-directed outputs.
     
     Args:
         task: Task to execute
         client: LLMClient instance
     
     Returns:
-        List of AgentRuns (one per interpretation hint)
+        List of AgentRuns (one per task interpretation)
     """
     base_seed = client.config["seeds"]["global"]
     runs = []
     
-    # Generate interpretation hints (generic diversity prompts)
-    hints = [
-        "Consider the most literal interpretation",
-        "Consider edge cases and corner scenarios",
-        "Consider the most common use case",
-        "Consider performance and efficiency",
-        "Consider code readability and maintainability"
-    ]
-    
-    for i, hint in enumerate(hints):
+    # Generate one prompt per task interpretation (interpretation-directed ensemble)
+    for i, interp in enumerate(task.interpretations):
         seed = base_seed + i
+        
+        # Bind the prompt to this specific interpretation
+        # Use interpretation ID and gold_check as semantic hints
+        hint = f"Focus on interpretation {interp.id} ({interp.gold_check})"
+        if interp.is_target:
+            hint += " - this is the target interpretation"
+        
         prompt = PROMPT_DIVERSE_V1.format(
             task_prompt=task.prompt,
             interpretation_hint=hint
