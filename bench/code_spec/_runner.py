@@ -142,7 +142,12 @@ def candidate_worker_main(input_file, output_file):
     test_input = job["input"]
     multi = job["multi"]
 
-    namespace = {"__name__": "__main__"}
+    # Clean namespace: no __file__ pointing to repo, prevent candidate from
+    # deriving source paths
+    namespace = {
+        "__name__": "__main__",
+        "__file__": "<candidate>",  # Sandboxed, not real file path
+    }
     try:
         exec(candidate, namespace)  # noqa: S102 - benchmark candidate execution
     except Exception as exc:  # noqa: BLE001
@@ -248,40 +253,77 @@ def supervisor_main():
             # Spawn candidate worker subprocess
             # MAJOR FIX #3: Put candidate in process group for tree killing
             # BLOCKER FIX: Worker's stdout is separate from supervisor's stdout
+            # BLOCKER FIX: Worker runs with scrubbed environment (repo off import path)
+            
+            # Create isolated sandbox directory for worker cwd
+            sandbox_dir = tempfile.mkdtemp(prefix="codespec_sandbox_")
+            
             try:
-                if sys.platform == "win32":
-                    CREATE_NEW_PROCESS_GROUP = 0x00000200
-                    process = subprocess.Popen(
-                        [sys.executable, __file__, input_file, output_file],
-                        creationflags=CREATE_NEW_PROCESS_GROUP,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                else:
-                    process = subprocess.Popen(
-                        [sys.executable, __file__, input_file, output_file],
-                        start_new_session=True,  # New process group
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                
-                # Wait with timeout
                 try:
-                    process.wait(timeout=TIMEOUT_SECONDS)
-                except subprocess.TimeoutExpired:
-                    # Kill the entire process tree
-                    _kill_process_tree(process.pid)
+                    # Scrub environment: remove PYTHONPATH and other Python env vars
+                    clean_env = {}
+                    for key, value in os.environ.items():
+                        # Keep essential system variables, exclude Python-specific ones
+                        if not key.startswith('PYTHON') and key not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV'):
+                            clean_env[key] = value
+                    
+                    # Build worker command with -S -E -B flags
+                    # -S: don't add site-packages (disables editable install finder)
+                    # -E: ignore PYTHON* environment variables
+                    # -B: don't write .pyc files
+                    worker_cmd = [
+                        sys.executable,
+                        '-S',  # No site-packages
+                        '-E',  # No PYTHON* env vars
+                        '-B',  # No .pyc
+                        __file__,
+                        input_file,
+                        output_file,
+                    ]
+                    
+                    if sys.platform == "win32":
+                        CREATE_NEW_PROCESS_GROUP = 0x00000200
+                        process = subprocess.Popen(
+                            worker_cmd,
+                            creationflags=CREATE_NEW_PROCESS_GROUP,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            env=clean_env,
+                            cwd=sandbox_dir,  # Isolated cwd, not in repo
+                        )
+                    else:
+                        process = subprocess.Popen(
+                            worker_cmd,
+                            start_new_session=True,  # New process group
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            env=clean_env,
+                            cwd=sandbox_dir,  # Isolated cwd, not in repo
+                        )
+                    
+                    # Wait with timeout
                     try:
-                        process.wait(timeout=1)
+                        process.wait(timeout=TIMEOUT_SECONDS)
                     except subprocess.TimeoutExpired:
-                        pass
-                    _emit_verdict("fail", 
-                                f"Test {test_num} timeout (infinite loop or too slow)")
+                        # Kill the entire process tree
+                        _kill_process_tree(process.pid)
+                        try:
+                            process.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            pass
+                        _emit_verdict("fail", 
+                                    f"Test {test_num} timeout (infinite loop or too slow)")
+                        return
+                    
+                except Exception as exc:  # noqa: BLE001
+                    _emit_verdict("error", f"Worker spawn failed: {exc}")
                     return
-                
-            except Exception as exc:  # noqa: BLE001
-                _emit_verdict("error", f"Worker spawn failed: {exc}")
-                return
+            finally:
+                # Clean up sandbox directory
+                try:
+                    os.rmdir(sandbox_dir)
+                except OSError:
+                    pass
             
             # Read candidate's output
             try:

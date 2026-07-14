@@ -639,6 +639,100 @@ for _ in range(50):  # Keep trying for a few seconds
         f"Check took too long: {elapsed:.1f}s (expected <{_TIMEOUT_SECONDS * 3}s)"
 
 
+def test_blocker_gold_import_test_cases():
+    """BLOCKER FIX: Candidate cannot import gold test cases from bench.code_spec.
+    
+    PoC attack: A wrong candidate imports TEST_CASES from the installed package
+    and returns the expected output directly without solving the problem.
+    
+    The fix runs the candidate worker with -S -E -B flags and scrubbed environment,
+    so the repo is not on the import path. Attempting to import bench.code_spec
+    raises ImportError, causing the candidate to error out → FAIL.
+    """
+    gold_import_candidate = """
+# Try to import the gold test cases
+from bench.code_spec import TEST_CASES
+
+def sort_func(records):
+    # Oracle: look up the expected output for this input
+    for inp, expected in TEST_CASES['sort_asc_stable']:
+        if records == inp:
+            return expected
+    # Fallback: wrong answer
+    return []
+"""
+    
+    checker = CHECKERS["sort_asc_stable"]
+    result = checker.check(gold_import_candidate)
+    
+    # The attack must FAIL (import should be blocked)
+    assert not result.passed, f"Gold import attack succeeded! Details: {result.details}"
+    assert "error" in result.details.lower() or "import" in result.details.lower(), \
+        f"Expected import error, got: {result.details}"
+
+
+def test_blocker_gold_import_bench_module():
+    """BLOCKER FIX: Candidate cannot import bench module at all.
+    
+    Another variant: try importing the bench module itself.
+    """
+    bench_import_candidate = """
+import bench
+
+def sort_func(records):
+    # Return wrong answer
+    return records
+"""
+    
+    checker = CHECKERS["sort_asc_stable"]
+    result = checker.check(bench_import_candidate)
+    
+    # The attack must FAIL (import should be blocked)
+    assert not result.passed, f"Bench module import succeeded! Details: {result.details}"
+
+
+def test_blocker_gold_file_read():
+    """BLOCKER FIX: Candidate cannot read gold by deriving file paths.
+    
+    Try to read the __init__.py file directly by path manipulation.
+    The worker's __file__ is sandboxed and cwd is in an isolated temp dir.
+    """
+    file_read_candidate = """
+import os
+import sys
+
+def sort_func(records):
+    # Try to find and read the code_spec module file
+    try:
+        # Try various path manipulations
+        for attempt in [
+            os.path.join(os.getcwd(), '..', 'bench', 'code_spec', '__init__.py'),
+            os.path.join(__file__, '..', '..', 'bench', 'code_spec', '__init__.py'),
+            '/bench/code_spec/__init__.py',
+        ]:
+            try:
+                with open(attempt, 'r') as f:
+                    # If we can read it, we've broken isolation
+                    content = f.read()
+                    if 'TEST_CASES' in content:
+                        # This shouldn't succeed
+                        pass
+            except:
+                pass
+    except:
+        pass
+    
+    # Return wrong answer
+    return []
+"""
+    
+    checker = CHECKERS["sort_asc_stable"]
+    result = checker.check(file_read_candidate)
+    
+    # The attack must FAIL
+    assert not result.passed, f"File read attack succeeded! Details: {result.details}"
+
+
 def test_major_timeout_kills_descendants():
     """MAJOR FIX #3: Timeout kills descendant processes, not just the runner.
     
