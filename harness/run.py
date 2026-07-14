@@ -47,6 +47,84 @@ Focus on interpretation: {interpretation_hint}
 Provide your answer considering this perspective, with confidence (0-100%)."""
 
 
+# ── V2 templates: identical to V1 but append {answer_format_instruction} ──────
+
+PROMPT_SINGLE_V2 = """{task_prompt}
+
+Please provide your answer and express your confidence level (0-100%).
+
+{answer_format_instruction}"""
+
+PROMPT_SC_V2 = """{task_prompt}
+
+Provide your best answer and confidence level (0-100%).
+
+{answer_format_instruction}"""
+
+PROMPT_MAD_INITIAL_V2 = """{task_prompt}
+
+You are Agent {agent_idx} in a multi-agent discussion. Provide your initial answer and confidence (0-100%).
+
+{answer_format_instruction}"""
+
+PROMPT_MAD_ROUND_V2 = """{task_prompt}
+
+You are Agent {agent_idx}. Previous round answers from all agents:
+{previous_answers}
+
+Considering the above, provide your updated answer and confidence (0-100%).
+
+{answer_format_instruction}"""
+
+PROMPT_VERIFIER_CANDIDATE_V2 = """{task_prompt}
+
+Provide a candidate answer and your confidence (0-100%).
+
+{answer_format_instruction}"""
+
+PROMPT_VERIFIER_SELECT_V2 = """Task: {task_prompt}
+
+Candidate answers:
+{candidates}
+
+As a verifier, select the best answer from the candidates above. Provide your selection (Candidate N) and confidence (0-100%).
+
+{answer_format_instruction}"""
+
+PROMPT_DIVERSE_V2 = """{task_prompt}
+
+Focus on interpretation: {interpretation_hint}
+
+Provide your answer considering this perspective, with confidence (0-100%).
+
+{answer_format_instruction}"""
+
+
+def answer_format_instruction(domain: str) -> str:
+    """Return domain-appropriate answer-format instruction for prompt injection.
+
+    Mirrors the exact extraction contracts of harness/label.py so that real
+    agents are told to emit answers the labeler can extract:
+      - policy_qa:  FINAL ANSWER: $<amount>  OR  {"amount": <number>}
+      - code_spec / data_analysis: single ```python code block
+      - unknown domain: generic fallback (never crashes)
+    """
+    if domain == "policy_qa":
+        return (
+            'End your response with EXACTLY one of these formats:\n'
+            '  FINAL ANSWER: $<amount>  (e.g. FINAL ANSWER: $42.00)\n'
+            '  OR a standalone JSON object: {"amount": <number>}\n'
+            'This structured format is required for automated scoring.'
+        )
+    elif domain in ("code_spec", "data_analysis"):
+        return (
+            'Provide your complete solution as a SINGLE ```python code block.\n'
+            'Do not split your solution across multiple code blocks.'
+        )
+    else:
+        return 'State your final answer clearly and concisely.'
+
+
 def run_task(task: Task, config: str, client: LLMClient, **kwargs) -> List[AgentRun]:
     """Run a task with specified config and return agent runs.
     
@@ -94,7 +172,10 @@ def run_single(task: Task, client: LLMClient) -> AgentRun:
         Single AgentRun
     """
     seed = client.config["seeds"]["global"]
-    prompt = PROMPT_SINGLE_V1.format(task_prompt=task.prompt)
+    prompt = PROMPT_SINGLE_V2.format(
+        task_prompt=task.prompt,
+        answer_format_instruction=answer_format_instruction(task.domain)
+    )
     
     completion = client.complete(
         role="tested_agents",
@@ -134,7 +215,10 @@ def run_self_consistency(task: Task, client: LLMClient, k: int = 5) -> List[Agen
     
     for i in range(k):
         seed = base_seed + i
-        prompt = PROMPT_SC_V1.format(task_prompt=task.prompt)
+        prompt = PROMPT_SC_V2.format(
+            task_prompt=task.prompt,
+            answer_format_instruction=answer_format_instruction(task.domain)
+        )
         
         completion = client.complete(
             role="tested_agents",
@@ -217,9 +301,10 @@ def run_mad(
         for agent in agents:
             if round_idx == 0:
                 # Initial round
-                prompt = PROMPT_MAD_INITIAL_V1.format(
+                prompt = PROMPT_MAD_INITIAL_V2.format(
                     task_prompt=task.prompt,
-                    agent_idx=agent["idx"]
+                    agent_idx=agent["idx"],
+                    answer_format_instruction=answer_format_instruction(task.domain)
                 )
             else:
                 # Subsequent rounds: show FROZEN previous round answers (from canonical snapshot)
@@ -227,10 +312,11 @@ def run_mad(
                     f"Agent {idx}: {answer}"
                     for idx, answer in prev_round_snapshot
                 ])
-                prompt = PROMPT_MAD_ROUND_V1.format(
+                prompt = PROMPT_MAD_ROUND_V2.format(
                     task_prompt=task.prompt,
                     agent_idx=agent["idx"],
-                    previous_answers=prev_answers
+                    previous_answers=prev_answers,
+                    answer_format_instruction=answer_format_instruction(task.domain)
                 )
             
             # Get completion with round-specific seed
@@ -293,7 +379,10 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
     candidates_text = []
     for i in range(n_candidates):
         seed = base_seed + i
-        prompt = PROMPT_VERIFIER_CANDIDATE_V1.format(task_prompt=task.prompt)
+        prompt = PROMPT_VERIFIER_CANDIDATE_V2.format(
+            task_prompt=task.prompt,
+            answer_format_instruction=answer_format_instruction(task.domain)
+        )
         
         completion = client.complete(
             role="tested_agents",
@@ -311,9 +400,10 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
     
     # Verifier selects from candidates
     verifier_seed = base_seed + n_candidates
-    verifier_prompt = PROMPT_VERIFIER_SELECT_V1.format(
+    verifier_prompt = PROMPT_VERIFIER_SELECT_V2.format(
         task_prompt=task.prompt,
-        candidates="\n".join(candidates_text)
+        candidates="\n".join(candidates_text),
+        answer_format_instruction=answer_format_instruction(task.domain)
     )
     
     verifier_completion = client.complete(
@@ -385,9 +475,10 @@ def run_diverse(task: Task, client: LLMClient) -> List[AgentRun]:
         if interp.is_target:
             hint += " - this is the target interpretation"
         
-        prompt = PROMPT_DIVERSE_V1.format(
+        prompt = PROMPT_DIVERSE_V2.format(
             task_prompt=task.prompt,
-            interpretation_hint=hint
+            interpretation_hint=hint,
+            answer_format_instruction=answer_format_instruction(task.domain)
         )
         
         completion = client.complete(
