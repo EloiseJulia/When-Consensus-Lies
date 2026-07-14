@@ -1,10 +1,12 @@
 # constructed by: Claude (Anthropic) family
 """Policy question-answering domain for ambiguous policy interpretation.
 
-This domain features short policy/rule Q&A where deleting a requirement CLASS
-(a policy clause) creates GENUINE ambiguity about the correct decision. Gold
-checkers are deterministic (structured equality, NO LLM) because answers are
-STRUCTURED verdicts (dict/enum), not free-form prose.
+This domain features numeric policy calculations where deleting a requirement CLASS
+(a convention clause) creates GENUINE ambiguity about the correct answer. Gold
+checkers are deterministic (structured equality with numeric tolerance, NO LLM)
+because answers are STRUCTURED numeric values (dict with float), not free-form prose.
+
+All answers are {"amount": <float>} with 0.01 tolerance comparison.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -119,283 +121,292 @@ class StructuredAnswerChecker(GoldChecker):
 
 
 # ============================================================================
-# PROBLEM LIBRARY - Policy problems with requirement classes
+# PROBLEM LIBRARY - Convention-based numeric policy calculations
 # ============================================================================
 
-def problem_travel_reimbursement():
-    """Travel expense reimbursement with ambiguous cap and eligibility window.
+def problem_overtime_001():
+    """Gross pay calculation with ambiguous overtime threshold and overtime rate.
     
-    TARGET (I0): Deny (exceeds cap) - natural reading is the cap applies.
-    I1: Approve full (cap deleted) - plausible if you ignore the cap.
-    I2: Approve with shorter window (90-day instead of 180-day) - plausible if you read the shorter eligibility window.
-    """
-    
-    spec = FullSpec(
-        domain="policy_qa",
-        task_id="policy_travel_001",
-        # GENUINE: "eligible for reimbursement" is ambiguous on cap and window
-        prompt_core="""An employee submitted a travel expense claim for $1,800 within 60 days of the trip. Is this claim eligible for reimbursement, and if so, how much?""",
-        requirement_classes=[
-            RequirementClass(
-                id="spending_cap",
-                description="Maximum reimbursable amount",
-                clauses=["The maximum reimbursable amount per trip is $1,500."]
-            ),
-            RequirementClass(
-                id="submission_window",
-                description="Deadline for submission",
-                clauses=["Claims must be submitted within 180 days of the trip."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Cap applies: Deny (exceeds cap) - target natural reading",
-                is_target=True,
-                gold_check="travel_deny_cap"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="No cap: Approve full $1,800",
-                is_target=False,
-                gold_check="travel_approve_full",
-                opened_by="spending_cap"
-            ),
-            InterpretationBranch(
-                id="I2",
-                description="90-day window: Deny (outside window)",
-                is_target=False,
-                gold_check="travel_deny_window",
-                opened_by="submission_window"
-            ),
-        ],
-        key_questions=[
-            "What is the maximum reimbursable amount per trip?",
-            "What is the deadline for submitting claims?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_loan_approval():
-    """Loan approval with ambiguous credit score threshold and income verification.
-    
-    TARGET (I0): Approve - natural reading is >= 650 is inclusive.
-    I1: Deny (strict > 650, not >=) - plausible if you read > not >=.
-    I2: Pending (missing income docs) - plausible if you require income verification.
-    """
-    
-    spec = FullSpec(
-        domain="policy_qa",
-        task_id="policy_loan_001",
-        # GENUINE: "minimum score 650" is ambiguous on inclusive vs exclusive
-        prompt_core="""An applicant has a credit score of 650 and submitted a loan application without income documentation. Should this application be approved?""",
-        requirement_classes=[
-            RequirementClass(
-                id="score_threshold",
-                description="Credit score threshold interpretation",
-                clauses=["The minimum credit score is 650 (inclusive)."]
-            ),
-            RequirementClass(
-                id="income_verification",
-                description="Income documentation requirement",
-                clauses=["Income documentation is not required for applications above the minimum score."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Inclusive threshold (>= 650): Approve - target",
-                is_target=True,
-                gold_check="loan_approve"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="Exclusive threshold (> 650): Deny",
-                is_target=False,
-                gold_check="loan_deny_score",
-                opened_by="score_threshold"
-            ),
-            InterpretationBranch(
-                id="I2",
-                description="Require income docs: Pending",
-                is_target=False,
-                gold_check="loan_pending_docs",
-                opened_by="income_verification"
-            ),
-        ],
-        key_questions=[
-            "Is the minimum credit score inclusive (>= 650) or exclusive (> 650)?",
-            "Are income documents required for all applications?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_refund_eligibility():
-    """Product refund with ambiguous return window and condition requirement.
-    
-    TARGET (I0): Approve - natural reading is within 30 days + any condition OK.
-    I1: Deny (45-day window passed) - plausible if you read 45-day window.
-    I2: Deny (not unopened) - plausible if you require unopened condition.
-    """
-    
-    spec = FullSpec(
-        domain="policy_qa",
-        task_id="policy_refund_001",
-        # GENUINE: "eligible for refund" is ambiguous on window and condition
-        prompt_core="""A customer purchased a product 25 days ago and wants a refund. The product has been opened but is undamaged. Is this refund request eligible?""",
-        requirement_classes=[
-            RequirementClass(
-                id="return_window",
-                description="Return deadline",
-                clauses=["Refunds are accepted within 30 days of purchase."]
-            ),
-            RequirementClass(
-                id="product_condition",
-                description="Product condition requirement",
-                clauses=["Products must be unopened for a refund."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Within 30 days, any condition: Approve - target",
-                is_target=True,
-                gold_check="refund_approve"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="45-day window: Deny (outside 45-day window)",
-                is_target=False,
-                gold_check="refund_deny_window",
-                opened_by="return_window"
-            ),
-            InterpretationBranch(
-                id="I2",
-                description="Unopened required: Deny (opened)",
-                is_target=False,
-                gold_check="refund_deny_condition",
-                opened_by="product_condition"
-            ),
-        ],
-        key_questions=[
-            "What is the return window (30 or 45 days)?",
-            "Must products be unopened for a refund?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_overtime_pay():
-    """Overtime pay calculation with ambiguous rate and eligibility.
-    
-    TARGET (I0): $450 (1.5x for all 10 hours) - natural reading is 1.5x applies.
-    I1: $600 (2x rate) - plausible if you read double-time.
-    I2: $300 (no overtime, straight time) - plausible if you exclude weekend.
+    Fairness note: All parameters are stated; answers are numeric amounts only.
+    TARGET (I0) is the answer using standard US FLSA convention (40h threshold,
+    1.5x multiplier). Each non-target interpretation deviates on EXACTLY ONE
+    convention axis and only makes sense if the deleted clause specified that
+    alternative convention.
     """
     
     spec = FullSpec(
         domain="policy_qa",
         task_id="policy_overtime_001",
-        # GENUINE: "overtime pay" is ambiguous on rate and weekend eligibility
-        prompt_core="""An employee worked 10 hours of overtime on a Saturday at a base rate of $30/hour. What is the total overtime pay?""",
+        prompt_core="""An employee worked 45 hours in one week. Their base pay rate is $20.00 per hour. Compute the employee's gross pay for the week. Answer in dollars, rounded to the nearest cent.""",
         requirement_classes=[
             RequirementClass(
-                id="overtime_rate",
-                description="Overtime pay multiplier",
-                clauses=["Overtime is paid at 1.5x the base rate."]
+                id="overtime_threshold",
+                description="Hours worked before overtime applies",
+                clauses=["Overtime applies to hours worked beyond 40 in a week."]
             ),
             RequirementClass(
-                id="weekend_eligibility",
-                description="Weekend overtime eligibility",
-                clauses=["Weekend hours qualify for overtime pay."]
+                id="overtime_rate",
+                description="Multiplier for overtime hours",
+                clauses=["Overtime hours are paid at 1.5 times the base rate."]
             ),
         ],
         interpretations=[
+            # TARGET (I0): Standard US FLSA (40h, 1.5x) -> 40*20 + 5*20*1.5 = 800+150 = 950
             InterpretationBranch(
                 id="I0",
-                description="1.5x rate, weekend qualifies: $450 - target",
+                description="40h regular + 5h OT at 1.5x: 40*20 + 5*30 = 950.",
                 is_target=True,
-                gold_check="overtime_450"
+                gold_check="overtime_950"
             ),
+            # Non-target (I1): 44h threshold -> 44*20 + 1*30 = 880+30 = 910
             InterpretationBranch(
                 id="I1",
-                description="2x rate: $600",
+                description="If threshold is 44h: 44*20 + 1*30 = 910.",
                 is_target=False,
-                gold_check="overtime_600",
-                opened_by="overtime_rate"
+                gold_check="overtime_910",
+                opened_by="overtime_threshold"
             ),
+            # Non-target (I2): 2.0x rate -> 40*20 + 5*20*2.0 = 800+200 = 1000
             InterpretationBranch(
                 id="I2",
-                description="Weekend excluded: $300 (straight time)",
+                description="If rate is 2.0x: 40*20 + 5*40 = 1000.",
                 is_target=False,
-                gold_check="overtime_300",
-                opened_by="weekend_eligibility"
+                gold_check="overtime_1000",
+                opened_by="overtime_rate"
             ),
         ],
         key_questions=[
-            "What is the overtime pay multiplier (1.5x or 2x)?",
-            "Do weekend hours qualify for overtime pay?"
+            "After how many hours per week does overtime begin (40, or another threshold)?",
+            "What multiplier applies to overtime hours (1.5x, or another rate)?"
         ]
     )
     
     return spec
 
 
-def problem_discount_eligibility():
-    """Student discount with ambiguous age limit and enrollment verification.
+def problem_interest_001():
+    """Simple interest calculation with ambiguous day-count and compounding conventions.
     
-    TARGET (I0): 15% discount - natural reading is age < 26 inclusive, no verification needed.
-    I1: 10% discount (age >= 26) - plausible if you read age limit as exclusive.
-    I2: No discount (verification required but missing) - plausible if you require enrollment proof.
+    Fairness note: The TARGET (I0) uses actual/365 day-count basis and simple
+    interest, which are the natural defaults for short-term loans in banking.
+    Each non-target interpretation requires an explicit alternative convention.
+    """
+    
+    spec = FullSpec(
+        domain="policy_qa",
+        task_id="policy_interest_001",
+        prompt_core="""A loan of $10,000.00 carries an annual interest rate of 6%. It is outstanding for 90 days. Compute the interest owed. Answer in dollars, rounded to the nearest cent.""",
+        requirement_classes=[
+            RequirementClass(
+                id="day_count",
+                description="Day-count convention for interest calculation",
+                clauses=["Use a 365-day year to compute the daily interest rate."]
+            ),
+            RequirementClass(
+                id="compounding",
+                description="Compounding method",
+                clauses=["The interest is simple interest (not compounded)."]
+            ),
+        ],
+        interpretations=[
+            # TARGET (I0): 365-day, simple -> 10000 * 0.06 * 90/365 = 147.95
+            InterpretationBranch(
+                id="I0",
+                description="Simple interest: 10000 * 0.06 * 90/365 = 147.95.",
+                is_target=True,
+                gold_check="interest_365_simple"
+            ),
+            # Non-target (I1): 360-day convention -> 10000 * 0.06 * 90/360 = 150.00
+            InterpretationBranch(
+                id="I1",
+                description="If 360-day year: 10000 * 0.06 * 90/360 = 150.00.",
+                is_target=False,
+                gold_check="interest_360",
+                opened_by="day_count"
+            ),
+            # Non-target (I2): monthly compounding -> 10000 * ((1+0.06/12)^3 - 1) = 150.75
+            InterpretationBranch(
+                id="I2",
+                description="If monthly compounding: 10000 * ((1.005)^3 - 1) = 150.75.",
+                is_target=False,
+                gold_check="interest_compound",
+                opened_by="compounding"
+            ),
+        ],
+        key_questions=[
+            "Should the daily rate use a 365-day or 360-day year?",
+            "Is the interest simple, or compounded?"
+        ]
+    )
+    
+    return spec
+
+
+def problem_tip_001():
+    """Restaurant tip calculation with ambiguous tip base and rounding.
+    
+    Fairness note: The TARGET (I0) computes tip on the pre-tax food amount and
+    rounds to the nearest cent, which is standard US restaurant etiquette.
+    """
+    
+    spec = FullSpec(
+        domain="policy_qa",
+        task_id="policy_tip_001",
+        prompt_core="""A restaurant bill totals $54.00, consisting of $50.00 for food and $4.00 in tax. Compute a 15% tip. Answer in dollars, rounded to the nearest cent.""",
+        requirement_classes=[
+            RequirementClass(
+                id="tip_base",
+                description="Base amount for tip calculation",
+                clauses=["The tip is calculated on the pre-tax food amount."]
+            ),
+            RequirementClass(
+                id="tip_rounding",
+                description="Rounding convention for tip",
+                clauses=["Round the tip to the nearest cent."]
+            ),
+        ],
+        interpretations=[
+            # TARGET (I0): pre-tax, cent rounding -> 0.15 * 50 = 7.50
+            InterpretationBranch(
+                id="I0",
+                description="15% of $50 pre-tax = $7.50.",
+                is_target=True,
+                gold_check="tip_pretax"
+            ),
+            # Non-target (I1): tip on total -> 0.15 * 54 = 8.10
+            InterpretationBranch(
+                id="I1",
+                description="If on total: 15% of $54 = $8.10.",
+                is_target=False,
+                gold_check="tip_total",
+                opened_by="tip_base"
+            ),
+            # Non-target (I2): round up to next dollar -> ceil(7.50) = 8.00
+            InterpretationBranch(
+                id="I2",
+                description="If round up to dollar: ceil($7.50) = $8.00.",
+                is_target=False,
+                gold_check="tip_roundup",
+                opened_by="tip_rounding"
+            ),
+        ],
+        key_questions=[
+            "Is the tip computed on the pre-tax amount or the after-tax total?",
+            "Round the tip to the nearest cent, or up to the next whole dollar?"
+        ]
+    )
+    
+    return spec
+
+
+def problem_refund_001():
+    """Prorated subscription refund with ambiguous term basis and cancellation-day counting.
+    
+    Fairness note: The TARGET (I0) uses a 365-day term and counts the cancellation
+    day as used, which are common defaults in subscription services.
+    """
+    
+    spec = FullSpec(
+        domain="policy_qa",
+        task_id="policy_refund_001",
+        prompt_core="""A customer paid $360.00 for a 12-month subscription. 90 days have elapsed since activation when they cancel. Compute the refund for the unused portion. Answer in dollars, rounded to the nearest cent.""",
+        requirement_classes=[
+            RequirementClass(
+                id="year_basis",
+                description="Day-count basis for subscription term",
+                clauses=["Treat the subscription term as 365 days for proration."]
+            ),
+            RequirementClass(
+                id="include_cancel_day",
+                description="Treatment of cancellation day",
+                clauses=["Count the cancellation day itself as a used day."]
+            ),
+        ],
+        interpretations=[
+            # TARGET (I0): 365-day, 90 used -> 360 * (365-90)/365 = 271.23
+            InterpretationBranch(
+                id="I0",
+                description="365-day basis, 90 used: 360 * 275/365 = 271.23.",
+                is_target=True,
+                gold_check="refund_365_90"
+            ),
+            # Non-target (I1): 360-day term -> 360 * (360-90)/360 = 270.00
+            InterpretationBranch(
+                id="I1",
+                description="If 360-day term: 360 * 270/360 = 270.00.",
+                is_target=False,
+                gold_check="refund_360",
+                opened_by="year_basis"
+            ),
+            # Non-target (I2): cancel day not used (89 used) -> 360 * (365-89)/365 = 272.22
+            InterpretationBranch(
+                id="I2",
+                description="If cancel day not used (89 days): 360 * 276/365 = 272.22.",
+                is_target=False,
+                gold_check="refund_89",
+                opened_by="include_cancel_day"
+            ),
+        ],
+        key_questions=[
+            "Should proration treat the term as 365 or 360 days?",
+            "Does the cancellation day count as a used day?"
+        ]
+    )
+    
+    return spec
+
+
+def problem_discount_001():
+    """Stacked discount calculation with ambiguous stacking and price rounding.
+    
+    Fairness note: The TARGET (I0) applies discounts sequentially (multiplicative)
+    and rounds the final price to the nearest cent, which is standard in retail.
     """
     
     spec = FullSpec(
         domain="policy_qa",
         task_id="policy_discount_001",
-        # GENUINE: "student discount" is ambiguous on age cutoff and verification
-        prompt_core="""A customer is 25 years old and claims to be a student but has not provided enrollment verification. What discount should be applied?""",
+        prompt_core="""An item is priced at $100.00 and has two promotional discounts of 15% and 12%. Compute the final price. Answer in dollars, rounded to the nearest cent.""",
         requirement_classes=[
             RequirementClass(
-                id="age_limit",
-                description="Student discount age threshold",
-                clauses=["Students under 26 qualify for a 15% discount."]
+                id="stacking",
+                description="Discount stacking method",
+                clauses=["Apply the two discounts sequentially, each on the running price."]
             ),
             RequirementClass(
-                id="enrollment_proof",
-                description="Enrollment verification requirement",
-                clauses=["Enrollment verification is not required for the discount."]
+                id="price_rounding",
+                description="Price rounding convention",
+                clauses=["Round the final price to the nearest cent."]
             ),
         ],
         interpretations=[
+            # TARGET (I0): Sequential (0.85 * 0.88), cent rounding -> 100*0.85*0.88 = 74.80
             InterpretationBranch(
                 id="I0",
-                description="Under 26 (inclusive), no verification: 15% - target",
+                description="Sequential: 100*0.85*0.88 = 74.80.",
                 is_target=True,
-                gold_check="discount_15"
+                gold_check="discount_sequential"
             ),
+            # Non-target (I1): Additive (27% off) -> 100*(1-0.27) = 73.00
             InterpretationBranch(
                 id="I1",
-                description="Age >= 26: 10% general discount",
+                description="If additive (15+12=27% off): 100*0.73 = 73.00.",
                 is_target=False,
-                gold_check="discount_10",
-                opened_by="age_limit"
+                gold_check="discount_additive",
+                opened_by="stacking"
             ),
+            # Non-target (I2): Round to whole dollar -> round(74.80) = 75.00
             InterpretationBranch(
                 id="I2",
-                description="Verification required: 0% (no proof)",
+                description="If round to dollar: round(74.80) = 75.00.",
                 is_target=False,
-                gold_check="discount_0",
-                opened_by="enrollment_proof"
+                gold_check="discount_roundup",
+                opened_by="price_rounding"
             ),
         ],
         key_questions=[
-            "What is the age threshold for student discount (under 26 inclusive or exclusive)?",
-            "Is enrollment verification required?"
+            "Are the discounts applied sequentially or added together?",
+            "Round the final price to the nearest cent, or the nearest whole dollar?"
         ]
     )
     
@@ -407,30 +418,30 @@ def problem_discount_eligibility():
 # ============================================================================
 
 REFERENCE_ANSWERS = {
-    # Travel reimbursement
-    "travel_deny_cap": {"decision": "deny", "reason": "exceeds_cap", "amount": 0},
-    "travel_approve_full": {"decision": "approve", "reason": "within_limits", "amount": 1800},
-    "travel_deny_window": {"decision": "deny", "reason": "outside_window", "amount": 0},
+    # Overtime gross pay (policy_overtime_001)
+    "overtime_950": {"amount": 950.00},
+    "overtime_910": {"amount": 910.00},
+    "overtime_1000": {"amount": 1000.00},
     
-    # Loan approval
-    "loan_approve": {"decision": "approve"},
-    "loan_deny_score": {"decision": "deny", "reason": "score_too_low"},
-    "loan_pending_docs": {"decision": "pending", "reason": "missing_income_docs"},
+    # Interest owed (policy_interest_001)
+    "interest_365_simple": {"amount": 147.95},
+    "interest_360": {"amount": 150.00},
+    "interest_compound": {"amount": 150.75},
     
-    # Refund eligibility
-    "refund_approve": {"decision": "approve"},
-    "refund_deny_window": {"decision": "deny", "reason": "outside_window"},
-    "refund_deny_condition": {"decision": "deny", "reason": "product_opened"},
+    # Restaurant tip (policy_tip_001)
+    "tip_pretax": {"amount": 7.50},
+    "tip_total": {"amount": 8.10},
+    "tip_roundup": {"amount": 8.00},
     
-    # Overtime pay
-    "overtime_450": {"amount": 450},
-    "overtime_600": {"amount": 600},
-    "overtime_300": {"amount": 300},
+    # Subscription refund (policy_refund_001)
+    "refund_365_90": {"amount": 271.23},
+    "refund_360": {"amount": 270.00},
+    "refund_89": {"amount": 272.22},
     
-    # Discount
-    "discount_15": {"discount_percent": 15},
-    "discount_10": {"discount_percent": 10},
-    "discount_0": {"discount_percent": 0},
+    # Stacked discount (policy_discount_001)
+    "discount_sequential": {"amount": 74.80},
+    "discount_additive": {"amount": 73.00},
+    "discount_roundup": {"amount": 75.00},
 }
 
 
@@ -458,11 +469,11 @@ def generate_tasks() -> List[Task]:
     """
     
     problems = [
-        problem_travel_reimbursement(),
-        problem_loan_approval(),
-        problem_refund_eligibility(),
-        problem_overtime_pay(),
-        problem_discount_eligibility(),
+        problem_overtime_001(),
+        problem_interest_001(),
+        problem_tip_001(),
+        problem_refund_001(),
+        problem_discount_001(),
     ]
     
     tasks = []
@@ -533,62 +544,59 @@ def get_task_specific_foils(task_id_base: str) -> List[Any]:
     Each foil is a plausible wrong answer that must match AT MOST ONE checker.
     """
     
-    if "policy_travel" in task_id_base:
+    if "policy_overtime" in task_id_base:
         return [
-            # Near-miss: approve partial (cap at $1500) - boundary between deny and approve
-            {"decision": "approve", "reason": "partial", "amount": 1500},
-            # Near-miss: deny with wrong reason
-            {"decision": "deny", "reason": "incomplete_docs", "amount": 0},
-            # Wrong structure: missing fields
-            {"decision": "approve"},
-            # Wrong type
-            "deny",
+            # Near-miss: plausible arithmetic errors
+            {"amount": 940.00},  # Close to 950
+            {"amount": 920.00},  # Between interpretations
+            # Wrong structure: bare number instead of dict
+            950.00,
+            # Wrong key
+            {"total": 950.00},
         ]
     
-    elif "policy_loan" in task_id_base:
+    elif "policy_interest" in task_id_base:
         return [
-            # Near-miss: approve with condition (boundary)
-            {"decision": "approve", "condition": "provide_income_docs"},
-            # Near-miss: deny with different reason
-            {"decision": "deny", "reason": "insufficient_history"},
+            # Near-miss: plausible errors
+            {"amount": 148.00},  # Close to 147.95
+            {"amount": 149.00},  # Between interpretations
             # Wrong structure
-            {"status": "approved"},
-            # Boolean instead of structured
-            True,
+            147.95,
+            # String instead of dict
+            "$147.95",
+        ]
+    
+    elif "policy_tip" in task_id_base:
+        return [
+            # Near-miss: other plausible tip amounts
+            {"amount": 7.00},   # Round down
+            {"amount": 9.00},   # Higher tip
+            # Wrong structure
+            7.50,
+            # Wrong key
+            {"tip": 7.50},
         ]
     
     elif "policy_refund" in task_id_base:
         return [
-            # Near-miss: partial refund (boundary)
-            {"decision": "approve", "amount_percent": 80},
-            # Near-miss: deny with wrong reason
-            {"decision": "deny", "reason": "damaged"},
-            # Wrong key name
-            {"status": "approve"},
-            # String instead of dict
-            "approved",
-        ]
-    
-    elif "policy_overtime" in task_id_base:
-        return [
-            # Near-miss: close amounts (boundary testing)
-            {"amount": 400},
-            {"amount": 480},
+            # Near-miss: plausible rounding errors
+            {"amount": 271.00},  # Close to 271.23
+            {"amount": 271.50},  # Between interpretations
             # Wrong structure
-            450,
-            # String instead of dict
-            "$450",
+            271.23,
+            # String
+            "$271.23",
         ]
     
     elif "policy_discount" in task_id_base:
         return [
-            # Near-miss: wrong discount amounts (boundary)
-            {"discount_percent": 20},
-            {"discount_percent": 5},
+            # Near-miss: other plausible prices
+            {"amount": 74.00},   # Close to 74.80
+            {"amount": 76.00},   # Different rounding
             # Wrong structure
-            {"discount": 0.15},
-            # Plain number
-            15,
+            74.80,
+            # Wrong key
+            {"price": 74.80},
         ]
     
     else:
