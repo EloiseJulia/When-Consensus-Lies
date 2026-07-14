@@ -99,43 +99,39 @@ class DataChecker(GoldChecker):
             "test_cases": self._serialize_cases(),
         })
 
-        # The verdict is written to this dedicated file (not stdout), so benign
-        # candidate output can never corrupt it.
-        fd, verdict_path = tempfile.mkstemp(prefix="data_analysis_verdict_", suffix=".json")
-        os.close(fd)
+        # BLOCKER FIX: Verdict delivered over PARENT-OWNED PIPE (supervisor stdout),
+        # NOT a shared temp file. The supervisor writes verdict to stdout with a
+        # sentinel prefix. The candidate worker's stdout goes to a separate pipe
+        # (to supervisor), so candidate cannot write to DataChecker's pipe.
         try:
-            try:
-                subprocess.run(
-                    [sys.executable, _RUNNER_PATH, verdict_path],
-                    input=payload,
-                    text=True,
-                    # DEVNULL (not PIPE): a candidate-spawned grandchild that
-                    # inherits these handles cannot keep the parent blocked past
-                    # the timeout.
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired:
-                # subprocess.run kills the child on timeout -> runaway code is
-                # actually terminated.
-                result = (False, "Execution timeout (infinite loop or too slow)")
-                _RESULT_CACHE[cache_key] = result
-                return CheckResult(passed=False, details=f"{self.description} - {result[1]}")
+            result = subprocess.run(
+                [sys.executable, _RUNNER_PATH],  # No verdict_path arg
+                input=payload,
+                text=True,
+                capture_output=True,  # Capture supervisor stdout
+                timeout=_TIMEOUT_SECONDS * 2,  # Allow supervisor its own timeout budget
+            )
+        except subprocess.TimeoutExpired:
+            # Supervisor itself timed out (shouldn't happen in practice)
+            result_tuple = (False, "Supervisor timeout (unexpected)")
+            _RESULT_CACHE[cache_key] = result_tuple
+            return CheckResult(passed=False, details=f"{self.description} - {result_tuple[1]}")
 
-            try:
-                with open(verdict_path, "r", encoding="utf-8") as vf:
-                    raw = vf.read().strip()
-                verdict = json.loads(raw)
-            except Exception as exc:  # noqa: BLE001
-                msg = f"No/invalid runner verdict: {exc}"
-                _RESULT_CACHE[cache_key] = (False, msg)
-                return CheckResult(passed=False, details=f"{self.description} - {msg}")
-        finally:
-            try:
-                os.unlink(verdict_path)
-            except OSError:
-                pass
+        # Parse verdict from supervisor stdout (sentinel line)
+        verdict = None
+        for line in result.stdout.splitlines():
+            if line.startswith("__DATA_ANALYSIS_VERDICT__ "):
+                try:
+                    verdict_json = line[len("__DATA_ANALYSIS_VERDICT__ "):]
+                    verdict = json.loads(verdict_json)
+                    break
+                except Exception:  # noqa: BLE001
+                    pass
+        
+        if verdict is None:
+            msg = "No verdict in supervisor output"
+            _RESULT_CACHE[cache_key] = (False, msg)
+            return CheckResult(passed=False, details=f"{self.description} - {msg}")
 
         passed = verdict.get("status") == "pass"
         msg = verdict.get("message", "")
