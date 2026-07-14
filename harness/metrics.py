@@ -4,7 +4,14 @@ PRIMARY METRIC: convergent_delusion (false_consensus_rate)
   = fraction of agents concentrated on the SAME single wrong label
   ≠ binary ρ (which only measures any-wrong vs correct)
 
-SECONDARY: marginal_rho (binary correlation bridge to prior literature)
+SECONDARY METRICS (diagnostic/bridge, NOT primary):
+  - marginal_rho: binary error correlation (bridge to prior literature)
+  - confidence_accuracy_slope: calibration ranking diagnostic
+  - ece: expected calibration error
+  - a_maj: majority-vote accuracy
+
+CRITICAL: convergent_delusion is PRIMARY. Do NOT treat binary ρ or
+marginal_rho as primary — they cannot distinguish concentrated vs scattered errors.
 """
 
 from typing import List, Tuple
@@ -185,3 +192,59 @@ def ece(confidences: List[float], correct: List[bool], n_bins: int = 10) -> floa
             ece_sum += weight * abs(avg_conf - accuracy)
     
     return ece_sum
+
+
+def confidence_accuracy_slope(confidences: List[float], correct: List[bool]) -> float:
+    """Compute the slope of OLS linear regression of correctness on confidence.
+    
+    This is a SECONDARY DIAGNOSTIC metric that measures the confidence-accuracy
+    relationship: positive slope means higher confidence associates with higher
+    accuracy (better-ranked calibration), negative slope means miscalibration.
+    
+    Formula: slope = cov(confidence, correct) / var(confidence)
+    where correct is treated as 1.0 for True, 0.0 for False.
+    
+    Returns 0.0 if:
+      - confidences is empty
+      - lengths mismatch
+      - confidence has zero variance (slope is mathematically undefined)
+    
+    Examples:
+        >>> confidence_accuracy_slope([0.2, 0.4, 0.6, 0.8], [False, False, True, True])
+        2.0  # Perfect positive relationship
+        
+        >>> confidence_accuracy_slope([0.5, 0.5, 0.5], [True, False, True])
+        0.0  # Zero variance in confidence → undefined slope
+    
+    Args:
+        confidences: List of confidence scores (floats, typically in [0, 1])
+        correct: List of boolean correctness indicators
+    
+    Returns:
+        Float: OLS slope of correct ~ confidence, or 0.0 if undefined
+    """
+    if not confidences or len(confidences) != len(correct):
+        return 0.0
+    
+    n = len(confidences)
+    
+    # Convert correct to float
+    correct_float = [1.0 if c else 0.0 for c in correct]
+    
+    # Compute means
+    mean_conf = sum(confidences) / n
+    mean_correct = sum(correct_float) / n
+    
+    # Compute variance of confidence
+    var_conf = sum((c - mean_conf) ** 2 for c in confidences) / n
+    
+    # If zero variance, slope is undefined
+    if var_conf == 0.0:
+        return 0.0
+    
+    # Compute covariance
+    cov = sum((conf - mean_conf) * (corr - mean_correct) 
+              for conf, corr in zip(confidences, correct_float)) / n
+    
+    # Return slope
+    return cov / var_conf
