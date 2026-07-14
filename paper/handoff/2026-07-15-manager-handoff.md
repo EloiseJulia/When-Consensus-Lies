@@ -8,8 +8,14 @@
 ## 0. TL;DR
 - Phase 0 & Phase 1: **DONE, merged to `main`**.
 - Phase 2 (harness+metrics): metrics ✅, run ✅, data_analysis flakiness fix ✅ (all merged);
-  **label slice is NOT merged — a structured-answer rework is IN-FLIGHT and UNCOMMITTED** in
-  its worktree (see §1, §6). Integration test + pre-registration NOT started.
+  **label slice is NOT merged, but the structured-answer rework is now COMMITTED** on its branch
+  at `df827cd` (see §1, §6) — it needs a FRESH cross-family audit → push → PR → merge. Integration
+  test + pre-registration NOT started.
+
+> UPDATE (post-retirement, docs-only): the `impl-p2-label` sub-agent completed AFTER the handoff was
+> first written. The label rework is COMMITTED (`df827cd`), not uncommitted. §1 and §f below reflect
+> this. Independent verification: full suite **167 passed** (1×, 2026-07-15). Still un-audited since
+> the rework and un-merged.
 - **PRE-REGISTRATION (H1/H2 + metric lock) is NOT done yet — this is a gating blocker before
   any full-scale run. See §D.**
 
@@ -36,12 +42,14 @@
 | — | Phase 2-S2b **label** | **NO PR yet; branch unmerged** |
 
 ### Un-merged branches / worktrees
-- `slice/phase2-S2b-label` @ `a683239` (worktree `.worktrees/phase2-label`) — **HAS UNCOMMITTED
-  CHANGES** to `harness/label.py` and `tests/test_label.py` (plus a deleted scratch
-  `commit_msg.txt`). This is the in-flight structured-answer rework (see §C, §6). The
-  `impl-p2-label` sub-agent was STILL RUNNING at retirement (turn 6, ~296 tool calls) and may
-  or may not have committed. **A successor MUST inspect this worktree first**: if the rework is
-  complete + tests green, commit it via a sub-agent; if partial, a fix sub-agent should finish it.
+- `slice/phase2-S2b-label` @ **`df827cd`** (worktree `.worktrees/phase2-label`) — the structured-answer
+  rework is **COMMITTED** (owner contract §C4: policy extraction = JSON amount → `FINAL ANSWER:` marker
+  → else I_perp; free-text guessing removed; code_spec/data_analysis labeling unchanged; obsolete
+  free-text tests removed). Worktree clean except a stray uncommitted deletion of scratch
+  `commit_msg.txt` (harmless; discard). Full suite **167 passed** (independent 1× re-run; agent
+  reported 2× green). **NOT pushed, NO PR, NOT audited since the rework.** Successor's first job: run a
+  FRESH cross-family (non-Claude, e.g. GPT) audit of the new extraction contract + canonical-reference
+  invariant, then push → PR → merge.
 - `fix/data_analysis-harness-flaky` @ `821bcc2` (worktree `.worktrees/phase2-dataflaky`) — already
   MERGED as #7 (squash). Branch/worktree are leftover; safe to prune.
 - Phase 1 slice branches/worktrees (`phase1-*`) — all merged; leftover; safe to prune.
@@ -147,11 +155,12 @@ the next label auditor a NON-Claude family.
   audited (independent recomputation), 0 findings.
 
 ## f. Open threads / ordered next steps (with deps)
-1. **[FIRST] Resolve the label slice.** Inspect `.worktrees/phase2-label` (uncommitted rework to
-   harness/label.py + tests/test_label.py implementing the structured-answer contract §C4). If the
-   `impl-p2-label` agent finished and tests are twice-green + canonical-reference invariant holds →
-   commit via a sub-agent, then run a FRESH cross-family (non-Claude) audit of the extraction, then
-   PR + merge. If partial → spawn a fix sub-agent to finish per the contract. (Blocks integration.)
+1. **[FIRST] Finish the label slice.** The structured-answer rework is COMMITTED at `df827cd` on
+   `slice/phase2-S2b-label` (worktree `.worktrees/phase2-label`), full suite 167 passed, but it is
+   NOT pushed, has NO PR, and has NOT been audited since the rework. Run a FRESH cross-family
+   (non-Claude) audit of harness/label.py's structured extraction contract + the canonical-reference
+   invariant (all 3 domains). If clean → push, PR, merge. If findings → spawn a Claude fix sub-agent,
+   re-audit cross-family. (Blocks integration.) Also discard the stray `commit_msg.txt` deletion.
 2. **[dep:1] Policy prompt structured-answer instruction** (todo `p2-answerfmt-prompt`): a sub-agent
    must make run.py / the policy prompt instruct agents to end with `FINAL ANSWER: $<amount>` or JSON
    {"amount": N}, matching the labeler contract. Then re-run run/label integration.
