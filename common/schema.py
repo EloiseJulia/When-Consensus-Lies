@@ -2,10 +2,16 @@
 
 Core data structures defining the interface contract for the project.
 These dataclasses mirror AI-Execution-Plan §3.
+
+Amendment 02 (owner-approved 2026-07-15): added Task.regime field.
+See paper/preregistration/2026-07-15-amendment-02-regime-field.md.
 """
 
 from dataclasses import dataclass
 from typing import List, Optional
+
+# Single source of truth for allowed regime values (Amendment 02).
+VALID_REGIMES = ("H1_external", "H2_derivable", None)
 
 
 @dataclass
@@ -31,6 +37,13 @@ class Task:
     interpretations: List[Interpretation]
     ambiguity_level: int  # 1|2|3 = how many requirement classes deleted
     key_questions: List[str]  # Golden clarifying questions
+    regime: Optional[str] = None  # "H1_external" | "H2_derivable" | None (excluded/untagged)
+
+    def __post_init__(self) -> None:
+        if self.regime not in VALID_REGIMES:
+            raise ValueError(
+                f"Task.regime must be one of {VALID_REGIMES!r}, got {self.regime!r}"
+            )
 
 
 @dataclass
