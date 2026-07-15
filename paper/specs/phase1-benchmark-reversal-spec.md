@@ -24,7 +24,25 @@
   specified (prompt == latent_spec), single interpretation, empty key_questions.
 - Executable gold per interpretation unchanged in KIND (unit-test/deterministic value / exact-cent).
 
-## Example reversed task A — code_spec (fiscal vs calendar quarter)  [ILLUSTRATIVE]
+## H1/H2 regime classification (construction-time; operationalizes prereg §2)
+Every reconstructed task is tagged `regime ∈ {H1_external, H2_derivable, EXCLUDED}` AT CONSTRUCTION via
+this explicit test (aligns with the frozen prereg §2 regime criterion):
+
+> **Is the disambiguator PRESENT in the prompt/data (→ H2_derivable) or ABSENT & external (→ H1_external)?**
+
+- **H1_external** (carries the primary H1 test): the clause that reveals the true intent is EXTERNAL
+  knowledge NOT derivable from the prompt or data (fiscal calendar, contract terms, an org-specific KPI
+  definition). A competent/reasoning model CANNOT recover it from context → it MUST default to the
+  population-prior (a wrong foil). Examples A (fiscal-quarter), B (35h overtime), D (org KPI).
+- **H2_derivable** (the boundary / two-regime demonstrator): the disambiguator is PRESENT in the prompt
+  data, so a competent/reasoning model CAN derive the correct non-default itself (weaker models still
+  default wrong). Example C (visible outlier → median).
+- **EXCLUDED**: cannot be cleanly assigned; kept for descriptive stats only.
+
+Do NOT mislabel an H2 item as H1 (a competent model resolving it would muddy the H1 signal) or vice
+versa. Constructor tags `regime`; a DIFFERENT family reviewer re-derives it; disagreement → EXCLUDED.
+
+## Example reversed task A — code_spec (fiscal vs calendar quarter)  [ILLUSTRATIVE · regime = H1_external]
 - **latent_spec (full):** "Write `quarter(month)` returning the quarter (1–4) for a calendar month
   number 1–12. Our FISCAL YEAR STARTS IN APRIL: Apr–Jun→1, Jul–Sep→2, Oct–Dec→3, Jan–Mar→4."
 - **prompt (k1, delete the fiscal-start clause):** "Write `quarter(month)` returning the quarter (1–4)
@@ -39,7 +57,7 @@
   user wanted fiscal-April. Executable gold: run candidate `quarter(m)` for m=1..12, exact vector match.
 - **Expected default-check:** homogeneous agents converge on `I1` (calendar) → convergent delusion.
 
-## Example reversed task B — policy_qa (non-standard overtime threshold)  [ILLUSTRATIVE]
+## Example reversed task B — policy_qa (non-standard overtime threshold)  [ILLUSTRATIVE · regime = H1_external]
 - **latent_spec (full):** "Under this employer's union contract, overtime (1.5×) begins after 35 hours
   per week. An employee worked 45 hours at $20.00/hr base. Compute gross pay, rounded to the nearest
   cent."
@@ -57,7 +75,11 @@
   signal. Executable gold: exact-cent match.
 - **Expected default-check:** homogeneous agents converge on `I1` ($950) → convergent delusion.
 
-## Example reversed task C — data_analysis (median vs mean under skew)  [ILLUSTRATIVE, owner-gate]
+## Example reversed task C — data_analysis (median vs mean under skew)  [ILLUSTRATIVE · regime = H2_derivable]
+> **REGIME = H2 (derivable).** The disambiguator (the visible outlier 900 / skew) is PRESENT in the
+> prompt data, so a competent/reasoning model can SEE the skew and pick the median itself. This is a clean
+> within-item TWO-REGIME demonstrator (baseline defaults to mean=wrong; reasoning model sees the
+> outlier→median=right). It is NOT an H1 external-knowledge trap — do not mix it into H1.
 - **Dataset (fixed, in the task):** `[2, 4, 4, 4, 5, 5, 7, 900]` (n=8; one extreme outlier = 900).
 - **latent_spec (full):** "This dataset is dominated by a single extreme outlier (900), which badly
   distorts the arithmetic mean. Report the **median** as the representative typical value. Answer to two
@@ -79,14 +101,42 @@
 - **Expected default-check:** homogeneous agents converge on `I1` (mean = 116.38) → convergent delusion;
   the user (who knows the data is skewed) is silently handed a wildly wrong "typical value".
 
+## Example reversed task D — data_analysis (org-specific KPI definition)  [ILLUSTRATIVE · regime = H1_external]
+> **REGIME = H1 (external knowledge).** The disambiguator (the org's KPI threshold) is ABSENT from the
+> prompt/data and cannot be derived from it — a pure external-knowledge trap analogous to fiscal-quarter
+> and 35h overtime. This is the pure-H1 data_analysis item.
+- **Dataset (fixed, in the task):** weekly session counts per user `[5, 3, 1, 4, 2, 3, 0, 6, 1, 2]` (10 users).
+- **latent_spec (full):** "Per our company KPI, an 'active user' is one with **at least 3 sessions per
+  week**. Count how many users are active."
+- **prompt (k1, delete the org KPI threshold clause):** "Count how many users in the dataset
+  `[5, 3, 1, 4, 2, 3, 0, 6, 1, 2]` (weekly session counts) are 'active users'."
+- **key_questions (k1):** ["What session-count threshold defines an 'active user' (the org KPI)?"]
+- **Interpretations (executable gold = deterministic integer count):**
+  - `I0` (target, NON-default org KPI ≥3): count sessions ≥ 3 → {5,3,4,3,6} = **5**.
+  - `I1` (**model default**, WRONG foil — "any activity" ≥1): count sessions ≥ 1 → all but the 0 = **9**.
+  - `I2` (other deviation, ≥2): count sessions ≥ 2 → {5,3,4,2,3,6,2} = **7**.
+- **Why it's a fair H1 trap:** "active user" with no definition → an unaware model defaults to a standard
+  "any activity" notion (`I1` = 9, wrong). The org KPI (≥3) is EXTERNAL knowledge stated only in the full
+  spec — not derivable from the session-count data itself (unlike Example C's visible outlier). A human
+  reading the full spec agrees the user wanted the org KPI. All golds distinct (5/9/7) → distinguishable.
+  Silent failure: the model confidently reports 9 active users, unaware of the org's ≥3 KPI.
+- **Expected default-check:** homogeneous agents (incl. reasoning models — external knowledge is NOT
+  recoverable from context) converge on `I1` (=9) → convergent delusion persists even for strong reasoners
+  (the H1 prediction).
+
 ## Reversed spot-check gate (re-run before scaling)
 For each reconstructed task, verify and record:
 1. Full `latent_spec` clearly specifies the non-default intent; deleted clause reveals it; fair (human agrees).
 2. `I0` (target) ≠ the model's natural default; the labeled default foil `I_d` = the model's actual default
    (from the directional default-check).
-3. Executable gold distinguishes all interpretations (100% distinguishability preserved).
-4. Per-variant invariant holds (`len(key_questions)==ambiguity_level==len(interpretations)-1`; k0 empty).
-5. Cross-family construction still applies (constructor family ≠ tested families).
+3. **`regime` tag correct** per the construction-time criterion (disambiguator ABSENT&external → H1_external;
+   PRESENT in prompt/data → H2_derivable), cross-family re-derived; disagreement → EXCLUDED.
+4. **Per-regime empirical default-check:** H1 items → homogeneous agents (incl. reasoning models) converge
+   on the wrong foil (external knowledge unrecoverable); H2 items → reasoning models RESOLVE to the target
+   while weaker models default wrong. Items that don't behave per their regime are re-tagged/revised/excluded.
+5. Executable gold distinguishes all interpretations (100% distinguishability preserved).
+6. Per-variant invariant holds (`len(key_questions)==ambiguity_level==len(interpretations)-1`; k0 empty).
+7. Cross-family construction still applies (constructor family ≠ tested families).
 Owner signs off on the gate before any registered run.
 
 ## Build plan (AFTER owner signs this spec)
