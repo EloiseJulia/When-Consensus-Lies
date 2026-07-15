@@ -82,26 +82,23 @@ def _make_run(task_id: str, output: str, seed: int, conf: float = 0.8) -> AgentR
 def test_golden_code_spec():
     """Part 1 golden — code_spec, 5 controlled agents, frozen hand-computed values.
 
-    Task: code_sort_001_k2_all  (ambiguity_level=2)
-      I0 = sort ascending, stable (target)
-      I1 = sort descending, stable
-      I2 = sort ascending, secondary sort by name
+    Task: code_quarterdate_001_k2_all  (ambiguity_level=2, combinatorial, reversed-property)
+      I0 = fiscal-April quarter + US date format (target, all-target, NON-default)
+      I1 = fiscal-April quarter + ISO date (C_D defaulted, partial)
+      I2 = calendar quarter + US date (C_Q defaulted, partial)
+      I3 = calendar quarter + ISO date ([combined-default])
 
     Controlled distribution (5 agents):
       agents 0–2 : I1 candidate in ```python fence  → label I1
       agent  3   : I0 candidate in ```python fence  → label I0  (target)
       agent  4   : I2 candidate in ```python fence  → label I2
 
-    The canonical candidates come from get_checkers_and_candidates, the same
-    mechanism that passes the domain's own validation suite — so the mapping is
-    guaranteed by the bench, not by this test.
-
     HAND CALCULATIONS
-    ─────────────────
+    -----------------
     Expected labels: [I1, I1, I1, I0, I2]
 
     convergent_delusion  (primary metric):
-      wrong_counts = {I1: 3, I2: 1}   (I0 is the target → excluded)
+      wrong_counts = {I1: 3, I2: 1}   (I0 is the target -> excluded)
       max_wrong_count = 3
       total = 5
       => 3 / 5 = 0.6
@@ -109,13 +106,13 @@ def test_golden_code_spec():
     a_maj:
       counts = {I1: 3, I0: 1, I2: 1}
       unique_winner = I1  (strict plurality, count 3 > every other label)
-      I1 ≠ target I0
+      I1 != target I0
       => 0.0
     """
     from bench.code_spec import get_checkers_and_candidates
 
     tasks = load_tasks("bench/data/code_spec.jsonl")
-    task = next(t for t in tasks if t.id == "code_sort_001_k2_all")
+    task = next(t for t in tasks if t.id == "code_quarterdate_001_k2_all")
 
     _, candidates, _ = get_checkers_and_candidates(task.domain, task)
     i0_code = candidates["I0"]
@@ -392,8 +389,8 @@ def test_wiring_code_spec():
     _wiring_check(
         domain="code_spec",
         task_ids=[
-            "code_sort_001_k1_sort_order",
-            "code_string_001_k1_separator",
+            "code_quarter_001_k1_fiscal_year_start",
+            "code_roundcurr_001_k1_rounding_standard",
         ],
         configs=[
             ("single",   1, {}),

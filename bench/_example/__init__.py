@@ -203,7 +203,10 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
     
     checkers = {}
     for interp in task.interpretations:
-        checkers[interp.id] = checkers_map[interp.gold_check]
+        gold = interp.gold_check
+        if gold.endswith("__combdef"):
+            gold = gold[: -len("__combdef")]
+        checkers[interp.id] = checkers_map[gold]
     
     return checkers, candidates, foils
 

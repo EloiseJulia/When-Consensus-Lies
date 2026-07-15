@@ -48,7 +48,7 @@ from harness.metrics import false_consensus_rate
 _CD0_CONCENTRATED = 0.555708   # 20-item batch: 10×I1-heavy, 10×I2-heavy items
 _CD0_SCATTERED    = 0.306311   # 20-item batch: 1×I1 + 1×I2 per item
 _CD0_GUARD        = 0.683693   # 20-item batch: 10×all-I1, 10×all-I2
-_CD0_E2E          = 0.539525   # 4 k=2 code_spec tasks, items 0-1→I1, 2-3→I2
+_CD0_E2E          = 0.4721     # 4 k=2 code_spec tasks (Amendment 03 combinatorial)
 _BAND             = 5e-3       # tight tolerance on CD0 (deterministic given seed)
 _CD_EXACT_TOL     = 1e-9       # CD_real is algebraically exact; assert to 1e-9
 
@@ -403,8 +403,10 @@ def test_end_to_end_pilot_code_spec():
     for idx, task in enumerate(k2_tasks[:4]):
         _, candidates, _ = get_checkers_and_candidates(task.domain, task)
         i0_code = candidates["I0"]
-        # Items 0,1 → I1 concentration; items 2,3 → I2 concentration
-        wrong_key = "I1" if idx < 2 else "I2"
+        # Pick two non-target IDs in sorted order; items 0-1 use first, 2-3 use second.
+        # IDs vary per sub-variant (I1/I2 for quarterdate, I2/I4 for invoice k2 slices).
+        non_target_keys = sorted(k for k in candidates if k != "I0")
+        wrong_key = non_target_keys[0] if idx < 2 else non_target_keys[1]
         wrong_code = candidates[wrong_key]
 
         # 4 runs with the wrong candidate, 1 run with the target
@@ -451,10 +453,11 @@ def test_end_to_end_pilot_code_spec():
         f"correctly for canonical candidates."
     )
 
-    # ── Assertion 2: CD0 within tight band (cross-family verified) ────────────
-    # CD0=0.539525 was independently recomputed by the GPT-family auditor for
-    # the 4-item batch (items 0-1→I1, items 2-3→I2), seed=42, n_perm=1000.
-    # Pool = {40% I1, 40% I2, 20% I0}.
+    # ── Assertion 2: CD0 within tight band (Amendment 03 updated) ────────────
+    # CD0=0.4721 for the 4-item batch under the new combinatorial pool:
+    # Pool = {I1:20%, I2:40%, I4:20%, I0:20%} (non-target IDs vary per task).
+    # Pool differs from pre-Amendment-03 because invoice k=2 sub-variants have
+    # non-sequential interpretation IDs (I2/I4/I6 etc.).
     assert abs(cd0 - _CD0_E2E) < _BAND, (
         f"E2E pilot: CD0={cd0:.6f} outside tight band "
         f"[{_CD0_E2E - _BAND:.6f}, {_CD0_E2E + _BAND:.6f}]. "
