@@ -57,12 +57,27 @@
   signal. Executable gold: exact-cent match.
 - **Expected default-check:** homogeneous agents converge on `I1` ($950) → convergent delusion.
 
-## Note on data_analysis
-Apply the same reversal (target = a non-default analysis convention the full spec states; deleted clause
-= the convention; default = the common convention as a wrong foil). Example direction: full spec says
-"fiscal-year quarterly aggregation" or "population variance (ddof=0) is required by our reporting
-standard" while the model defaults to the common alternative. (Concrete data_analysis examples to be
-included in the full spec revision after owner approves the approach.)
+## Example reversed task C — data_analysis (median vs mean under skew)  [ILLUSTRATIVE, owner-gate]
+- **Dataset (fixed, in the task):** `[2, 4, 4, 4, 5, 5, 7, 900]` (n=8; one extreme outlier = 900).
+- **latent_spec (full):** "This dataset is dominated by a single extreme outlier (900), which badly
+  distorts the arithmetic mean. Report the **median** as the representative typical value. Answer to two
+  decimals."
+- **prompt (k1, delete the skew/median clause):** "Report the representative typical value of the
+  dataset `[2, 4, 4, 4, 5, 5, 7, 900]`. Answer to two decimals."
+- **key_questions (k1):** ["Which measure of central tendency represents the 'typical value' here
+  (mean, median, or mode)?"]
+- **Interpretations (executable gold = deterministic numeric, exact to 2 decimals):**
+  - `I0` (target, NON-default): **median** = (4th+5th of sorted)/2 = (4+5)/2 = **4.50**.
+  - `I1` (**model default**, WRONG foil): arithmetic **mean** = 931/8 = **116.38**.
+  - `I2` (other deviation): **mode** = most frequent value = **4.00**.
+- **Why it's a fair trap (the subtlest domain):** "typical value" with no context → an unaware model
+  defaults to the arithmetic **mean** (`I1` = 116.38), which the outlier makes grossly unrepresentative.
+  The full spec legitimately and clearly specifies the **median** (`I0` = 4.50) *because* of the skew —
+  the deleted clause ("dominated by an outlier … report the median") is exactly what reveals it. A human
+  reading the full spec agrees the user genuinely wanted the median. All three golds are distinct
+  (4.50 / 116.38 / 4.00) → 100% distinguishable. Executable gold: run candidate code, exact-2dp match.
+- **Expected default-check:** homogeneous agents converge on `I1` (mean = 116.38) → convergent delusion;
+  the user (who knows the data is skewed) is silently handed a wildly wrong "typical value".
 
 ## Reversed spot-check gate (re-run before scaling)
 For each reconstructed task, verify and record:

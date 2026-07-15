@@ -55,8 +55,12 @@ non-default, and the deleted clause is precisely what conveys it.
    off before scaling.
 
 ## Sign-off
-- [ ] Owner approves the target/default reversal amendment (metric frozen; construct-validity fix).
-- [ ] On approval: commit as the amendment of record; record SHA here. Then the reconstruction proceeds
-      per `paper/specs/phase1-benchmark-reversal-spec.md`.
+- [x] Owner approves the target/default reversal amendment (metric frozen; construct-validity fix). —
+      approved 2026-07-15 ("COMMIT Amendment 01 ... Approved"). Both example tasks approved as passing
+      the fairness bar; data_analysis example added to the reconstruction spec for a separate gate.
+- [x] Committed as the amendment of record. Reconstruction proceeds per
+      `paper/specs/phase1-benchmark-reversal-spec.md` AFTER the data_analysis example is approved and the
+      reversed spot-check gate passes.
 
-Amendment commit SHA: `__________` (filled at sign-off)
+Amendment status: **APPROVED & IN EFFECT** (owner-signed 2026-07-15). Metric definitions remain frozen.
+Amendment commit SHA: recorded by the commit immediately following this edit (see `git log`).
