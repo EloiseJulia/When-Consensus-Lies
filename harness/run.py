@@ -4,7 +4,7 @@ Configs: single, sc (self-consistency), homogeneous-MAD, heterogeneous-MAD,
 verifier, interpretation-diverse. All deterministic, offline by default.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from common.schema import Task, AgentRun
 from common.llm import LLMClient
 
@@ -134,43 +134,49 @@ def run_task(task: Task, config: str, client: LLMClient, **kwargs) -> List[Agent
         task: Task object with prompt and interpretations
         config: Config name (single|sc|homogeneous-MAD|heterogeneous-MAD|verifier|interpretation-diverse)
         client: LLMClient instance
-        **kwargs: Config-specific parameters (k, rounds, n_agents, etc.)
+        **kwargs: Config-specific parameters (k, rounds, n_agents, temperature, etc.).
+            temperature: Override the per-config default temperature.
+              single default=0.0; all sampling configs default=0.7.
     
     Returns:
         List of AgentRun objects (label="" - labeling is a separate stage)
     """
+    temperature = kwargs.pop("temperature", None)  # caller-supplied override (None = use per-config default)
     if config == "single":
-        return [run_single(task, client)]
+        return [run_single(task, client, temperature=temperature)]
     elif config == "sc":
         k = kwargs.get("k", 5)
-        return run_self_consistency(task, client, k=k)
+        return run_self_consistency(task, client, k=k, temperature=temperature)
     elif config == "homogeneous-MAD":
         n_agents = kwargs.get("n_agents", 3)
         rounds = kwargs.get("rounds", 3)
-        return run_mad(task, client, homogeneous=True, n_agents=n_agents, rounds=rounds)
+        return run_mad(task, client, homogeneous=True, n_agents=n_agents, rounds=rounds, temperature=temperature)
     elif config == "heterogeneous-MAD":
         n_agents = kwargs.get("n_agents", 4)
         rounds = kwargs.get("rounds", 3)
-        return run_mad(task, client, homogeneous=False, n_agents=n_agents, rounds=rounds)
+        return run_mad(task, client, homogeneous=False, n_agents=n_agents, rounds=rounds, temperature=temperature)
     elif config == "verifier":
         n_candidates = kwargs.get("n_candidates", 3)
-        return run_verifier(task, client, n_candidates=n_candidates)
+        return run_verifier(task, client, n_candidates=n_candidates, temperature=temperature)
     elif config == "interpretation-diverse":
-        return run_diverse(task, client)
+        return run_diverse(task, client, temperature=temperature)
     else:
         raise ValueError(f"Unknown config: {config}")
 
 
-def run_single(task: Task, client: LLMClient) -> AgentRun:
+def run_single(task: Task, client: LLMClient, temperature: Optional[float] = None) -> AgentRun:
     """Single agent, one shot.
     
     Args:
         task: Task to execute
         client: LLMClient instance
+        temperature: Sampling temperature. Defaults to 0.0 (deterministic).
     
     Returns:
         Single AgentRun
     """
+    if temperature is None:
+        temperature = 0.0
     seed = client.config["seeds"]["global"]
     prompt = PROMPT_SINGLE_V2.format(
         task_prompt=task.prompt,
@@ -180,7 +186,8 @@ def run_single(task: Task, client: LLMClient) -> AgentRun:
     completion = client.complete(
         role="tested_agents",
         prompt=prompt,
-        seed=seed
+        seed=seed,
+        temperature=temperature,
     )
     
     # Derive confidence deterministically from seed
@@ -199,17 +206,20 @@ def run_single(task: Task, client: LLMClient) -> AgentRun:
     )
 
 
-def run_self_consistency(task: Task, client: LLMClient, k: int = 5) -> List[AgentRun]:
+def run_self_consistency(task: Task, client: LLMClient, k: int = 5, temperature: Optional[float] = None) -> List[AgentRun]:
     """Self-consistency with k independent samples.
     
     Args:
         task: Task to execute
         client: LLMClient instance
         k: Number of samples (typically 5 or 10)
+        temperature: Sampling temperature. Defaults to 0.7 to ensure diverse samples.
     
     Returns:
         List of k AgentRuns with different seeds
     """
+    if temperature is None:
+        temperature = 0.7
     runs = []
     base_seed = client.config["seeds"]["global"]
     
@@ -223,7 +233,8 @@ def run_self_consistency(task: Task, client: LLMClient, k: int = 5) -> List[Agen
         completion = client.complete(
             role="tested_agents",
             prompt=prompt,
-            seed=seed
+            seed=seed,
+            temperature=temperature,
         )
         
         verbalized_conf = 0.5 + (seed % 50) / 100.0
@@ -249,7 +260,8 @@ def run_mad(
     client: LLMClient,
     homogeneous: bool = True,
     n_agents: int = 3,
-    rounds: int = 3
+    rounds: int = 3,
+    temperature: Optional[float] = None,
 ) -> List[AgentRun]:
     """Multi-agent debate with N agents over R rounds.
     
@@ -259,10 +271,13 @@ def run_mad(
         homogeneous: If True, use homogeneous family; else heterogeneous
         n_agents: Number of agents
         rounds: Number of debate rounds
+        temperature: Sampling temperature. Defaults to 0.7 to ensure diverse debate.
     
     Returns:
         List of AgentRuns (one per agent with final-round answer)
     """
+    if temperature is None:
+        temperature = 0.7
     base_seed = client.config["seeds"]["global"]
     
     # Select agent models from config
@@ -329,7 +344,8 @@ def run_mad(
                 prompt=prompt,
                 seed=round_seed,
                 family=agent["family"],
-                model=agent["model"]
+                model=agent["model"],
+                temperature=temperature,
             )
             
             agent["history"].append((round_idx, completion.text, completion.logit_conf))
@@ -357,7 +373,7 @@ def run_mad(
     return runs
 
 
-def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[AgentRun]:
+def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3, temperature: Optional[float] = None) -> List[AgentRun]:
     """Verifier-based selection: candidates generate, verifier selects.
     
     FIX BUG 3: Returns only the verifier's AgentRun with the SELECTED candidate's
@@ -368,10 +384,13 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
         task: Task to execute
         client: LLMClient instance
         n_candidates: Number of candidate answers to generate
+        temperature: Sampling temperature. Defaults to 0.7 for diverse candidates.
     
     Returns:
         Single-element list containing the verifier's selection AgentRun
     """
+    if temperature is None:
+        temperature = 0.7
     base_seed = client.config["seeds"]["global"]
     
     # Generate candidate answers
@@ -387,7 +406,8 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
         completion = client.complete(
             role="tested_agents",
             prompt=prompt,
-            seed=seed
+            seed=seed,
+            temperature=temperature,
         )
         
         candidates.append({
@@ -409,7 +429,8 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
     verifier_completion = client.complete(
         role="tested_agents",
         prompt=verifier_prompt,
-        seed=verifier_seed
+        seed=verifier_seed,
+        temperature=temperature,
     )
     
     # Parse verifier's selection to resolve the chosen candidate's answer
@@ -448,7 +469,7 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
     return [verifier_run]
 
 
-def run_diverse(task: Task, client: LLMClient) -> List[AgentRun]:
+def run_diverse(task: Task, client: LLMClient, temperature: Optional[float] = None) -> List[AgentRun]:
     """Interpretation-diverse ensemble prompting.
     
     FIX BUG 4: Binds each prompt to an ACTUAL task interpretation (from
@@ -458,10 +479,13 @@ def run_diverse(task: Task, client: LLMClient) -> List[AgentRun]:
     Args:
         task: Task to execute
         client: LLMClient instance
+        temperature: Sampling temperature. Defaults to 0.7 for diverse outputs.
     
     Returns:
         List of AgentRuns (one per task interpretation)
     """
+    if temperature is None:
+        temperature = 0.7
     base_seed = client.config["seeds"]["global"]
     runs = []
     
@@ -484,7 +508,8 @@ def run_diverse(task: Task, client: LLMClient) -> List[AgentRun]:
         completion = client.complete(
             role="tested_agents",
             prompt=prompt,
-            seed=seed
+            seed=seed,
+            temperature=temperature,
         )
         
         verbalized_conf = 0.5 + (seed % 50) / 100.0

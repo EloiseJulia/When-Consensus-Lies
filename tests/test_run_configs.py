@@ -694,3 +694,186 @@ def test_verifier_select_prompt_contains_format_instruction(policy_task, client)
     for p in select_prompts:
         assert "FINAL ANSWER:" in p, \
             f"Verifier selection prompt missing format instruction.\nPrompt: {p[:300]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fix 1 — Temperature threading tests (offline; no network)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _capture_temperature(client):
+    """Monkey-patch client.complete to capture all temperature kwargs.
+
+    Returns a list of temperature values (including None) passed to each
+    complete() call.  The real .complete() is still invoked so all existing
+    shape/determinism invariants remain valid.
+    """
+    temps: list = []
+    original = client.complete
+
+    def capturing(role, prompt, seed=None, temperature=None, **kwargs):
+        temps.append(temperature)
+        return original(role, prompt, seed=seed, temperature=temperature, **kwargs)
+
+    client.complete = capturing
+    return temps
+
+
+def test_single_config_passes_temperature_zero(mock_task, client):
+    """run_single must pass temperature=0.0 (deterministic) to client.complete."""
+    temps = _capture_temperature(client)
+    run_single(mock_task, client)
+    assert temps, "run_single must call client.complete at least once"
+    assert all(t == 0.0 for t in temps), (
+        f"run_single must use temperature=0.0 for determinism, got {temps}"
+    )
+
+
+@pytest.mark.parametrize("config,kwargs", [
+    ("sc", {"k": 3}),
+    ("homogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("heterogeneous-MAD", {"n_agents": 2, "rounds": 2}),
+    ("verifier", {"n_candidates": 2}),
+    ("interpretation-diverse", {}),
+])
+def test_sampling_configs_default_temperature_is_0_7(mock_task, client, config, kwargs):
+    """Sampling configs must default to temperature=0.7 for ensemble diversity."""
+    temps = _capture_temperature(client)
+    run_task(mock_task, config, client, **kwargs)
+    assert temps, f"Config {config} must call client.complete at least once"
+    assert all(t == 0.7 for t in temps), (
+        f"Config '{config}' must default to temperature=0.7, got {temps}"
+    )
+
+
+def test_temperature_override_in_run_task_single(mock_task, client):
+    """Passing temperature= via run_task kwargs overrides run_single default."""
+    temps = _capture_temperature(client)
+    run_task(mock_task, "single", client, temperature=0.3)
+    assert all(t == 0.3 for t in temps), (
+        f"temperature kwarg override must propagate through run_task, got {temps}"
+    )
+
+
+@pytest.mark.parametrize("override_temp", [0.0, 0.3, 1.0])
+def test_temperature_override_propagates_to_all_sampling_configs(
+    mock_task, client, override_temp
+):
+    """Ablation sweep: temperature override propagates to every sampling config."""
+    for config, kwargs in [
+        ("sc", {"k": 2}),
+        ("homogeneous-MAD", {"n_agents": 2, "rounds": 1}),
+        ("interpretation-diverse", {}),
+    ]:
+        temps = _capture_temperature(client)
+        run_task(mock_task, config, client, temperature=override_temp, **kwargs)
+        assert all(t == override_temp for t in temps), (
+            f"Config '{config}': override temperature {override_temp} must reach "
+            f"all complete() calls, got {temps}"
+        )
+
+
+def test_single_determinism_preserved_with_temperature_zero(mock_task, client):
+    """run_single with temperature=0.0 must still be fully deterministic."""
+    run1 = run_single(mock_task, client)
+    run2 = run_single(mock_task, client)
+    assert run1.output == run2.output, "run_single must remain deterministic with temperature=0.0"
+    assert run1.seed == run2.seed
+
+
+def test_different_temperatures_produce_different_offline_outputs(mock_task, client):
+    """Offline mock must produce different outputs for different temperatures.
+
+    This validates that temperature is folded into the mock hash, making the
+    offline mode temperature-aware even without a real API.
+    """
+    runs_low = run_self_consistency(mock_task, client, k=2, temperature=0.0)
+    runs_high = run_self_consistency(mock_task, client, k=2, temperature=1.0)
+    # All outputs at temp=0.0 vs temp=1.0 should differ (different hash inputs)
+    outputs_low = {r.output for r in runs_low}
+    outputs_high = {r.output for r in runs_high}
+    assert outputs_low != outputs_high, (
+        "Different temperatures must produce different offline mock outputs "
+        "(temperature is not folded into the hash)"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# _FamilyClient compatibility — regression guard for MAJOR (scripts/mini_pilot.py)
+#
+# The _FamilyClient wrapper in scripts/mini_pilot.py overrides complete() to
+# inject explicit family/model. After the temperature threading fix, run_*
+# functions forward temperature= to complete(). If _FamilyClient.complete()
+# doesn't accept temperature, every run_* call raises TypeError before any HTTP.
+# These tests reproduce the _FamilyClient pattern inline (offline; no network).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from common.llm import LLMClient as _LLMClientBase
+
+
+def _make_family_client(cfg, fam: str, slug: str, tmp_path):
+    """Reproduce the _FamilyClient wrapper exactly as written in mini_pilot.py."""
+
+    class _FamilyClient(_LLMClientBase):
+        _family: str = fam
+        _slug: str = slug
+
+        def complete(self, role, prompt, seed=None, max_retries=3,
+                     family=None, model=None, temperature=None):
+            return super().complete(
+                role=role,
+                prompt=prompt,
+                seed=seed,
+                max_retries=max_retries,
+                family=self._family,
+                model=self._slug,
+                temperature=temperature,
+            )
+
+    return _FamilyClient(cfg, cache_dir=str(tmp_path / "fam_cache"), offline=True)
+
+
+def test_family_client_run_single_no_typeerror(mock_task, tmp_path):
+    """_FamilyClient must not raise TypeError when run_single forwards temperature."""
+    from common.config import load_config
+    cfg = load_config()
+    fc = _make_family_client(cfg, fam="openai", slug="openai/gpt-4o-mini", tmp_path=tmp_path)
+    # run_single passes temperature=0.0 — must reach _FamilyClient.complete without TypeError
+    result = run_single(mock_task, fc)
+    assert result is not None
+    assert result.config == "single"
+
+
+def test_family_client_run_sc_no_typeerror(mock_task, tmp_path):
+    """_FamilyClient must not raise TypeError when run_self_consistency forwards temperature."""
+    from common.config import load_config
+    cfg = load_config()
+    fc = _make_family_client(cfg, fam="meta", slug="meta/llama-3.3-70b-instruct", tmp_path=tmp_path)
+    # run_self_consistency passes temperature=0.7 — must reach _FamilyClient.complete
+    runs = run_self_consistency(mock_task, fc, k=3)
+    assert len(runs) == 3
+    assert all(r.config == "sc" for r in runs)
+
+
+def test_family_client_temperature_override_no_typeerror(mock_task, tmp_path):
+    """Explicit temperature override via run_task must also reach _FamilyClient without TypeError."""
+    from common.config import load_config
+    cfg = load_config()
+    fc = _make_family_client(cfg, fam="openai", slug="openai/gpt-4o-mini", tmp_path=tmp_path)
+    # Ablation-style override: temperature passed through run_task → run_single
+    runs = run_task(mock_task, "single", fc, temperature=0.3)
+    assert len(runs) == 1
+    runs_sc = run_task(mock_task, "sc", fc, k=2, temperature=0.0)
+    assert len(runs_sc) == 2
+
+
+def test_family_client_preserves_family_model_override(mock_task, tmp_path):
+    """_FamilyClient family/model override behavior must be intact after the fix."""
+    from common.config import load_config
+    cfg = load_config()
+    slug = "openai/gpt-4o-mini"
+    fc = _make_family_client(cfg, fam="openai", slug=slug, tmp_path=tmp_path)
+    run = run_single(mock_task, fc)
+    # The wrapper forces model=slug regardless of role routing
+    assert run.model_id == slug, (
+        f"_FamilyClient must override model_id to {slug!r}, got {run.model_id!r}"
+    )
