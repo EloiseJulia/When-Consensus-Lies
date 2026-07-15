@@ -139,6 +139,13 @@ For each reconstructed task, verify and record:
 7. Cross-family construction still applies (constructor family ≠ tested families).
 Owner signs off on the gate before any registered run.
 
+> **Reaffirmations (owner, 2026-07-15):**
+> 1. **The EMPIRICAL per-regime default-check is the FINAL ARBITER of the H1/H2 tag**, not the a-priori
+>    heuristic. If an H1-tagged task turns out reasoners resolve it, or an H2-tagged task makes reasoners
+>    also fail, the task is RECLASSIFIED or EXCLUDED — observed behavior must match the tag.
+> 2. **The reversed spot-check gate returns to the owner for FINAL sign-off before any full-scale /
+>    registered run.** The Manager does not self-approve scaling.
+
 ## Build plan (AFTER owner signs this spec)
 1. Bundle-prerequisite infra fixes (separate slice): temperature control ∈ {0,0.3,0.7,1.0} in run.py/llm.py;
    o-series/reasoning request handling (no logprobs, `max_completion_tokens`, verbalized confidence).
