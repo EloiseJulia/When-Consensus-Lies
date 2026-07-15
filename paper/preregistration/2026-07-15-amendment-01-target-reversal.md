@@ -63,4 +63,4 @@ non-default, and the deleted clause is precisely what conveys it.
       reversed spot-check gate passes.
 
 Amendment status: **APPROVED & IN EFFECT** (owner-signed 2026-07-15). Metric definitions remain frozen.
-Amendment commit SHA: recorded by the commit immediately following this edit (see `git log`).
+Amendment commit SHA: `a4fee0f` — the signed amendment commit on `main`.
