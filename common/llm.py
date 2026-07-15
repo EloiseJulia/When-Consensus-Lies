@@ -62,6 +62,8 @@ class LLMClient:
         base_url: str = "https://models.github.ai/inference",
         max_budget_usd: Optional[float] = None,
         max_requests_per_min: Optional[int] = None,
+        http_timeout: float = 60.0,
+        max_tokens_per_call: int = 4096,
     ):
         """Initialize LLM client.
 
@@ -72,6 +74,8 @@ class LLMClient:
             base_url: Base URL for the OpenAI-compatible API endpoint
             max_budget_usd: Hard spend cap in USD; raises BudgetExceeded when exceeded
             max_requests_per_min: Max API calls per 60-second sliding window
+            http_timeout: Socket timeout (seconds) for each urlopen call (MAJOR 5)
+            max_tokens_per_call: Assumed worst-case output tokens for budget pre-auth
         """
         self.config = config
         self.cache_dir = Path(cache_dir)
@@ -84,6 +88,8 @@ class LLMClient:
         # Mutable budget and rate-limit state
         self._total_cost_usd: float = 0.0
         self._request_times: Deque[float] = collections.deque()
+        self._http_timeout: float = http_timeout           # MAJOR 5
+        self._max_tokens_per_call: int = max_tokens_per_call  # BLOCKER 2 pre-auth
         
     def complete(
         self,
@@ -116,21 +122,34 @@ class LLMClient:
         if cached:
             return cached
         
-        # Generate completion (with retry wrapper for TRANSIENT errors only)
+        # Generate completion (with retry wrapper for TRANSIENT errors only).
+        # MAJOR 4 FIX: _write_cache / _log_cost are OUTSIDE this loop so that
+        # a persistence OSError never causes the loop to re-call the paid API.
+        completion = None
         for attempt in range(max_retries):
             try:
                 completion = self._generate(role, prompt, seed, family, model)
-                self._write_cache(cache_key, completion)
-                self._log_cost(role, prompt, completion)
-                return completion
+                break  # generation succeeded; exit retry loop
             except (NotImplementedError, BudgetExceeded, _OnlineModeError):
                 raise  # permanent — never retry
             except Exception:
                 if attempt == max_retries - 1:
                     raise
                 time.sleep(2 ** attempt)  # Exponential backoff
-        
-        raise RuntimeError("Max retries exceeded")
+
+        # Persist OUTSIDE the generation retry loop.
+        # Failures here are non-fatal and must NEVER trigger another API call.
+        try:
+            self._write_cache(cache_key, completion)
+        except Exception:
+            pass  # non-fatal: caller gets the result; next call will re-fetch
+
+        try:
+            self._log_cost(role, prompt, completion)
+        except Exception:
+            pass  # non-fatal: cost tracking is best-effort
+
+        return completion
     
     def _generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> Completion:
         """Generate completion. Offline (mock) by default; online via GitHub Models."""
@@ -314,21 +333,35 @@ class LLMClient:
                 "Set GITHUB_MODELS_TOKEN or GH_MODELS_TOKEN environment variable."
             )
 
-        # ── Hard budget check BEFORE the call ─────────────────────────────────
-        if self.max_budget_usd is not None and self._total_cost_usd >= self.max_budget_usd:
-            raise BudgetExceeded(
-                f"Budget cap of ${self.max_budget_usd:.4f} USD exceeded "
-                f"(accumulated ${self._total_cost_usd:.4f})"
+        # ── Pre-authorization budget check (BLOCKER 2 fix) ────────────────────
+        # Estimate worst-case cost for THIS call and refuse BEFORE making any
+        # HTTP request. Never returns an over-budget completion.
+        if self.max_budget_usd is not None:
+            # Use UTF-8 byte length as a GUARANTEED upper bound on input tokens.
+            # For byte-level BPE tokenizers (GPT-4o, GPT-4.1, etc.) each token
+            # encodes at least one byte, so token_count ≤ utf8_byte_count.
+            # This holds for ALL text including multi-byte Unicode / emoji /
+            # ZWJ sequences where char count << byte count. Add 64 for
+            # message-framing / system-prompt overhead.
+            tokens_in_upper = len(prompt.encode("utf-8")) + 64
+            worst_case_cost = self._estimate_cost(
+                slug, tokens_in_upper, self._max_tokens_per_call
             )
-
-        # ── Rate-limit enforcement ─────────────────────────────────────────────
-        self._enforce_rate_limit()
+            if self._total_cost_usd + worst_case_cost > self.max_budget_usd:
+                raise BudgetExceeded(
+                    f"Pre-authorization: worst-case cost ${worst_case_cost:.6f} "
+                    f"would exceed remaining budget "
+                    f"${max(0.0, self.max_budget_usd - self._total_cost_usd):.6f}"
+                )
 
         # ── Build request ──────────────────────────────────────────────────────
         payload: Dict[str, Any] = {
             "model": slug,
             "messages": [{"role": "user", "content": prompt}],
             "seed": seed,
+            # Hard-cap output so the server cannot return more tokens than estimated.
+            # This makes the pre-authorization budget check a true upper bound.
+            "max_tokens": self._max_tokens_per_call,
         }
         if is_openai:
             payload["logprobs"] = True
@@ -343,41 +376,112 @@ class LLMClient:
         url = f"{self.base_url}/chat/completions"
         body_bytes = json.dumps(payload).encode("utf-8")
 
-        # ── HTTP call with bounded 429/5xx retry (exponential backoff + jitter) ─
+        # ── HTTP retry loop ─────────────────────────────────────────────────────
+        # TOKEN-SAFETY INVARIANT (BLOCKER fix):
+        #   Python sets __context__ on a raised exception to the currently-handled
+        #   exception even when using `from None` (which only clears __cause__).
+        #   A urllib HTTPError can carry the API token in its body/headers, so any
+        #   raise INSIDE an `except HTTPError` block leaks the token via __context__.
+        #   Fix: inside each except block we drain+discard response data and copy
+        #   ONLY the integer status code to a local variable, then exit the except
+        #   scope via break/continue WITHOUT raising. All _OnlineModeError raises
+        #   happen AFTER the loop, outside any except scope, guaranteeing
+        #   __context__ = None on the terminal exception.
+        #
+        # MAJOR 3 fix: _record_request_time() is in `finally` so every urlopen
+        #   attempt — including URLError/timeout — is counted in the rate-limit window.
+        # MAJOR 5: urlopen receives a finite, configurable timeout.
         _MAX_HTTP_RETRIES = 6
         resp_data: Dict[str, Any] = {}
+        _http_success: bool = False
+        _last_status: Optional[int] = None      # last retriable status (429/5xx)
+        _terminal_status: Optional[int] = None  # terminal 4xx status
+        _terminal_body: str = ""                # scrubbed terminal error body
+        _had_transport_error: bool = False       # URLError / timeout
+
         for attempt in range(_MAX_HTTP_RETRIES):
+            self._enforce_rate_limit()            # throttle EVERY attempt (MAJOR 3)
+
             req = urllib.request.Request(
                 url, data=body_bytes, headers=headers, method="POST"
             )
-            try:
-                with urllib.request.urlopen(req) as resp:
-                    resp_data = json.loads(resp.read())
-                break  # success — exit retry loop
-            except urllib.error.HTTPError as exc:
-                status = exc.code
-                if status == 429 or (500 <= status < 600):
-                    if attempt == _MAX_HTTP_RETRIES - 1:
-                        raise _OnlineModeError(
-                            f"HTTP {status}: gave up after {_MAX_HTTP_RETRIES} retries"
-                        ) from exc
-                    backoff = min(2.0 ** attempt + random.uniform(0.0, 1.0), 60.0)
-                    time.sleep(backoff)
-                    continue
-                else:
-                    # 4xx (non-429): fail loud — one attempt only
-                    try:
-                        err_body = exc.read().decode("utf-8", errors="replace")
-                    except Exception:
-                        err_body = "(unreadable error body)"
-                    # Scrub token from error message before raising
-                    err_body = err_body.replace(token, "[REDACTED]")
-                    raise _OnlineModeError(
-                        f"HTTP {status} error from API: {err_body}"
-                    ) from None
+            _attempt_status: Optional[int] = None
+            _is_transport: bool = False
+            _scrubbed_body: str = ""
 
-        # ── Record request time for rate-limit window ──────────────────────────
-        self._record_request_time()
+            try:
+                with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
+                    resp_data = json.loads(resp.read())
+                _http_success = True
+            except urllib.error.HTTPError as exc:
+                # ── Drain+discard exc; copy ONLY the int status ────────────────
+                # Nothing that references `exc` beyond this block.
+                _attempt_status = exc.code
+                _is_retriable = (_attempt_status == 429 or 500 <= _attempt_status < 600)
+                if not _is_retriable:
+                    # Terminal: read body once, scrub token, store
+                    try:
+                        _scrubbed_body = exc.read().decode("utf-8", errors="replace")
+                        _scrubbed_body = _scrubbed_body.replace(token, "[REDACTED]")
+                    except Exception:
+                        _scrubbed_body = "(unreadable)"
+                else:
+                    # Retriable: drain body without saving
+                    try:
+                        exc.read()
+                    except Exception:
+                        pass
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+                # exc is fully drained/closed; nothing below this line holds a ref to it
+            except urllib.error.URLError:
+                # Network errors (DNS failure, connection refused, timeout wrapper)
+                _is_transport = True
+            finally:
+                # Record EVERY attempt regardless of outcome (MAJOR 3 fix)
+                self._record_request_time()
+
+            # ── Decision logic: OUTSIDE all except scopes ─────────────────────
+            # No exception is being handled here.  Any raise below will have
+            # __context__ = None because there is no active exception in scope.
+            if _http_success:
+                break
+
+            if _is_transport:
+                _had_transport_error = True
+                if attempt < _MAX_HTTP_RETRIES - 1:
+                    time.sleep(min(2.0 ** attempt + random.uniform(0.0, 1.0), 60.0))
+                    continue
+                break  # exhausted — raise below
+
+            # _attempt_status is set
+            if _attempt_status == 429 or (500 <= _attempt_status < 600):
+                _last_status = _attempt_status
+                if attempt < _MAX_HTTP_RETRIES - 1:
+                    time.sleep(min(2.0 ** attempt + random.uniform(0.0, 1.0), 60.0))
+                    continue
+                break  # exhausted — raise below
+            else:
+                # 4xx non-429: fail immediately
+                _terminal_status = _attempt_status
+                _terminal_body = _scrubbed_body
+                break  # raise below
+
+        # ── Raise AFTER loop — no active exception → __context__ is None ───────
+        if not _http_success:
+            if _terminal_status is not None:
+                raise _OnlineModeError(
+                    f"HTTP {_terminal_status} error from API: {_terminal_body}"
+                )
+            if _had_transport_error:
+                raise _OnlineModeError(
+                    f"Transport error: gave up after {_MAX_HTTP_RETRIES} retries"
+                )
+            raise _OnlineModeError(
+                f"HTTP {_last_status}: gave up after {_MAX_HTTP_RETRIES} retries"
+            )
 
         # ── Parse response ─────────────────────────────────────────────────────
         choice = resp_data["choices"][0]
