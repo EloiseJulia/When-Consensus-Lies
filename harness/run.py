@@ -194,7 +194,7 @@ def run_single(task: Task, client: LLMClient) -> AgentRun:
         output=completion.text,
         label="",  # Labeling is a separate stage
         verbalized_conf=verbalized_conf,
-        logit_conf=None,
+        logit_conf=completion.logit_conf,
         seed=seed
     )
 
@@ -236,7 +236,7 @@ def run_self_consistency(task: Task, client: LLMClient, k: int = 5) -> List[Agen
             output=completion.text,
             label="",
             verbalized_conf=verbalized_conf,
-            logit_conf=None,
+            logit_conf=completion.logit_conf,
             seed=seed
         )
         runs.append(run)
@@ -332,12 +332,12 @@ def run_mad(
                 model=agent["model"]
             )
             
-            agent["history"].append((round_idx, completion.text))
+            agent["history"].append((round_idx, completion.text, completion.logit_conf))
     
     # Create final AgentRuns from last round
     runs = []
     for agent in agents:
-        final_round, final_answer = agent["history"][-1]
+        final_round, final_answer, final_logit_conf = agent["history"][-1]
         final_seed = agent["seed"] + final_round * 1000
         verbalized_conf = 0.5 + (final_seed % 50) / 100.0
         
@@ -349,7 +349,7 @@ def run_mad(
             output=final_answer,
             label="",
             verbalized_conf=verbalized_conf,
-            logit_conf=None,
+            logit_conf=final_logit_conf,
             seed=final_seed
         )
         runs.append(run)
@@ -441,7 +441,7 @@ def run_verifier(task: Task, client: LLMClient, n_candidates: int = 3) -> List[A
         output=selected_answer,  # The actual selected candidate answer, not "Candidate N"
         label="",
         verbalized_conf=verifier_conf,
-        logit_conf=None,
+        logit_conf=verifier_completion.logit_conf,
         seed=verifier_seed
     )
     
@@ -497,7 +497,7 @@ def run_diverse(task: Task, client: LLMClient) -> List[AgentRun]:
             output=completion.text,
             label="",
             verbalized_conf=verbalized_conf,
-            logit_conf=None,
+            logit_conf=completion.logit_conf,
             seed=seed
         )
         runs.append(run)

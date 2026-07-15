@@ -1,46 +1,70 @@
 # Role-based model routing with provenance separation (HARD LAW 6)
-# constructor ≠ tested ≠ judge ≠ code_reviewer must be different model families
+# constructor ≠ tested ≠ judge ≠ code_reviewer must be different model families.
+#
+# Endpoint: https://models.github.ai/inference (OpenAI-compatible)
+# Token env: GITHUB_MODELS_TOKEN or GH_MODELS_TOKEN (User-scope; never logged)
+#
+# Anthropic and Google are NOT on GitHub Models → dropped from experiment routing.
+# Build/audit provenance (Claude-impl / GPT-audit) is CODE provenance, orthogonal
+# to the experiment family-distinctness requirement.
+#
+# Option-B family table (owner-approved 2026-07-15 — all experiment roles mutually distinct):
+#   constructor(cohere) ∉ tested{openai,meta,mistral-ai,deepseek}
+#   judge(microsoft)   ∉ tested ∪ {constructor(cohere)}
+#   ✓ Hard Law 6 satisfied
 
 roles:
   constructor:
-    # Builds benchmark / latent spec / deletion-based ambiguity
-    family: google
-    model: gemini-1.5-pro
+    # Cohere: outside every tested pool → clean cross-family construction control (R2).
+    family: cohere
+    model: cohere/cohere-command-a
 
   tested_agents:
-    # The agents being studied (core experimental subjects)
     homogeneous:
-      - family: anthropic
-        model: claude-3-5-sonnet-20241022
+      # OpenAI gpt-4o-mini: shared-prior ρ-baseline (owner-ruled: strongest deployed
+      # shared prior + ONLY family on GitHub Models exposing logprobs → logit_conf
+      # signal available for the silent-failure signature).
+      - family: openai
+        model: openai/gpt-4o-mini
+
     heterogeneous:
+      # 4-family diverse mix for H1 cross-family baseline measurement.
       - family: openai
-        model: gpt-4-turbo
-      - family: anthropic
-        model: claude-3-5-sonnet-20241022
-      - family: qwen
-        model: qwen-plus
+        model: openai/gpt-4o-mini
+      - family: meta
+        model: meta/llama-3.3-70b-instruct
+      - family: mistral-ai
+        model: mistral-ai/mistral-small-2503
       - family: deepseek
-        model: deepseek-chat
+        model: deepseek/deepseek-v3-0324
+
     reasoning:
-      - family: openai
-        model: o3-mini
+      # H2 test: frontier reasoners. deepseek-r1 is confirmed reachable.
+      #
+      # TODO (Manager — requires token-live verification before mini-pilot):
+      #   Add openai/gpt-5 (or the correct o-series slug, e.g. openai/o3 or
+      #   openai/o4-mini) once the EXACT slug is confirmed on
+      #   https://models.github.ai/catalog/models with a live token.
+      #   Goal: within-provider H1→H2 gradient (gpt-4o-mini shows convergent-
+      #   delusion; same-provider frontier reasoner resolves it).
+      #   If no OpenAI frontier reasoner is reachable → keep deepseek-r1 alone
+      #   and document as a limitation in the paper.
+      #   Candidate: openai/gpt-5  (seen in catalog probe 2026-07-15; unverified)
       - family: deepseek
-        model: deepseek-reasoner
+        model: deepseek/deepseek-r1
 
   judge:
-    # Only when executable gold unavailable; must differ from constructor
-    family: openai
-    model: gpt-4-turbo
+    # microsoft/phi-4: NOT in any tested pool (phi-4-reasoning purposely avoided
+    # to keep phi-4 clean as judge). Used only when executable gold is unavailable.
+    family: microsoft
+    model: microsoft/phi-4
 
   code_reviewer:
-    # Reviews AI-written code; MUST differ from the code author's family and from
-    # the homogeneous shared-prior baseline (anthropic). Default routing only —
-    # the Manager picks the actual auditor family per slice so it never equals
-    # that slice's implementer family (Phase 0 was written by anthropic, audited
-    # by openai). deepseek is distinct from constructor/judge and from the
-    # homogeneous baseline.
-    family: deepseek
-    model: deepseek-chat
+    # PLACEHOLDER — Manager overrides per slice so auditor family ≠ implementer.
+    # This is CODE-AUDIT routing only; orthogonal to the experiment provenance
+    # requirements. Default: mistral-ai (distinct from constructor/judge/homogeneous).
+    family: mistral-ai
+    model: mistral-ai/mistral-medium-2505
 
 seeds:
   global: 20260713
