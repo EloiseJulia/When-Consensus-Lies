@@ -149,10 +149,19 @@ Owner signs off on the gate before any registered run.
 ## Build plan (AFTER owner signs this spec)
 1. Bundle-prerequisite infra fixes (separate slice): temperature control ∈ {0,0.3,0.7,1.0} in run.py/llm.py;
    o-series/reasoning request handling (no logprobs, `max_completion_tokens`, verbalized confidence).
-2. Reconstruct all domains per the reversed property (sub-agent; cross-family audit; distinguishability +
-   invariant tests green).
-3. Directional default-check pilot (homogeneous agents converge on the wrong foil) + reversed spot-check gate.
-4. Owner sign-off → registered mini-pilot → full-scale.
+   [DONE — merged #14.] Plus `Task.regime` schema field [Amendment 02, in flight].
+2. **Regime plumbing:** add `regime` to `FullSpec` (bench/build.py) and pass it through `assemble_task`
+   into `Task.regime`. (build.py is not frozen; minimal change.)
+3. **Staged reconstruction (de-risk: one template, then replicate):**
+   a. **code_spec FIRST** as the template slice — rewrite its FullSpecs to the reversed property + set
+      `regime` per task; do the build.py regime plumbing here; cross-family audit; merge.
+   b. **data_analysis + policy_qa** — parallel slices using the established template; each cross-family
+      audited; merged. (H1 items like the org-KPI Example D; the median-under-skew H2 demonstrator.)
+   Each domain preserves executable gold, deletion ambiguity, per-variant invariant, 100%
+   distinguishability, and cross-family construction.
+4. Directional default-check pilot (per-regime: H1 → even reasoners default to the wrong foil; H2 →
+   reasoners resolve, weaker default wrong) + reversed spot-check gate.
+5. Owner sign-off → registered mini-pilot → full-scale.
 
 ## Provenance
 Spec by Manager (orchestrator). Reconstruction by a spawned sub-agent; auditor family ≠ implementer.
