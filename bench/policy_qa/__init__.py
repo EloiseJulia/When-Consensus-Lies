@@ -642,6 +642,8 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
     
     for interp in task.interpretations:
         check_id = interp.gold_check
+        if check_id.endswith("__combdef"):
+            check_id = check_id[: -len("__combdef")]
         if check_id not in CHECKERS:
             raise ValueError(f"Unknown checker: {check_id}")
         checkers[interp.id] = CHECKERS[check_id]

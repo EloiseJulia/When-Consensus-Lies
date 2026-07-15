@@ -183,13 +183,14 @@ BENCH_DATA_DIR = os.path.join(
 )
 
 @pytest.mark.parametrize("filename", [
-    "code_spec.jsonl",
     "data_analysis.jsonl",
     "policy_qa.jsonl",
 ])
 def test_existing_bench_data_loads(filename):
     """Pre-amendment on-disk benchmark files must still load (no 'regime' key in them)
-    and every Task must have regime is None."""
+    and every Task must have regime is None.
+    Note: code_spec.jsonl has been reconstructed under Amendment 01 and now carries
+    regime values — it is tested separately in test_code_spec.py::test_task_regime_valid."""
     path = os.path.join(BENCH_DATA_DIR, filename)
     if not os.path.exists(path):
         pytest.skip(f"Bench data file not found: {path}")

@@ -11,6 +11,7 @@ Domain slices supply:
 - Reference candidates for validation
 """
 
+import itertools
 import json
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Set
@@ -45,6 +46,7 @@ class FullSpec:
     requirement_classes: List[RequirementClass]
     interpretations: List[InterpretationBranch]
     key_questions: List[str]  # Questions that recover deleted requirements
+    regime: Optional[str] = None  # "H1_external" | "H2_derivable" | None (excluded/untagged)
 
 
 def validate_full_spec(full_spec: FullSpec) -> None:
@@ -82,11 +84,58 @@ def validate_full_spec(full_spec: FullSpec) -> None:
                 raise ValueError(
                     f"Non-target interpretation {interp.id} must declare opened_by"
                 )
-            if interp.opened_by not in id_set:
+            # opened_by may reference a single class or a comma-separated list
+            # of classes (for combinatorial multi-axis interpretations).
+            opened_by_classes = [c.strip() for c in interp.opened_by.split(",")]
+            unknown_classes = [c for c in opened_by_classes if c not in id_set]
+            if unknown_classes:
                 raise ValueError(
-                    f"Interpretation {interp.id} opened_by unknown class "
-                    f"'{interp.opened_by}'"
+                    f"Interpretation {interp.id} opened_by unknown class(es): "
+                    f"{unknown_classes}"
                 )
+
+    # Combinatorial power-set invariant (auto-detected).
+    # When the number of non-target interpretations equals 2^n - 1 (the full
+    # combinatorial count), every non-empty subset of requirement-class IDs must
+    # appear exactly once as an opened_by frozenset.  This rejects:
+    #   • duplicate subsets (e.g. two interps opened by {A})
+    #   • missing subsets (e.g. {B} absent when {A} and {A,B} are present)
+    # Specs with fewer non-targets (e.g. policy_qa's old 2-non-target k=2) are
+    # skipped — the count mismatch means they are NOT combinatorial specs.
+    n_classes = len(full_spec.requirement_classes)
+    non_targets = [i for i in full_spec.interpretations if not i.is_target]
+    expected_powerset_size = (2 ** n_classes) - 1
+    if n_classes >= 1 and len(non_targets) == expected_powerset_size:
+        all_class_ids = frozenset(ids)
+        actual_sets = [
+            frozenset(c.strip() for c in interp.opened_by.split(","))
+            for interp in non_targets
+        ]
+        # Duplicate check
+        seen: set = set()
+        for s in actual_sets:
+            if s in seen:
+                raise ValueError(
+                    f"Combinatorial invariant: duplicate opened_by set {set(s)}. "
+                    f"Each non-empty subset of requirement classes must appear exactly once."
+                )
+            seen.add(s)
+        # Completeness check
+        expected_sets = {
+            frozenset(combo)
+            for r in range(1, n_classes + 1)
+            for combo in itertools.combinations(all_class_ids, r)
+        }
+        actual_set_of_sets = set(actual_sets)
+        missing = expected_sets - actual_set_of_sets
+        extra = actual_set_of_sets - expected_sets
+        if missing or extra:
+            raise ValueError(
+                f"Combinatorial invariant: opened_by sets do not form the true "
+                f"power set of {{}}. Missing: {missing}. Extra: {extra}.".format(
+                    set(all_class_ids)
+                )
+            )
 
 
 def delete_requirements(
@@ -158,13 +207,16 @@ def delete_requirements(
             )
 
     # Interpretations opened by this deletion: target always; a non-target iff
-    # its opening class was deleted.
+    # ALL of its opening classes were deleted (supports both single-axis and
+    # combinatorial multi-axis opened_by="classA,classB,...").
     opened_interpretations = [full_spec.interpretations[
         [i.is_target for i in full_spec.interpretations].index(True)
     ]]
     for interp in full_spec.interpretations:
-        if not interp.is_target and interp.opened_by in deleted_set:
-            opened_interpretations.append(interp)
+        if not interp.is_target and interp.opened_by is not None:
+            opened_by_classes = [c.strip() for c in interp.opened_by.split(",")]
+            if all(c in deleted_set for c in opened_by_classes):
+                opened_interpretations.append(interp)
 
     return {
         "underdetermined_prompt": underdetermined_prompt,
@@ -191,14 +243,25 @@ def assemble_task(
     """
     deletion_result = delete_requirements(full_spec, k, classes_to_delete)
     
-    interpretations = [
-        Interpretation(
-            id=ib.id,
-            is_target=ib.is_target,
-            gold_check=ib.gold_check
+    deleted_set = frozenset(deletion_result["deleted_classes"])
+    interpretations = []
+    for ib in deletion_result["opened_interpretations"]:
+        check_name = ib.gold_check
+        # Append __combdef to the per-variant combined-default interpretation:
+        # the non-target whose opened_by set equals exactly the full deleted set.
+        # This persists the combined-default designation in the serialized field
+        # (description/opened_by are dropped by assemble_task; schema is frozen).
+        if k > 0 and not ib.is_target and ib.opened_by is not None:
+            ob_set = frozenset(c.strip() for c in ib.opened_by.split(","))
+            if ob_set == deleted_set:
+                check_name = check_name + "__combdef"
+        interpretations.append(
+            Interpretation(
+                id=ib.id,
+                is_target=ib.is_target,
+                gold_check=check_name,
+            )
         )
-        for ib in deletion_result["opened_interpretations"]
-    ]
 
     # Post-condition: exactly one target survives into the emitted Task (I0).
     n_targets = sum(1 for i in interpretations if i.is_target)
@@ -215,7 +278,8 @@ def assemble_task(
         latent_spec=deletion_result["latent_spec"],
         interpretations=interpretations,
         ambiguity_level=k,
-        key_questions=full_spec.key_questions
+        key_questions=full_spec.key_questions,
+        regime=full_spec.regime,
     )
 
 
