@@ -34,6 +34,29 @@ class _OnlineModeError(RuntimeError):
     """
 
 
+# Reasoning / o-series models that require special request handling:
+#   - send max_completion_tokens (NOT max_tokens)
+#   - do NOT send logprobs / top_logprobs  (causes HTTP 400)
+#   - do NOT send temperature              (ignored / causes 400)
+# Edit this list when new reasoning-class slugs are released.
+_REASONING_PREFIXES = (
+    "openai/o1",
+    "openai/o3",
+    "openai/o4",
+    "openai/gpt-5",
+)
+
+
+def is_reasoning_model(slug: str) -> bool:
+    """Return True when *slug* identifies an o-series / reasoning-class model.
+
+    Matches ``openai/o1*``, ``openai/o3*``, ``openai/o4*``, ``openai/gpt-5*``.
+    The prefix list ``_REASONING_PREFIXES`` is the single source of truth and is
+    easily editable as new model families are released.
+    """
+    return any(slug.startswith(p) for p in _REASONING_PREFIXES)
+
+
 @dataclass
 class Completion:
     """LLM completion result."""
@@ -98,7 +121,8 @@ class LLMClient:
         seed: Optional[int] = None,
         max_retries: int = 3,
         family: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
     ) -> Completion:
         """Generate completion for a given role and prompt.
         
@@ -109,6 +133,9 @@ class LLMClient:
             max_retries: Number of retry attempts on failure
             family: Optional explicit model family (overrides role-based routing)
             model: Optional explicit model name (overrides role-based routing)
+            temperature: Sampling temperature (None = API default). Omitted for
+                reasoning models (o-series/gpt-5*) regardless of this value.
+                Included in the cache key so different temperatures cache separately.
         
         Returns:
             Completion object with text and metadata
@@ -117,7 +144,7 @@ class LLMClient:
             seed = self.config["seeds"]["global"]
         
         # Check cache first
-        cache_key = self._cache_key(role, prompt, seed, family, model)
+        cache_key = self._cache_key(role, prompt, seed, family, model, temperature)
         cached = self._read_cache(cache_key)
         if cached:
             return cached
@@ -128,7 +155,7 @@ class LLMClient:
         completion = None
         for attempt in range(max_retries):
             try:
-                completion = self._generate(role, prompt, seed, family, model)
+                completion = self._generate(role, prompt, seed, family, model, temperature)
                 break  # generation succeeded; exit retry loop
             except (NotImplementedError, BudgetExceeded, _OnlineModeError):
                 raise  # permanent — never retry
@@ -151,18 +178,20 @@ class LLMClient:
 
         return completion
     
-    def _generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> Completion:
+    def _generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None, temperature: Optional[float] = None) -> Completion:
         """Generate completion. Offline (mock) by default; online via GitHub Models."""
         if self.offline:
-            return self._mock_generate(role, prompt, seed, family, model)
+            return self._mock_generate(role, prompt, seed, family, model, temperature)
         else:
-            return self._generate_online(role, prompt, seed, family, model)
+            return self._generate_online(role, prompt, seed, family, model, temperature)
     
-    def _mock_generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> Completion:
+    def _mock_generate(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None, temperature: Optional[float] = None) -> Completion:
         """Deterministic mock generation for offline operation.
         
-        Output is a stable hash of (family, model, prompt, seed) to ensure reproducibility
-        and proper heterogeneous provenance (different models → different outputs).
+        Output is a stable hash of (family, model, prompt, seed, temperature) to ensure
+        reproducibility and proper heterogeneous provenance (different models → different
+        outputs). Temperature is included so different temperatures hash differently,
+        making offline behavior temperature-aware.
         """
         # Resolve model info (explicit params override role-based routing)
         if family is not None and model is not None:
@@ -174,9 +203,10 @@ class LLMClient:
             model_family = model_info["family"]
             model_name = model_info["model"]
         
-        # Derive deterministic output from inputs INCLUDING family/model
-        # (critical for heterogeneous provenance: different models must yield different outputs)
-        content = f"{model_family}|{model_name}|{prompt}|{seed}"
+        # Derive deterministic output from inputs INCLUDING family/model AND temperature
+        # (critical for heterogeneous provenance: different models must yield different outputs;
+        #  temperature is included so different temperatures produce distinct mock outputs)
+        content = f"{model_family}|{model_name}|{prompt}|{seed}|{temperature}"
         hash_obj = hashlib.sha256(content.encode('utf-8'))
         hash_hex = hash_obj.hexdigest()
         
@@ -200,14 +230,14 @@ class LLMClient:
         info = model_for_role(role, self.config)
         return f"{info['family']}:{info['model']}"
 
-    def _cache_key(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None) -> str:
+    def _cache_key(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None, temperature: Optional[float] = None) -> str:
         """Generate cache key from inputs.
 
-        Includes the execution mode (offline vs online) and the resolved
-        family:model identity so the cache can never (a) serve an offline mock
-        to an online client, or (b) return a stale model id after the role's
-        configured model/family changes — either would corrupt AgentRun.model_id
-        provenance.
+        Includes the execution mode (offline vs online), the resolved family:model
+        identity, and the temperature so the cache can never (a) serve an offline mock
+        to an online client, (b) return a stale model id after the role's configured
+        model/family changes, or (c) collide across different temperatures — any of
+        which would corrupt AgentRun provenance or produce incorrect cached responses.
         """
         mode = "offline" if self.offline else "online"
         
@@ -217,7 +247,7 @@ class LLMClient:
         else:
             identity = self._role_identity(role)
         
-        content = f"{mode}|{identity}|{role}|{prompt}|{seed}"
+        content = f"{mode}|{identity}|{role}|{prompt}|{seed}|{temperature}"
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
     
     def _read_cache(self, cache_key: str) -> Optional[Completion]:
@@ -283,6 +313,7 @@ class LLMClient:
         seed: int,
         family: Optional[str],
         model: Optional[str],
+        temperature: Optional[float] = None,
     ) -> Completion:
         """Call the GitHub Models API (OpenAI-compatible chat/completions).
 
@@ -292,17 +323,24 @@ class LLMClient:
         The token is NEVER logged, printed, or included in any error message.
 
         logprobs:
-          - openai/* slugs: logprobs=True requested → logit_conf populated from
-            exp(mean(first-5-token logprobs)).
+          - Non-reasoning openai/* slugs: logprobs=True requested → logit_conf populated
+            from exp(mean(first-5-token logprobs)).
+          - Reasoning models (o1*, o3*, o4*, gpt-5*): logprobs NOT sent (HTTP 400);
+            logit_conf=None; verbalized confidence only.
           - All other families (meta, mistral-ai, deepseek, microsoft, cohere):
             logprobs not exposed on GitHub Models → logit_conf=None; rely on
             verbalized confidence. Documented capability table:
-              openai/*          logit_conf: ✓ (logprobs supported)
-              meta/*            logit_conf: ✗ (not exposed)
-              mistral-ai/*      logit_conf: ✗ (not exposed)
-              deepseek/*        logit_conf: ✗ (not exposed)
-              microsoft/*       logit_conf: ✗ (not exposed)
-              cohere/*          logit_conf: ✗ (not exposed)
+              openai/* (non-reasoning)  logit_conf: ✓ (logprobs supported)
+              openai/* (reasoning)      logit_conf: ✗ (logprobs rejected)
+              meta/*                    logit_conf: ✗ (not exposed)
+              mistral-ai/*              logit_conf: ✗ (not exposed)
+              deepseek/*                logit_conf: ✗ (not exposed)
+              microsoft/*               logit_conf: ✗ (not exposed)
+              cohere/*                  logit_conf: ✗ (not exposed)
+
+        temperature:
+          - Passed as ``temperature`` in the payload for non-reasoning models when provided.
+          - Omitted for reasoning models (o-series/gpt-5*) — these models do not accept it.
 
         Retry policy (bounded — no infinite loops):
           HTTP 429 / 5xx  → exponential backoff with jitter, up to _MAX_HTTP_RETRIES
@@ -320,6 +358,7 @@ class LLMClient:
             family = info["family"]
 
         is_openai = slug.startswith("openai/")
+        is_reasoning = is_reasoning_model(slug)
 
         # ── Token — read from env; never log / print / write ──────────────────
         token = (
@@ -359,13 +398,22 @@ class LLMClient:
             "model": slug,
             "messages": [{"role": "user", "content": prompt}],
             "seed": seed,
-            # Hard-cap output so the server cannot return more tokens than estimated.
-            # This makes the pre-authorization budget check a true upper bound.
-            "max_tokens": self._max_tokens_per_call,
         }
-        if is_openai:
-            payload["logprobs"] = True
-            payload["top_logprobs"] = 1
+        if is_reasoning:
+            # o-series / gpt-5*: use max_completion_tokens (not max_tokens);
+            # do NOT send logprobs (HTTP 400) or temperature (not accepted).
+            # Budget pre-auth still uses self._max_tokens_per_call as the output bound.
+            payload["max_completion_tokens"] = self._max_tokens_per_call
+        else:
+            # All non-reasoning models: max_tokens enforces the output cap.
+            payload["max_tokens"] = self._max_tokens_per_call
+            # Include temperature when caller provided one (never for reasoning models).
+            if temperature is not None:
+                payload["temperature"] = temperature
+            if is_openai:
+                # Non-reasoning OpenAI: logprobs supported → logit_conf populated.
+                payload["logprobs"] = True
+                payload["top_logprobs"] = 1
 
         # Authorization header carries the token; never echoed back in logs or errors
         headers = {
@@ -494,8 +542,13 @@ class LLMClient:
         cost_usd = self._estimate_cost(slug, tokens_in, tokens_out)
         self._total_cost_usd += cost_usd
 
-        # ── logit_conf (OpenAI only) ───────────────────────────────────────────
-        logit_conf: Optional[float] = self._extract_logit_conf(choice) if is_openai else None
+        # ── logit_conf (non-reasoning OpenAI only) ────────────────────────────
+        # Reasoning models don't send logprobs (would cause HTTP 400), so
+        # logit_conf is always None for them.  Non-reasoning non-OpenAI models
+        # don't expose logprobs on GitHub Models either.
+        logit_conf: Optional[float] = (
+            self._extract_logit_conf(choice) if (is_openai and not is_reasoning) else None
+        )
 
         return Completion(
             text=text,

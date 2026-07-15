@@ -129,8 +129,9 @@ def main() -> None:
                     _slug: str = slug
 
                     def complete(self, role, prompt, seed=None, max_retries=3,
-                                 family=None, model=None):
-                        # Use explicit family/model override for experiment correctness
+                                 family=None, model=None, temperature=None):
+                        # Use explicit family/model override for experiment correctness;
+                        # forward temperature so run_* temperature threading reaches the API.
                         return super().complete(
                             role=role,
                             prompt=prompt,
@@ -138,6 +139,7 @@ def main() -> None:
                             max_retries=max_retries,
                             family=self._family,
                             model=self._slug,
+                            temperature=temperature,
                         )
 
                 family_client = _FamilyClient(

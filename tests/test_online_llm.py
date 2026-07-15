@@ -1082,3 +1082,281 @@ def test_unicode_budget_ascii_unchanged(tmp_path, cfg, monkeypatch):
                        max_tokens_per_call=max_tokens)
     result = client.complete(role="tested_agents", prompt=ascii_prompt, seed=1)
     assert result.text is not None, "ASCII prompt within budget must complete"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fix 1 — Temperature control tests (offline-safe, no network)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_temperature_sent_for_non_reasoning_non_openai_model(tmp_path, cfg, monkeypatch):
+    """temperature is included in the payload for non-reasoning non-OpenAI models."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    captured: dict = {}
+
+    def mock_urlopen(req, *a, **kw):
+        captured.update(json.loads(req.data.decode("utf-8")))
+        return _FakeHTTPResponse(_make_ok_response(model="meta/llama-3.3-70b-instruct"))
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+    client.complete(
+        role="tested_agents", prompt="p", seed=1,
+        family="meta", model="meta/llama-3.3-70b-instruct",
+        temperature=0.7,
+    )
+
+    assert "temperature" in captured, "temperature must be in payload for non-reasoning model"
+    assert captured["temperature"] == 0.7
+    assert "max_tokens" in captured, "non-reasoning model must use max_tokens"
+    assert "max_completion_tokens" not in captured
+
+
+def test_temperature_sent_for_non_reasoning_openai_model(tmp_path, cfg, monkeypatch):
+    """temperature is included in the payload for non-reasoning OpenAI models."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    captured: dict = {}
+
+    def mock_urlopen(req, *a, **kw):
+        captured.update(json.loads(req.data.decode("utf-8")))
+        return _FakeHTTPResponse(_make_ok_response(model="openai/gpt-4o-mini"))
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+    client.complete(
+        role="tested_agents", prompt="p_temp_openai", seed=1,
+        family="openai", model="openai/gpt-4o-mini",
+        temperature=0.3,
+    )
+
+    assert "temperature" in captured, "temperature must be in payload for non-reasoning openai model"
+    assert captured["temperature"] == 0.3
+    assert "logprobs" in captured, "non-reasoning openai must still include logprobs"
+    assert "max_tokens" in captured
+
+
+def test_temperature_none_omits_field_from_payload(tmp_path, cfg, monkeypatch):
+    """When temperature=None (default), the field must NOT appear in the payload."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    captured: dict = {}
+
+    def mock_urlopen(req, *a, **kw):
+        captured.update(json.loads(req.data.decode("utf-8")))
+        return _FakeHTTPResponse(_make_ok_response(model="openai/gpt-4o-mini"))
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+    client.complete(role="tested_agents", prompt="p_no_temp", seed=1)
+
+    assert "temperature" not in captured, (
+        "temperature must not appear in payload when not provided (let API use its default)"
+    )
+
+
+def test_temperature_in_cache_key_different_temps_separate_entries(tmp_path, cfg, monkeypatch):
+    """Different temperatures must produce separate cache entries and separate HTTP calls."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    http_calls = 0
+
+    def mock_urlopen(req, *a, **kw):
+        nonlocal http_calls
+        http_calls += 1
+        return _FakeHTTPResponse(_make_ok_response(text=f"response_{http_calls}"))
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+
+    # Same prompt+seed but different temperatures → different cache keys → 2 HTTP calls
+    r_low = client.complete(role="tested_agents", prompt="same_prompt", seed=42, temperature=0.0)
+    r_high = client.complete(role="tested_agents", prompt="same_prompt", seed=42, temperature=1.0)
+
+    assert http_calls == 2, (
+        f"Different temperatures must each hit the network (separate cache keys). "
+        f"Expected 2 HTTP calls, got {http_calls}."
+    )
+    assert r_low.text != r_high.text, "Different temperatures must produce different cached texts"
+
+    # Third call with temperature=0.0 must serve from cache (no new HTTP call)
+    r_low_again = client.complete(role="tested_agents", prompt="same_prompt", seed=42, temperature=0.0)
+    assert http_calls == 2, "Repeated call with same temperature must use cache, not re-fetch"
+    assert r_low_again.text == r_low.text
+
+
+def test_temperature_cache_key_helper(tmp_path, cfg):
+    """_cache_key must embed temperature so different temps produce different keys."""
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+
+    key_none = client._cache_key("tested_agents", "p", 1, None, None, None)
+    key_zero = client._cache_key("tested_agents", "p", 1, None, None, 0.0)
+    key_high = client._cache_key("tested_agents", "p", 1, None, None, 1.0)
+
+    assert key_none != key_zero, "temperature=None vs 0.0 must differ"
+    assert key_zero != key_high, "temperature=0.0 vs 1.0 must differ"
+    assert key_none != key_high, "temperature=None vs 1.0 must differ"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fix 2 — o-series / reasoning-model tests (offline-safe, no network)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from common.llm import is_reasoning_model
+
+
+def test_is_reasoning_model_classifier():
+    """is_reasoning_model must classify known reasoning and non-reasoning slugs."""
+    # Reasoning slugs — must return True
+    for slug in [
+        "openai/o1",
+        "openai/o1-mini",
+        "openai/o1-preview",
+        "openai/o3",
+        "openai/o3-mini",
+        "openai/o4-mini",
+        "openai/o4",
+        "openai/gpt-5",
+        "openai/gpt-5-mini",
+    ]:
+        assert is_reasoning_model(slug), f"Expected {slug!r} to be a reasoning model"
+
+    # Non-reasoning slugs — must return False
+    for slug in [
+        "openai/gpt-4o-mini",
+        "openai/gpt-4o",
+        "openai/gpt-4.1",
+        "openai/gpt-4.1-mini",
+        "meta/llama-3.3-70b-instruct",
+        "mistral-ai/mistral-small-2503",
+        "deepseek/deepseek-v3-0324",
+        "microsoft/phi-4",
+        "cohere/cohere-command-a",
+    ]:
+        assert not is_reasoning_model(slug), f"Expected {slug!r} NOT to be a reasoning model"
+
+
+def test_reasoning_model_payload_o4_mini(tmp_path, cfg, monkeypatch):
+    """openai/o4-mini (reasoning): must use max_completion_tokens, omit logprobs and temperature."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    captured: dict = {}
+
+    def mock_urlopen(req, *a, **kw):
+        captured.update(json.loads(req.data.decode("utf-8")))
+        return _FakeHTTPResponse(_make_ok_response(model="openai/o4-mini"))
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+    result = client.complete(
+        role="tested_agents", prompt="p_reasoning", seed=1,
+        family="openai", model="openai/o4-mini",
+        temperature=0.7,  # must be ignored / omitted for reasoning models
+    )
+
+    # max_completion_tokens must be present (NOT max_tokens)
+    assert "max_completion_tokens" in captured, (
+        "Reasoning model must use max_completion_tokens, not max_tokens"
+    )
+    assert "max_tokens" not in captured, (
+        "Reasoning model must NOT use max_tokens (causes 400)"
+    )
+    # logprobs must be absent
+    assert "logprobs" not in captured, (
+        "Reasoning model must NOT include logprobs (causes HTTP 400)"
+    )
+    assert "top_logprobs" not in captured, (
+        "Reasoning model must NOT include top_logprobs"
+    )
+    # temperature must be absent (even when caller passes one)
+    assert "temperature" not in captured, (
+        "Reasoning model must NOT include temperature (not accepted by API)"
+    )
+    # logit_conf must be None
+    assert result.logit_conf is None, "Reasoning model must have logit_conf=None"
+
+
+def test_non_reasoning_openai_payload_has_logprobs_max_tokens_temperature(tmp_path, cfg, monkeypatch):
+    """Non-reasoning openai slug: must have logprobs + max_tokens + temperature."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    captured: dict = {}
+    logprobs_data = [{"token": " ok", "logprob": -0.1}]
+
+    def mock_urlopen(req, *a, **kw):
+        captured.update(json.loads(req.data.decode("utf-8")))
+        return _FakeHTTPResponse(
+            _make_ok_response(model="openai/gpt-4o-mini", logprobs_content=logprobs_data)
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+    result = client.complete(
+        role="tested_agents", prompt="p_nr_openai", seed=1,
+        family="openai", model="openai/gpt-4o-mini",
+        temperature=0.5,
+    )
+
+    assert "logprobs" in captured and captured["logprobs"] is True
+    assert "top_logprobs" in captured
+    assert "max_tokens" in captured
+    assert "max_completion_tokens" not in captured
+    assert "temperature" in captured and captured["temperature"] == 0.5
+    assert result.logit_conf is not None, "Non-reasoning openai must populate logit_conf"
+
+
+def test_reasoning_model_logit_conf_is_none(tmp_path, cfg, monkeypatch):
+    """Reasoning model responses must always have logit_conf=None."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    # Even if (hypothetically) logprobs appeared in the response, logit_conf must be None
+    logprobs_data = [{"token": " x", "logprob": -0.2}]
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *a, **kw: _FakeHTTPResponse(
+            _make_ok_response(model="openai/o4-mini", logprobs_content=logprobs_data)
+        ),
+    )
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
+    result = client.complete(
+        role="tested_agents", prompt="p", seed=1,
+        family="openai", model="openai/o4-mini",
+    )
+    assert result.logit_conf is None, (
+        "logit_conf must be None for reasoning models regardless of response content"
+    )
+
+
+def test_reasoning_model_budget_preauth_uses_max_completion_tokens(tmp_path, cfg, monkeypatch):
+    """Budget pre-auth must still block for reasoning models (using _max_tokens_per_call
+    as the output bound even though the field is named max_completion_tokens)."""
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", FAKE_TOKEN)
+
+    http_calls = 0
+
+    def mock_urlopen(req, *a, **kw):
+        nonlocal http_calls
+        http_calls += 1
+        return _FakeHTTPResponse(_make_ok_response(model="openai/o4-mini"))
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    # Budget of $0.0 → any worst-case estimate > 0 must be rejected before HTTP
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False,
+                       max_budget_usd=0.0)
+
+    with pytest.raises(BudgetExceeded, match="Pre-authorization"):
+        client.complete(
+            role="tested_agents", prompt="hello", seed=1,
+            family="openai", model="openai/o4-mini",
+        )
+
+    assert http_calls == 0, "Budget pre-auth must block reasoning model calls too"
