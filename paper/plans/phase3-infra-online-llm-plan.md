@@ -43,22 +43,30 @@
   still pass unchanged. Online mode is opt-in.
 
 ## Deliverable 2 — `common/config.yaml` provenance re-routing (Hard Law 6: constructor≠tested≠judge≠code_reviewer)
-Drop `anthropic`/`google`/`qwen` (not on GitHub Models). PROPOSED mapping (⚠ one scientific choice flagged):
-- **constructor:** `cohere/cohere-command-a` (family `cohere`) — deliberately a family NOT in the tested
-  set, to keep the R2 cross-family-construction control clean (constructor family ∉ tested families).
-- **tested_agents.homogeneous:** `openai/gpt-4o-mini` (family `openai`) — ⚠ THE HOMOGENEOUS SHARED-PRIOR
-  BASELINE FAMILY IS A SCIENTIFIC CHOICE (it is the ρ-baseline in H1). Proposed `openai`; owner may
-  prefer `meta` or `mistral-ai`. Flag for owner confirmation.
-- **tested_agents.heterogeneous:** 4 distinct families — `openai/gpt-4o-mini`,
-  `meta/llama-3.3-70b-instruct`, `mistral-ai/mistral-small-2503`, `deepseek/deepseek-v3-0324`.
-- **tested_agents.reasoning:** `deepseek/deepseek-r1`, `microsoft/phi-4-reasoning` (the H2 reasoning
-  condition; both real reasoning models on GitHub Models).
-- **judge:** `microsoft/phi-4` (family `microsoft`, ≠ constructor `cohere`) — used ONLY when executable
-  gold unavailable (primary domains use executable gold, so rarely invoked).
-- **code_reviewer:** default `mistral-ai/mistral-medium-2505`; the Manager still overrides per slice so
-  auditor family ≠ that slice's implementer family (this is CODE audit routing, orthogonal to the
-  experiment; our code audits use Claude-impl/GPT-audit today).
-- Keep `seeds.global`. Update the header comment to reflect GitHub-Models families.
+Drop `anthropic`/`google`/`qwen` (not on GitHub Models). **FINAL family table (owner-approved 2026-07-15,
+Option B — all roles mutually distinct):**
+
+| Role | Family | Slug | Notes |
+|------|--------|------|-------|
+| constructor | `cohere` | `cohere/cohere-command-a` | outside tested set → keeps R2 cross-family-construction control clean |
+| tested_agents.homogeneous | `openai` | `openai/gpt-4o-mini` | shared-prior baseline / ρ-baseline (owner-ruled: strongest deployed shared prior + only family exposing logprobs for the silent-failure signature) |
+| tested_agents.heterogeneous | `openai`,`meta`,`mistral-ai`,`deepseek` | `openai/gpt-4o-mini`, `meta/llama-3.3-70b-instruct`, `mistral-ai/mistral-small-2503`, `deepseek/deepseek-v3-0324` | 4-family diverse mix |
+| tested_agents.reasoning | `deepseek`,`openai` | `deepseek/deepseek-r1`, `openai/<FRONTIER — verify slug when token live>` | H2 tested on FRONTIER reasoners (deepseek-r1 + an OpenAI o-series/gpt-5). Gives a within-provider H1→H2 gradient (gpt-4o-mini shows convergent-delusion; same-provider frontier reasoner resolves it). **Fallback if no OpenAI frontier reasoner is reachable: `deepseek-r1` alone, documented as a limitation.** |
+| judge | `microsoft` | `microsoft/phi-4` | NOT in any tested pool now (Phi freed by moving reasoning off phi-4-reasoning) → fully clean. Used only if executable gold unavailable (rare; all domains use executable gold). |
+| code_reviewer | (override per slice) | placeholder | CODE-audit routing only; the Manager overrides per slice so auditor family ≠ implementer family. Orthogonal to the experiment (current code audits: Claude-impl / GPT-audit via task tool). Not part of the experiment family-distinctness requirement. |
+
+Mutual distinctness check: constructor(cohere) ∉ tested{openai,meta,mistral-ai,deepseek} ; judge(microsoft) ∉
+tested ∪ {constructor}. ✅ All experiment roles mutually distinct.
+
+**Token-live verification (owner: not a blocker for the table, required before mini-pilot):** once the
+rotated token is reachable, confirm (a) the exact OpenAI frontier reasoning slug is on this catalog and
+(b) whether it exposes logprobs and (c) its rate limits. If unavailable → fall back to `deepseek-r1`
+alone for the reasoning pool and document the limitation. Keep `seeds.global`. Update the header comment
+to reflect the GitHub-Models families.
+
+**Token source:** read from env `GITHUB_MODELS_TOKEN` OR `GH_MODELS_TOKEN` (the persistent User-scope var
+is currently `GH_MODELS_TOKEN`; the rotated token should be persisted to User scope by the owner). NEVER
+log/print the token. Endpoint `https://models.github.ai/inference` (OpenAI-compatible).
 
 ## Deliverable 3 — cheap MINI-PILOT (smoke, NOT full-scale)
 - A small runnable script (e.g. `scripts/mini_pilot.py`, NOT a pytest that hits the network by default)
