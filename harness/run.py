@@ -118,8 +118,12 @@ def answer_format_instruction(domain: str) -> str:
         )
     elif domain in ("code_spec", "data_analysis"):
         return (
-            'Provide your complete solution as a SINGLE ```python code block.\n'
-            'Do not split your solution across multiple code blocks.'
+            'Provide your complete solution as EXACTLY ONE ```python code block '
+            'containing your FINAL answer.\n'
+            'Do NOT include any other code block (no illustrative/example/draft '
+            'blocks): output a single ```python block and nothing fenced besides '
+            'it. If you show any reasoning first, keep it brief and make sure the '
+            'one ```python code block is the LAST thing in your response.'
         )
     else:
         return 'State your final answer clearly and concisely.'
