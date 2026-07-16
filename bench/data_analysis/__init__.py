@@ -197,371 +197,362 @@ class DataChecker(GoldChecker):
             f"data_analysis harness infra failure after {max_attempts} retries: {last_infra_error}"
         )
 
+# ============================================================================
+# PROBLEM LIBRARY — COMBINATORIAL-INVARIANT reversed-target tasks (Amendment 03)
+#
+# Under the REVERSED property (Amendment 01):
+#   I0 (target) = the NON-default true intent stated by the full latent_spec
+#   I_d (a foil) = the model's natural default (what an unaware solver produces
+#     from the underdetermined prompt)
+#
+# Binary convention axes (Amendment 03), each strictly {target, default}:
+#   central_tendency:      target=median          default=arithmetic mean   (H2_derivable)
+#   active_user_threshold: target=>=3 (org KPI)   default=>=1 (any activity)(H1_external)
+#   avg_rounding:          target=round-half-up    default=round-half-even   (H1_external)
+#
+# Families:
+#   data_typical_001      k_max=1  axis central_tendency       -> 2 variants (k0,k1)  H2_derivable
+#   data_activeusers_001  k_max=1  axis active_user_threshold  -> 2 variants (k0,k1)  H1_external
+#   data_report_001       k_max=2  active_user_threshold+avg_rounding -> 4 variants  H1_external
+#
+# Amended invariant per variant deleting subset S (|S|=k'):
+#   len(key_questions) == k'
+#   len(interpretations) == 2^k'   (full combinatorial set)
+#   I0 = all-target; combined-all-default foil marked [combined-default]
+#   100% distinguishable across ALL 2^k' via executable gold (deterministic numeric).
+# ============================================================================
+
+
+def problem_typical_value():
+    """k=1 family, axis central_tendency: median under a VISIBLE extreme outlier.
+
+    H2_derivable: the outlier 900 is present in the prompt's dataset, so a
+    reasoning model can DERIVE that the mean is distorted and the MEDIAN is the
+    representative 'typical value'. The natural default (arithmetic mean) is the
+    WRONG foil.
+
+    1 req class -> 2^1=2 interps: I0 (median, target) + I1 (mean, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_typical_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `typical_value(data)` that returns the single "
+            "representative 'typical value' of the dataset "
+            "[2, 4, 4, 4, 5, 5, 7, 900], as a string rounded to 2 decimal places."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="central_tendency",
+                description="Which measure of central tendency represents the typical value",
+                clauses=[
+                    "This dataset is dominated by a single extreme outlier (900) that "
+                    "distorts the mean; report the MEDIAN as the representative typical "
+                    "value. Answer to 2 decimals."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: MEDIAN as the typical value (target). The visible "
+                    "outlier 900 distorts the mean, so the median is representative. "
+                    "[2,4,4,4,5,5,7,900] -> '4.50'."
+                ),
+                is_target=True,
+                gold_check="typical_median",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: arithmetic MEAN as the typical "
+                    "value. [2,4,4,4,5,5,7,900] -> mean 931/8 = 116.375 -> '116.38'."
+                ),
+                is_target=False,
+                gold_check="typical_mean",
+                opened_by="central_tendency",
+            ),
+        ],
+        key_questions=[
+            "Which measure of central tendency represents the 'typical value' (mean/median)?",
+        ],
+    )
+
+
+def problem_active_users():
+    """k=1 family, axis active_user_threshold: org-specific KPI activity threshold.
+
+    H1_external: the KPI 'active user' threshold (>=3 sessions/week) is an EXTERNAL
+    company convention, NOT derivable from the data. The natural default (count any
+    activity, >=1) is the WRONG foil.
+
+    1 req class -> 2^1=2 interps: I0 (>=3, target) + I1 (>=1, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_activeusers_001",
+        regime="H1_external",
+        prompt_core=(
+            "Write a function `count_active(sessions)` that takes a list of "
+            "per-user weekly session counts "
+            "[5, 3, 1, 4, 2, 3, 0, 6, 1, 2] and returns the number of active users."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="active_user_threshold",
+                description="Session-count threshold that defines an active user (org KPI)",
+                clauses=[
+                    "Per our company KPI, an 'active user' has AT LEAST 3 sessions per "
+                    "week. Count active users."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: org KPI threshold >=3 sessions/week (target). "
+                    "[5,3,1,4,2,3,0,6,1,2] -> 5 active users."
+                ),
+                is_target=True,
+                gold_check="active_threshold3",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: count any activity, threshold >=1. "
+                    "[5,3,1,4,2,3,0,6,1,2] -> 9 active users."
+                ),
+                is_target=False,
+                gold_check="active_threshold1",
+                opened_by="active_user_threshold",
+            ),
+        ],
+        key_questions=[
+            "What session-count threshold defines an 'active user' (the org KPI)?",
+        ],
+    )
+
+
+def problem_activity_report():
+    """k=2 family, axes active_user_threshold + avg_rounding.
+
+    H1_external: both conventions are EXTERNAL org policy; model defaults on both.
+
+    INDEPENDENCE: the two axes control DISJOINT output segments (like code_spec's
+    quarter/date/amount):
+      - active_user_threshold changes ONLY the count field N.
+      - avg_rounding changes ONLY the average field M (mean = sum/len is
+        independent of the threshold).
+    Deleting one axis leaves the other's gold unchanged (no interaction term); the
+    2^2 golds are the exact Cartesian product. Datasets are chosen so the mean is a
+    '.5' tie with an EVEN integer part (half-up != half-even) and the >=3 vs >=1
+    counts differ, so all 4 interpretations are pairwise distinct.
+
+    2 req classes -> 2^2=4 interpretations:
+      I0  >=3 + half-up    [all-target]
+      I1  >=3 + half-even  [avg_rounding defaulted, partial]
+      I2  >=1 + half-up    [active_user_threshold defaulted, partial]
+      I3  >=1 + half-even  [combined-default]
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_report_001",
+        regime="H1_external",
+        prompt_core=(
+            "Write a function `format_report(sessions)` that takes a list of "
+            "per-user weekly session counts and returns a one-line summary string "
+            "of the form '{N} active | avg {M}', where N is the number of active "
+            "users and M is the average sessions per user (total sessions divided "
+            "by the number of users) as a whole number."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="active_user_threshold",
+                description="Session-count threshold that defines an active user (org KPI)",
+                clauses=[
+                    "Per our company KPI, an 'active user' has AT LEAST 3 sessions per "
+                    "week; N counts users meeting that threshold."
+                ],
+            ),
+            RequirementClass(
+                id="avg_rounding",
+                description="Rounding rule for the average sessions per user",
+                clauses=[
+                    "Round the average M to the nearest whole number using ROUND HALF UP "
+                    "(ties round up, e.g. 2.5 -> 3), per our reporting standard."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: KPI threshold >=3 + half-up rounding (target, all-target). "
+                    "[12,2,2,2,2,0,0,0] -> '1 active | avg 3'."
+                ),
+                is_target=True,
+                gold_check="report_thr3_halfup",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "Partial default: threshold >=3 + half-even rounding "
+                    "(avg_rounding defaulted). [12,2,2,2,2,0,0,0] -> '1 active | avg 2'."
+                ),
+                is_target=False,
+                gold_check="report_thr3_halfeven",
+                opened_by="avg_rounding",
+            ),
+            InterpretationBranch(
+                id="I2",
+                description=(
+                    "Partial default: threshold >=1 + half-up rounding "
+                    "(active_user_threshold defaulted). [12,2,2,2,2,0,0,0] -> '5 active | avg 3'."
+                ),
+                is_target=False,
+                gold_check="report_thr1_halfup",
+                opened_by="active_user_threshold",
+            ),
+            InterpretationBranch(
+                id="I3",
+                description=(
+                    "MODEL DEFAULT [combined-default]: threshold >=1 + half-even rounding "
+                    "(both defaulted). [12,2,2,2,2,0,0,0] -> '5 active | avg 2'."
+                ),
+                is_target=False,
+                gold_check="report_thr1_halfeven",
+                opened_by="active_user_threshold,avg_rounding",
+            ),
+        ],
+        key_questions=[
+            "What session-count threshold defines an 'active user' (the org KPI)?",
+            "Which rounding rule for the average: half-up (ties up) or Python "
+            "default half-even?",
+        ],
+    )
+
 
 # ============================================================================
-# PROBLEM LIBRARY - Data analysis problems with requirement classes
-# ============================================================================
-
-def problem_compute_mean():
-    """Compute mean with ambiguous missing-value handling."""
-    
-    spec = FullSpec(
-        domain="data_analysis",
-        task_id="data_mean_001",
-        # GENUINE: the prompt states the data MAY contain missing entries, but
-        # is neutral on how to handle them once the clause is deleted.
-        prompt_core="""Write a function `compute_mean` that calculates the average of a list of numbers that may contain missing entries represented as None.""",
-        requirement_classes=[
-            RequirementClass(
-                id="missing_values",
-                description="How to handle None/missing values",
-                clauses=["Ignore None values in the calculation (skip them)."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Skip missing values (target - the common aggregation default, "
-                            "like statistics/pandas which drop missing entries)",
-                is_target=True,
-                gold_check="mean_skip_none"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="Propagate None (return None if any None present)",
-                is_target=False,
-                gold_check="mean_propagate_none",
-                opened_by="missing_values"
-            ),
-        ],
-        key_questions=[
-            "Should I skip None values or propagate None if any are present?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_compute_variance():
-    """Compute variance with ambiguous population vs sample formula."""
-    
-    spec = FullSpec(
-        domain="data_analysis",
-        task_id="data_variance_001",
-        # GENUINE: for a COMPLETE population, population variance (÷n) is the
-        # natural default; the (deleted) clause states that default, and the
-        # sample formula (÷n-1) is the plausible alternative-convention delusion.
-        prompt_core="""Write a function `compute_variance` that calculates the variance of a list of numbers representing a complete population of measurements.""",
-        requirement_classes=[
-            RequirementClass(
-                id="formula",
-                description="Population vs sample variance",
-                clauses=["Use the population variance formula (divide by n)."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Population variance (÷n, target - natural default for a "
-                            "complete population, e.g. numpy.var default ddof=0)",
-                is_target=True,
-                gold_check="var_population"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="Sample variance (÷n-1, e.g. statistics.variance)",
-                is_target=False,
-                gold_check="var_sample",
-                opened_by="formula"
-            ),
-        ],
-        key_questions=[
-            "Should I use population variance (÷n) or sample variance (÷n-1)?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_compute_median():
-    """Compute median with ambiguous even-count averaging."""
-    
-    spec = FullSpec(
-        domain="data_analysis",
-        task_id="data_median_001",
-        # GENUINE: "median" for even-length lists - average the middle two or pick one?
-        prompt_core="""Write a function `compute_median` that finds the median value of a list of numbers.""",
-        requirement_classes=[
-            RequirementClass(
-                id="even_handling",
-                description="How to handle even-length lists",
-                clauses=["For even-length lists, return the average of the two middle values."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Average two middle values (target - Python statistics.median)",
-                is_target=True,
-                gold_check="median_average"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="Return lower middle value",
-                is_target=False,
-                gold_check="median_lower",
-                opened_by="even_handling"
-            ),
-        ],
-        key_questions=[
-            "For even-length lists, should I average the two middle values or pick one?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_filter_records():
-    """Filter records with ambiguous threshold boundary (inclusive vs exclusive)."""
-    
-    spec = FullSpec(
-        domain="data_analysis",
-        task_id="data_filter_001",
-        # GENUINE: "meets a minimum threshold" is neutral on whether the boundary
-        # value itself qualifies. The (deleted) clause states the natural inclusive
-        # reading ("minimum" -> the value reaching the threshold counts).
-        prompt_core="""Write a function `filter_records` that filters a list of records (dicts with 'value' key) to keep those that meet a given minimum threshold.""",
-        requirement_classes=[
-            RequirementClass(
-                id="boundary",
-                description="Whether threshold is inclusive or exclusive",
-                clauses=["A record meets the threshold if its value is greater than or equal to the threshold (inclusive)."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Inclusive (value >= threshold, target - 'minimum' includes "
-                            "the boundary value)",
-                is_target=True,
-                gold_check="filter_inclusive"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="Exclusive (value > threshold, strictly above)",
-                is_target=False,
-                gold_check="filter_exclusive",
-                opened_by="boundary"
-            ),
-        ],
-        key_questions=[
-            "Does meeting the minimum threshold include values equal to it (>=), or only above it (>)?"
-        ]
-    )
-    
-    return spec
-
-
-def problem_group_by_key():
-    """Group records with ambiguous sort order of groups."""
-    
-    spec = FullSpec(
-        domain="data_analysis",
-        task_id="data_group_001",
-        # GENUINE: "group by category" is neutral on the order of groups
-        prompt_core="""Write a function `group_by_key` that groups a list of records (dicts with 'category' and 'value' keys) by category, returning a dict mapping each category to a list of its values.""",
-        requirement_classes=[
-            RequirementClass(
-                id="list_order",
-                description="Order of values within each category's list",
-                clauses=["Preserve the original order of values within each category's list."]
-            ),
-        ],
-        interpretations=[
-            InterpretationBranch(
-                id="I0",
-                description="Preserve original order (target - dict iteration order)",
-                is_target=True,
-                gold_check="group_preserve_order"
-            ),
-            InterpretationBranch(
-                id="I1",
-                description="Sort values within each category",
-                is_target=False,
-                gold_check="group_sort_values",
-                opened_by="list_order"
-            ),
-        ],
-        key_questions=[
-            "Should I preserve the original order of values or sort them within each category?"
-        ]
-    )
-    
-    return spec
-
-
-# ============================================================================
-# REFERENCE IMPLEMENTATIONS - One per interpretation per problem
+# REFERENCE IMPLEMENTATIONS — one per interpretation per family.
+# Each reference must pass ONLY its own checker and FAIL all others.
 # ============================================================================
 
 REFERENCE_IMPLEMENTATIONS = {
-    # Compute mean
-    "mean_skip_none": """
-def compute_mean(numbers):
-    filtered = [x for x in numbers if x is not None]
-    return sum(filtered) / len(filtered) if filtered else 0.0
-""",
-    "mean_propagate_none": """
-def compute_mean(numbers):
-    if None in numbers:
-        return None
-    return sum(numbers) / len(numbers) if numbers else 0.0
-""",
-    
-    # Compute variance
-    "var_sample": """
-def compute_variance(numbers):
-    n = len(numbers)
-    if n < 2:
-        return 0.0
-    mean = sum(numbers) / n
-    return sum((x - mean) ** 2 for x in numbers) / (n - 1)
-""",
-    "var_population": """
-def compute_variance(numbers):
-    n = len(numbers)
-    if n == 0:
-        return 0.0
-    mean = sum(numbers) / n
-    return sum((x - mean) ** 2 for x in numbers) / n
-""",
-    
-    # Compute median
-    "median_average": """
-def compute_median(numbers):
-    sorted_nums = sorted(numbers)
-    n = len(sorted_nums)
+    # -- data_typical_001 (central_tendency axis) -----------------------------
+    "typical_median": """
+def typical_value(data):
+    s = sorted(data)
+    n = len(s)
     mid = n // 2
     if n % 2 == 0:
-        return (sorted_nums[mid - 1] + sorted_nums[mid]) / 2.0
+        med = (s[mid - 1] + s[mid]) / 2.0
     else:
-        return sorted_nums[mid]
+        med = s[mid]
+    return f"{med:.2f}"
 """,
-    "median_lower": """
-def compute_median(numbers):
-    sorted_nums = sorted(numbers)
-    n = len(sorted_nums)
-    if n % 2 == 0:
-        return sorted_nums[n // 2 - 1]
-    else:
-        return sorted_nums[n // 2]
+    "typical_mean": """
+def typical_value(data):
+    mean = sum(data) / len(data)
+    return f"{mean:.2f}"
 """,
-    
-    # Filter records
-    "filter_exclusive": """
-def filter_records(records, threshold):
-    return [r for r in records if r['value'] > threshold]
+
+    # -- data_activeusers_001 (active_user_threshold axis) --------------------
+    "active_threshold3": """
+def count_active(sessions):
+    return sum(1 for s in sessions if s >= 3)
 """,
-    "filter_inclusive": """
-def filter_records(records, threshold):
-    return [r for r in records if r['value'] >= threshold]
+    "active_threshold1": """
+def count_active(sessions):
+    return sum(1 for s in sessions if s >= 1)
 """,
-    
-    # Group by key
-    "group_preserve_order": """
-def group_by_key(records):
-    result = {}
-    for r in records:
-        cat = r['category']
-        if cat not in result:
-            result[cat] = []
-        result[cat].append(r['value'])
-    return result
+
+    # -- data_report_001 (active_user_threshold + avg_rounding axes) ----------
+    "report_thr3_halfup": """
+def format_report(sessions):
+    from decimal import Decimal, ROUND_HALF_UP
+    active = sum(1 for s in sessions if s >= 3)
+    mean = Decimal(sum(sessions)) / Decimal(len(sessions))
+    avg = int(mean.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    return f"{active} active | avg {avg}"
 """,
-    "group_sort_values": """
-def group_by_key(records):
-    result = {}
-    for r in records:
-        cat = r['category']
-        if cat not in result:
-            result[cat] = []
-        result[cat].append(r['value'])
-    for cat in result:
-        result[cat].sort()
-    return result
+    "report_thr3_halfeven": """
+def format_report(sessions):
+    active = sum(1 for s in sessions if s >= 3)
+    avg = round(sum(sessions) / len(sessions))
+    return f"{active} active | avg {avg}"
+""",
+    "report_thr1_halfup": """
+def format_report(sessions):
+    from decimal import Decimal, ROUND_HALF_UP
+    active = sum(1 for s in sessions if s >= 1)
+    mean = Decimal(sum(sessions)) / Decimal(len(sessions))
+    avg = int(mean.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    return f"{active} active | avg {avg}"
+""",
+    "report_thr1_halfeven": """
+def format_report(sessions):
+    active = sum(1 for s in sessions if s >= 1)
+    avg = round(sum(sessions) / len(sessions))
+    return f"{active} active | avg {avg}"
 """,
 }
 
 
 # ============================================================================
-# TEST CASES - Input/output pairs for each interpretation
+# TEST CASES — input/output pairs for each checker.
+# Every PAIR of checkers within a family differs on at least one test case.
 # ============================================================================
 
 TEST_CASES = {
-    # Compute mean - cases that DISTINGUISH skip vs propagate None
-    "mean_skip_none": [
-        ([1, 2, 3, 4], 2.5),
-        ([10, None, 20], 15.0),  # Discriminating: skip None -> (10+20)/2 = 15
-        ([5], 5.0),
+    # -- data_typical_001 -----------------------------------------------------
+    # Datasets where median != mean so the two checkers are disjoint.
+    "typical_median": [
+        ([2, 4, 4, 4, 5, 5, 7, 900], "4.50"),   # median avg(4,5)=4.50; mean=116.38
+        ([1, 2, 3, 4, 100], "3.00"),            # median 3.00; mean 22.00
+        ([10, 20, 30, 1000], "25.00"),          # median avg(20,30)=25.00; mean 265.00
     ],
-    "mean_propagate_none": [
-        ([1, 2, 3, 4], 2.5),
-        ([10, None, 20], None),  # Discriminating: propagate None
-        ([5], 5.0),
+    "typical_mean": [
+        ([2, 4, 4, 4, 5, 5, 7, 900], "116.38"),  # mean 931/8=116.375->116.38
+        ([1, 2, 3, 4, 100], "22.00"),           # mean 110/5=22.00
+        ([10, 20, 30, 1000], "265.00"),         # mean 1060/4=265.00
     ],
-    
-    # Compute variance - cases that DISTINGUISH sample (n-1) vs population (n)
-    "var_sample": [
-        ([1, 2, 3, 4, 5], 2.5),  # sample var = 10/(5-1) = 2.5
-        ([10, 20], 50.0),  # sample var = 100/(2-1) = 50
+
+    # -- data_activeusers_001 -------------------------------------------------
+    # Datasets where count>=3 != count>=1 so the two checkers are disjoint.
+    "active_threshold3": [
+        ([5, 3, 1, 4, 2, 3, 0, 6, 1, 2], 5),
+        ([3, 3, 2, 1, 0], 2),
+        ([1, 2, 3], 1),
     ],
-    "var_population": [
-        ([1, 2, 3, 4, 5], 2.0),  # population var = 10/5 = 2.0
-        ([10, 20], 25.0),  # population var = 100/2 = 25
+    "active_threshold1": [
+        ([5, 3, 1, 4, 2, 3, 0, 6, 1, 2], 9),
+        ([3, 3, 2, 1, 0], 4),
+        ([1, 2, 3], 3),
     ],
-    
-    # Compute median - cases that DISTINGUISH average vs lower for even-length
-    # AND that separate median from a plain-mean impostor (BLOCKER fix): the
-    # asymmetric cases below have mean != median so "return the mean" fails.
-    "median_average": [
-        ([1, 2, 3], 2.0),
-        ([1, 2, 3, 4], 2.5),  # Discriminating: average of 2 and 3
-        ([10, 20], 15.0),  # Discriminating: average of 10 and 20
-        ([1, 1, 100], 1.0),  # Anti-mean: median=1 but mean=34.0
-        ([1, 2, 3, 100], 2.5),  # Anti-mean: median avg(2,3)=2.5 but mean=26.5
+
+    # -- data_report_001 ------------------------------------------------------
+    # Two datasets; mean is a '.5' tie with EVEN integer part (half-up != half-even),
+    # and count>=3 != count>=1. All 4 checkers pairwise distinct on both datasets.
+    # DS1 [12,2,2,2,2,0,0,0]: N>=3=1, N>=1=5, mean=2.5 -> halfup 3, halfeven 2
+    # DS2 [14,14,2,2,2,2,0,0]: N>=3=2, N>=1=6, mean=4.5 -> halfup 5, halfeven 4
+    "report_thr3_halfup": [
+        ([12, 2, 2, 2, 2, 0, 0, 0], "1 active | avg 3"),
+        ([14, 14, 2, 2, 2, 2, 0, 0], "2 active | avg 5"),
     ],
-    "median_lower": [
-        ([1, 2, 3], 2.0),
-        ([1, 2, 3, 4], 2.0),  # Discriminating: lower middle value
-        ([10, 20], 10.0),  # Discriminating: lower middle value
-        ([1, 1, 100], 1.0),  # odd-length: middle value
-        ([1, 2, 3, 100], 2.0),  # even-length: lower middle = 2
+    "report_thr3_halfeven": [
+        ([12, 2, 2, 2, 2, 0, 0, 0], "1 active | avg 2"),
+        ([14, 14, 2, 2, 2, 2, 0, 0], "2 active | avg 4"),
     ],
-    
-    # Filter records - cases that DISTINGUISH exclusive (>) vs inclusive (>=)
-    "filter_exclusive": [
-        (([{'value': 5}, {'value': 10}, {'value': 15}], 10), [{'value': 15}]),  # > 10 excludes 10
-        (([{'value': 3}, {'value': 7}], 5), [{'value': 7}]),
+    "report_thr1_halfup": [
+        ([12, 2, 2, 2, 2, 0, 0, 0], "5 active | avg 3"),
+        ([14, 14, 2, 2, 2, 2, 0, 0], "6 active | avg 5"),
     ],
-    "filter_inclusive": [
-        (([{'value': 5}, {'value': 10}, {'value': 15}], 10), [{'value': 10}, {'value': 15}]),  # >= 10 includes 10
-        (([{'value': 3}, {'value': 7}], 5), [{'value': 7}]),
-    ],
-    
-    # Group by key - cases that DISTINGUISH preserve vs sort
-    "group_preserve_order": [
-        (
-            [{'category': 'A', 'value': 30}, {'category': 'B', 'value': 10}, 
-             {'category': 'A', 'value': 10}, {'category': 'B', 'value': 20}],
-            {'A': [30, 10], 'B': [10, 20]}  # Discriminating: original order preserved
-        ),
-    ],
-    "group_sort_values": [
-        (
-            [{'category': 'A', 'value': 30}, {'category': 'B', 'value': 10}, 
-             {'category': 'A', 'value': 10}, {'category': 'B', 'value': 20}],
-            {'A': [10, 30], 'B': [10, 20]}  # Discriminating: values sorted
-        ),
+    "report_thr1_halfeven": [
+        ([12, 2, 2, 2, 2, 0, 0, 0], "5 active | avg 2"),
+        ([14, 14, 2, 2, 2, 2, 0, 0], "6 active | avg 4"),
     ],
 }
 
@@ -570,24 +561,26 @@ TEST_CASES = {
 # CHECKERS REGISTRY
 # ============================================================================
 
-CHECKERS = {}
 ENTRYPOINTS = {
-    # Map checker IDs to their entrypoint function names
-    "mean_skip_none": "compute_mean",
-    "mean_propagate_none": "compute_mean",
-    "var_sample": "compute_variance",
-    "var_population": "compute_variance",
-    "median_average": "compute_median",
-    "median_lower": "compute_median",
-    "filter_exclusive": "filter_records",
-    "filter_inclusive": "filter_records",
-    "group_preserve_order": "group_by_key",
-    "group_sort_values": "group_by_key",
+    # k=1 family: central tendency
+    "typical_median":       "typical_value",
+    "typical_mean":         "typical_value",
+    # k=1 family: active-user threshold
+    "active_threshold3":    "count_active",
+    "active_threshold1":    "count_active",
+    # k=2 family: threshold x avg-rounding
+    "report_thr3_halfup":   "format_report",
+    "report_thr3_halfeven": "format_report",
+    "report_thr1_halfup":   "format_report",
+    "report_thr1_halfeven": "format_report",
 }
 
-for check_id, test_cases in TEST_CASES.items():
-    entrypoint = ENTRYPOINTS[check_id]
-    CHECKERS[check_id] = DataChecker(test_cases, entrypoint=entrypoint, description=check_id)
+CHECKERS = {}
+for _check_id, _test_cases in TEST_CASES.items():
+    _entrypoint = ENTRYPOINTS[_check_id]
+    CHECKERS[_check_id] = DataChecker(
+        _test_cases, entrypoint=_entrypoint, description=_check_id
+    )
 
 
 # ============================================================================
@@ -595,233 +588,208 @@ for check_id, test_cases in TEST_CASES.items():
 # ============================================================================
 
 def generate_tasks() -> List[Task]:
-    """Generate all data_analysis tasks with multiple deletion patterns.
+    """Generate all 8 data_analysis tasks (Amendment 03 combinatorial invariant).
 
-    key_questions invariant (spot-check fix): a task's key_questions are exactly
-    the clarifying questions for the axes DELETED in that variant — never the
-    full base-problem set. Hence for every emitted task:
-        len(key_questions) == ambiguity_level == len(interpretations) - 1
-    and the k=0 control has an EMPTY key_questions list. key_questions is the
-    gold for the Direction-B (false-surfacing) detector, so a stale question on
-    the control would invert that metric; this keeps it deterministic.
+    Amended invariant per variant (enforced by post-generation assertion):
+        len(key_questions) == k'       (deleted-axis count)
+        len(interpretations) == 2^k'   (full combinatorial set)
+        I0 = all-target; combined-all-default marked [combined-default]
+        k0 control: prompt==latent_spec, 1 interp, empty key_questions.
+
+    Task count:
+        2 k=1 families x 2 variants  =  4
+        1 k=2 family   x 4 variants  =  4
+        Total                        =  8
     """
-
-    problems = [
-        problem_compute_mean(),
-        problem_compute_variance(),
-        problem_compute_median(),
-        problem_filter_records(),
-        problem_group_by_key(),
-    ]
-
     tasks = []
 
-    for base_spec in problems:
-        base_id = base_spec.task_id
-        n_req = len(base_spec.requirement_classes)
+    # -- k=1 single-axis families ---------------------------------------------
+    k1_defs = [
+        (problem_typical_value(), [
+            ("_k0", []),
+            ("_k1_central_tendency", ["central_tendency"]),
+        ]),
+        (problem_active_users(), [
+            ("_k0", []),
+            ("_k1_active_user_threshold", ["active_user_threshold"]),
+        ]),
+    ]
 
-        # Deterministic axis -> clarifying-question map (parallel by construction).
-        if len(base_spec.key_questions) != n_req:
-            raise ValueError(
-                f"{base_id}: key_questions ({len(base_spec.key_questions)}) must "
-                f"be parallel to requirement_classes ({n_req})"
-            )
+    for base_spec, variant_defs in k1_defs:
         qmap = {
             rc.id: q
             for rc, q in zip(base_spec.requirement_classes, base_spec.key_questions)
         }
-
-        def _emit(spec_copy, k, delete_ids):
-            task = assemble_task(spec_copy, k=k, classes_to_delete=delete_ids)
-            # Override the full-spec key_questions with ONLY the deleted axes.
-            task.key_questions = [qmap[cid] for cid in delete_ids]
-            return task
-
-        # k=0 CONTROL: unambiguous -> no deleted axes -> no key_questions.
-        task_k0 = _emit(base_spec, 0, [])
-        task_k0.id = f"{base_id}_k0"
-        tasks.append(task_k0)
-
-        # k=1: delete each requirement individually.
-        for req_class in base_spec.requirement_classes:
+        for suffix, delete_ids in variant_defs:
             spec_copy = FullSpec(
                 domain=base_spec.domain,
-                task_id=f"{base_id}_k1_{req_class.id}",
+                task_id=base_spec.task_id + suffix,
                 prompt_core=base_spec.prompt_core,
                 requirement_classes=base_spec.requirement_classes[:],
                 interpretations=base_spec.interpretations[:],
-                key_questions=base_spec.key_questions[:]
+                key_questions=base_spec.key_questions[:],
+                regime=base_spec.regime,
             )
-            tasks.append(_emit(spec_copy, 1, [req_class.id]))
+            task = assemble_task(
+                spec_copy, k=len(delete_ids),
+                classes_to_delete=delete_ids if delete_ids else None,
+            )
+            task.key_questions = [qmap[cid] for cid in delete_ids]
+            tasks.append(task)
+
+    # -- k=2 family: data_report_001 ------------------------------------------
+    rep_spec = problem_activity_report()
+    rep_qmap = {
+        rc.id: q
+        for rc, q in zip(rep_spec.requirement_classes, rep_spec.key_questions)
+    }
+    for suffix, delete_ids in [
+        ("_k0",                        []),
+        ("_k1_active_user_threshold",  ["active_user_threshold"]),
+        ("_k1_avg_rounding",           ["avg_rounding"]),
+        ("_k2_all",                    ["active_user_threshold", "avg_rounding"]),
+    ]:
+        spec_copy = FullSpec(
+            domain=rep_spec.domain,
+            task_id=rep_spec.task_id + suffix,
+            prompt_core=rep_spec.prompt_core,
+            requirement_classes=rep_spec.requirement_classes[:],
+            interpretations=rep_spec.interpretations[:],
+            key_questions=rep_spec.key_questions[:],
+            regime=rep_spec.regime,
+        )
+        task = assemble_task(
+            spec_copy, k=len(delete_ids),
+            classes_to_delete=delete_ids if delete_ids else None,
+        )
+        task.key_questions = [rep_qmap[cid] for cid in delete_ids]
+        tasks.append(task)
+
+    # -- Post-generation amended-invariant gate (fail fast) -------------------
+    for t in tasks:
+        k_prime = t.ambiguity_level
+        expected_interps = 2 ** k_prime
+        if len(t.interpretations) != expected_interps:
+            raise AssertionError(
+                f"{t.id}: expected 2^{k_prime}={expected_interps} interpretations, "
+                f"got {len(t.interpretations)}"
+            )
+        if len(t.key_questions) != k_prime:
+            raise AssertionError(
+                f"{t.id}: expected {k_prime} key_questions, got {len(t.key_questions)}"
+            )
+        targets = [i for i in t.interpretations if i.is_target]
+        if len(targets) != 1 or targets[0].id != "I0":
+            raise AssertionError(f"{t.id}: must have exactly one target I0")
+        if t.regime not in ("H1_external", "H2_derivable"):
+            raise AssertionError(f"{t.id}: reconstructed task must carry a regime tag")
+        # __combdef marker: every k>0 task must have EXACTLY ONE combined-default
+        if k_prime > 0:
+            combdef_count = sum(
+                1 for i in t.interpretations if i.gold_check.endswith("__combdef")
+            )
+            if combdef_count != 1:
+                raise AssertionError(
+                    f"{t.id}: expected exactly 1 __combdef interpretation, "
+                    f"got {combdef_count}"
+                )
 
     return tasks
 
 
 # ============================================================================
-# VALIDATION LOADER
-# Task-specific near-miss foils for each problem
+# FOILS (near-miss adversarial candidates) — each matches AT MOST ONE checker
 # ============================================================================
 
 def get_task_specific_foils(task_id_base: str) -> List[str]:
-    """Generate task-specific near-miss foils that test checker boundaries.
-    
-    Each task gets plausible near-miss foils that might match multiple
-    interpretations if checkers aren't truly disjoint.
-    """
-    
-    if "data_mean" in task_id_base:
+    """Near-miss foils for each problem family (task_id_base = prefix before '_k')."""
+
+    if task_id_base == "data_typical_001":
         return [
-            # Near-miss: treats None as zero instead of skip/propagate
+            # Mode (most frequent value): 4.00 on the primary dataset; 0 matches
             """
-def compute_mean(numbers):
-    total = sum(0 if x is None else x for x in numbers)
-    return total / len(numbers) if numbers else 0.0
+def typical_value(data):
+    from collections import Counter
+    mode = Counter(data).most_common(1)[0][0]
+    return f"{mode:.2f}"
 """,
-            # Near-miss: wrong denominator
+            # Minimum value; 0 matches
             """
-def compute_mean(numbers):
-    filtered = [x for x in numbers if x is not None]
-    return sum(filtered) / len(numbers) if numbers else 0.0
+def typical_value(data):
+    return f"{min(data):.2f}"
 """,
-            # Always-fail foil
+            # Median but WITHOUT rounding to 2 decimals (format mismatch); 0 matches
             """
-def compute_mean(numbers):
-    raise NotImplementedError()
-""",
-        ]
-    
-    elif "data_variance" in task_id_base:
-        return [
-            # Near-miss: uses n instead of n-1 but with wrong mean calculation
-            """
-def compute_variance(numbers):
-    n = len(numbers)
-    if n == 0:
-        return 0.0
-    mean = sum(numbers) / (n + 1)
-    return sum((x - mean) ** 2 for x in numbers) / n
-""",
-            # Near-miss: standard deviation instead of variance
-            """
-def compute_variance(numbers):
-    n = len(numbers)
-    if n < 2:
-        return 0.0
-    mean = sum(numbers) / n
-    return (sum((x - mean) ** 2 for x in numbers) / (n - 1)) ** 0.5
-""",
-            # Wrong implementation
-            """
-def compute_variance(numbers):
-    return 0.0
-""",
-        ]
-    
-    elif "data_median" in task_id_base:
-        return [
-            # Near-miss: uses upper middle instead of lower or average
-            """
-def compute_median(numbers):
-    sorted_nums = sorted(numbers)
-    n = len(sorted_nums)
-    if n % 2 == 0:
-        return sorted_nums[n // 2]
-    else:
-        return sorted_nums[n // 2]
-""",
-            # Near-miss: doesn't sort
-            """
-def compute_median(numbers):
-    n = len(numbers)
+def typical_value(data):
+    s = sorted(data)
+    n = len(s)
     mid = n // 2
     if n % 2 == 0:
-        return (numbers[mid - 1] + numbers[mid]) / 2.0
+        return str((s[mid - 1] + s[mid]) / 2.0)
+    return str(s[mid])
+""",
+        ]
+
+    elif task_id_base == "data_activeusers_001":
+        return [
+            # Threshold >=2 (neither KPI nor any-activity); 0 matches
+            """
+def count_active(sessions):
+    return sum(1 for s in sessions if s >= 2)
+""",
+            # Threshold >=5; 0 matches
+            """
+def count_active(sessions):
+    return sum(1 for s in sessions if s >= 5)
+""",
+            # Total sessions instead of count of users; 0 matches
+            """
+def count_active(sessions):
+    return sum(sessions)
+""",
+        ]
+
+    elif task_id_base == "data_report_001":
+        return [
+            # One-decimal average (format mismatch on M); 0 matches
+            """
+def format_report(sessions):
+    active = sum(1 for s in sessions if s >= 3)
+    mean = sum(sessions) / len(sessions)
+    return f"{active} active | avg {mean:.1f}"
+""",
+            # Wrong separator (semicolon instead of pipe); 0 matches
+            """
+def format_report(sessions):
+    from decimal import Decimal, ROUND_HALF_UP
+    active = sum(1 for s in sessions if s >= 3)
+    mean = Decimal(sum(sessions)) / Decimal(len(sessions))
+    avg = int(mean.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    return f"{active} active ; avg {avg}"
+""",
+            # N = number of users (len) instead of active count; 0 matches
+            """
+def format_report(sessions):
+    from decimal import Decimal, ROUND_HALF_UP
+    mean = Decimal(sum(sessions)) / Decimal(len(sessions))
+    avg = int(mean.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    return f"{len(sessions)} active | avg {avg}"
+""",
+        ]
+
     else:
-        return numbers[mid]
-""",
-            # Wrong: returns mean instead of median
-            """
-def compute_median(numbers):
-    return sum(numbers) / len(numbers)
-""",
-        ]
-    
-    elif "data_filter" in task_id_base:
-        return [
-            # Near-miss: uses < instead of > or >=
-            """
-def filter_records(records, threshold):
-    return [r for r in records if r['value'] < threshold]
-""",
-            # Near-miss: filters out instead of keeping
-            """
-def filter_records(records, threshold):
-    return [r for r in records if r['value'] <= threshold]
-""",
-            # Wrong: empty result
-            """
-def filter_records(records, threshold):
-    return []
-""",
-        ]
-    
-    elif "data_group" in task_id_base:
-        return [
-            # Near-miss: sorts by key instead of values
-            """
-def group_by_key(records):
-    result = {}
-    for r in sorted(records, key=lambda x: x['category']):
-        cat = r['category']
-        if cat not in result:
-            result[cat] = []
-        result[cat].append(r['value'])
-    return result
-""",
-            # Near-miss: reverses values within each category
-            """
-def group_by_key(records):
-    result = {}
-    for r in records:
-        cat = r['category']
-        if cat not in result:
-            result[cat] = []
-        result[cat].append(r['value'])
-    for cat in result:
-        result[cat].reverse()
-    return result
-""",
-            # Wrong: flattens all values
-            """
-def group_by_key(records):
-    return {'all': [r['value'] for r in records]}
-""",
-        ]
-    
-    else:
-        # Fallback generic foils
-        return [
-            "def func(): raise NotImplementedError()",
-            "x = 42",
-            "def func(): return None",
-        ]
+        return ["def func(): raise NotImplementedError()"]
 
 
 def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
     Dict[str, GoldChecker], Dict[str, Any], List[Any]
 ]:
-    """Provide checkers, reference candidates, and adversarial foils.
-    
-    Returns a 3-tuple (checkers, candidates, foils). Foils are candidates that
-    must match AT MOST ONE checker; they probe checker disjointness beyond the
-    reference candidates.
-    """
-    
-    # Build checkers for this task's interpretations
+    """Return (checkers, reference-candidates, near-miss-foils) for a task."""
     checkers = {}
     candidates = {}
-    
+
     for interp in task.interpretations:
+        # Strip __combdef suffix — it's a serialized marker, not a checker key.
         check_id = interp.gold_check
         if check_id.endswith("__combdef"):
             check_id = check_id[: -len("__combdef")]
@@ -829,10 +797,8 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
             raise ValueError(f"Unknown checker: {check_id}")
         checkers[interp.id] = CHECKERS[check_id]
         candidates[interp.id] = REFERENCE_IMPLEMENTATIONS[check_id]
-    
-    # Task-specific near-miss foils
-    # Extract base task ID (before _k0, _k1, etc.)
-    task_id_base = task.id.split('_k')[0] if '_k' in task.id else task.id
+
+    task_id_base = task.id.split("_k")[0] if "_k" in task.id else task.id
     foils = get_task_specific_foils(task_id_base)
 
     return checkers, candidates, foils
@@ -844,12 +810,17 @@ def get_checkers_and_candidates(domain: str, task: Task) -> Tuple[
 
 if __name__ == "__main__":
     from pathlib import Path
-    
+
     tasks = generate_tasks()
     output_path = Path(__file__).parent.parent / "data" / "data_analysis.jsonl"
     output_path.parent.mkdir(exist_ok=True)
     save_tasks(tasks, str(output_path))
-    
+
     print(f"Generated {len(tasks)} data_analysis tasks -> {output_path}")
     levels = {k: sum(1 for t in tasks if t.ambiguity_level == k) for k in range(4)}
     print(f"Ambiguity distribution: {levels}")
+    regimes = {}
+    for t in tasks:
+        r = t.regime if t.regime else "None"
+        regimes[r] = regimes.get(r, 0) + 1
+    print(f"Regime distribution: {regimes}")
