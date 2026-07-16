@@ -42,6 +42,7 @@ from common.schema import AgentRun, Interpretation, Task
 from harness.runner import (
     ALL_CONFIGS,
     CheckpointStore,
+    POOL_CONFIGS,
     Runner,
     RunnerConfig,
     RpmThrottler,
@@ -1315,3 +1316,324 @@ class TestIdentityHelpers:
             job_key("t1", "single", "judge", MODEL, 1),
         }
         assert len(keys) == 6
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Round-2 audit fixes (real integration paths — would FAIL on the pre-fix code)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _SimulatedCrash(BaseException):
+    """A BaseException (NOT an ``Exception``) used to model a hard process crash.
+
+    The runner's infra-retry and run-loop only catch ``Exception`` (and the two
+    permanent errors), so this propagates straight out of ``run()`` — exactly
+    like the process being killed mid-job, WITHOUT any ``except`` handler (or the
+    old post-job ``add_cost``) getting a chance to run.
+    """
+
+
+class _CachingCostClient:
+    """Fake client whose completions cost money the FIRST time only.
+
+    A ``shared_cache`` set is threaded through every per-job instance (modelling
+    the durable on-disk LLM cache): the first completion for a given key charges
+    ``cost_per_call``; a repeat (cache hit, e.g. on resume) charges 0.  Each
+    instance's ``_total_cost_usd`` still starts at 0, like a real per-job client.
+    """
+
+    def __init__(self, config, cost_per_call, cache_dir, max_requests_per_min,
+                 shared_cache):
+        self.config = config
+        self.cache_dir = Path(cache_dir)
+        self.offline = True
+        self.max_requests_per_min = max_requests_per_min
+        self._total_cost_usd = 0.0
+        self._cost_per_call = cost_per_call
+        self._shared_cache = shared_cache
+
+    def complete(self, role, prompt, seed=None, **kwargs):
+        key = (self.config["seeds"]["global"], role, prompt)
+        if key in self._shared_cache:
+            return None  # cache hit → zero incremental cost (resume rerun)
+        self._shared_cache.add(key)
+        self._total_cost_usd += self._cost_per_call
+        return None
+
+
+class TestCostLedgerCrashSafety:
+    """BLOCKER B: cost is journaled PER PAID completion (via the throttle
+    wrapper's ``cost_sink``) — NOT once after the whole job returns.
+
+    A crash AFTER a paid completion but BEFORE ``mark_job_done`` must therefore
+    NOT undercount the aggregate: the ledger entry is already fsync'd.  On the
+    pre-fix code cost was appended only after the job returned (success/except
+    paths), so a hard crash left NO ledger entry and the resumed run under-counted
+    the spend — this test FAILS there and PASSES after the fix.
+    """
+
+    COST = 0.10
+
+    def _factory(self, tmp_path, shared_cache):
+        def factory(job_config, remaining_budget):
+            return _CachingCostClient(
+                job_config, cost_per_call=self.COST,
+                cache_dir=str(tmp_path / "cache"), max_requests_per_min=None,
+                shared_cache=shared_cache,
+            )
+        return factory
+
+    def _crashing_run(self, crash_holder):
+        def run(task, config, client, **kwargs):
+            # Pay (journaled per-completion), THEN maybe crash before returning.
+            client.complete(role="tested_agents", prompt="x", seed=1)
+            if crash_holder["crash"]:
+                raise _SimulatedCrash("killed after paid completion, before job_done")
+            return [make_run(task.id, config, seed=client.config["seeds"]["global"])]
+        return run
+
+    def test_crash_after_paid_completion_is_counted_on_resume(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        shared_cache: Set[Any] = set()
+        crash_holder = {"crash": True}
+
+        runner1, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1], max_infra_retries=1,
+            run_task_fn=self._crashing_run(crash_holder),
+            client_factory=self._factory(tmp_path, shared_cache),
+        )
+        # Hard crash mid-job — propagates out of run() (no except handler runs).
+        with pytest.raises(_SimulatedCrash):
+            runner1.run()
+
+        # The paid completion was journaled BEFORE the crash — reload proves it.
+        assert CheckpointStore(cp).aggregate_cost_usd == pytest.approx(self.COST)
+        # And the job was NOT marked done (so it will re-run on resume).
+        assert not CheckpointStore(cp).job_done(
+            "t1", "single", "tested_agents", MODEL, 1
+        )
+
+        # Resume: no crash this time; the completion CACHE-HITS (zero new cost).
+        crash_holder["crash"] = False
+        runner2, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1], max_infra_retries=1,
+            run_task_fn=self._crashing_run(crash_holder),
+            client_factory=self._factory(tmp_path, shared_cache),
+        )
+        result = runner2.run()
+
+        assert result["completed"] == 1
+        # Ledger still counts the spend EXACTLY once — no undercount, no double.
+        assert CheckpointStore(cp).aggregate_cost_usd == pytest.approx(self.COST)
+
+
+class TestMultiRolePlumbing:
+    """BLOCKER A: a grid cell's ``(model_role, model_id)`` must actually CONTROL
+    the invoked work for EVERY role — not just ``tested_agents``.
+
+    ``_bind_model`` binds tested_agents → homogeneous baseline, and any other
+    role → that role's ``{family, model}`` entry.  Two cells that differ only by
+    role must therefore execute DISTINCT work (distinct keys ⇒ distinct work),
+    and completing one must not falsely-skip the other.
+
+    On the pre-fix ``_bind_model`` (which returned early for non-tested roles) the
+    ``judge`` cell bound nothing, so both cells executed IDENTICAL work — the
+    distinct-work assertion FAILS there.
+    """
+
+    _MODELS = [
+        ("tested_agents", "openai/gpt-4o-mini"),
+        ("judge", "meta/llama-3.3-70b-instruct"),
+    ]
+
+    def _recording_run(self, seen):
+        def run(task, config, client, **kwargs):
+            cfg = client.config
+            tested = cfg["roles"]["tested_agents"]["homogeneous"][0]["model"]
+            judge = cfg["roles"]["judge"]["model"]
+            seen.append((tested, judge))
+            return [make_run(task.id, config, model=tested,
+                             seed=cfg["seeds"]["global"])]
+        return run
+
+    def test_two_roles_execute_distinct_work(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        seen: List[tuple] = []
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], models=self._MODELS,
+            run_task_fn=self._recording_run(seen),
+        )
+        # Two distinct grid cells (differ only by role) for the same task/seed.
+        assert len(runner.enumerate_grid()) == 2
+        result = runner.run()
+
+        assert result["completed"] == 2
+        assert len(seen) == 2
+        # The two cells bound DIFFERENT roles → different executed work.
+        assert seen[0] != seen[1], "distinct role cells must execute distinct work"
+        # tested_agents cell overrode the tested model; judge cell overrode judge.
+        judges = {j for (_t, j) in seen}
+        assert "meta/llama-3.3-70b-instruct" in judges
+
+    def test_two_roles_no_false_skip_on_resume(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        # Pre-complete ONLY the tested_agents cell.
+        CheckpointStore(cp).mark_job_done(
+            "t1", "single", "tested_agents", "openai/gpt-4o-mini", 42
+        )
+        seen: List[tuple] = []
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], models=self._MODELS,
+            run_task_fn=self._recording_run(seen),
+        )
+        result = runner.run()
+
+        # The judge cell (distinct key) must still run — no silent skip.
+        assert result["completed"] == 1
+        assert result["skipped"] == 1
+        assert len(seen) == 1
+        assert seen[0][1] == "meta/llama-3.3-70b-instruct"
+
+
+class TestHeterogeneousPoolIdentity:
+    """BLOCKER A: a heterogeneous (pool) config invokes a POOL of distinct
+    models, so a single scalar model_id cannot describe it.  Such configs are
+    keyed by a canonical POOL identity and the per-model sweep is NOT applied —
+    so several distinct grid keys can never collapse onto identical pool work.
+    """
+
+    def test_pool_config_is_recognized(self):
+        assert "heterogeneous-MAD" in POOL_CONFIGS
+
+    def test_pool_config_yields_single_pool_cell(self, tmp_path):
+        # Even with a 2-model sweep, a pool config must yield exactly ONE cell
+        # per (task, seed), keyed by the pool identity — never the per-model sweep.
+        models = [
+            ("tested_agents", "openai/gpt-4o-mini"),
+            ("tested_agents", "meta/llama-3.3-70b-instruct"),
+        ]
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["heterogeneous-MAD"], seeds=[42], models=models,
+        )
+        grid = runner.enumerate_grid()
+        assert len(grid) == 1, "pool config must not fan out over the model sweep"
+        (task_id, cfg_name, model_role, model_id, seed) = grid[0]
+        assert cfg_name == "heterogeneous-MAD"
+        assert model_role == "tested_agents"
+        assert model_id.startswith("pool:"), "pool cell keyed by pool identity"
+
+    def test_pool_identity_reflects_configured_pool(self, tmp_path):
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["heterogeneous-MAD"], seeds=[42],
+        )
+        pool_id = runner.enumerate_grid()[0][3]
+        # Every configured heterogeneous model appears in the pool identity.
+        pool = runner._base_client.config["roles"]["tested_agents"]["heterogeneous"]
+        for member in pool:
+            assert member["model"] in pool_id
+
+    def test_bind_model_is_noop_for_pool_config(self):
+        from common.config import load_config
+        cfg = load_config()
+        before = json.dumps(cfg["roles"]["tested_agents"], sort_keys=True)
+        Runner._bind_model(cfg, "heterogeneous-MAD", "tested_agents", "pool:x+y")
+        after = json.dumps(cfg["roles"]["tested_agents"], sort_keys=True)
+        assert before == after, "pool config must NOT rebind — work is the pool"
+
+    def test_homogeneous_and_pool_keys_never_collide(self, tmp_path):
+        # A homogeneous sweep + a pool config together → distinct keys for all.
+        models = [
+            ("tested_agents", "openai/gpt-4o-mini"),
+            ("tested_agents", "meta/llama-3.3-70b-instruct"),
+        ]
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["single", "heterogeneous-MAD"], seeds=[7], models=models,
+        )
+        grid = runner.enumerate_grid()
+        # single → 2 model cells; heterogeneous-MAD → 1 pool cell = 3 total.
+        assert len(grid) == 3
+        keys = {job_key(*cell) for cell in grid}
+        assert len(keys) == 3, "all grid keys must be distinct (no collision)"
+
+    def test_pool_config_runs_and_marks_done(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["heterogeneous-MAD"], seeds=[42],
+        )
+        result = runner.run()
+        assert result["completed"] == 1
+        pool_id = runner.enumerate_grid()[0][3]
+        # Resume is idempotent: the pool cell is now skipped, not re-run.
+        assert CheckpointStore(cp).job_done(
+            "t1", "heterogeneous-MAD", "tested_agents", pool_id, 42
+        )
+
+
+class TestLegacyCheckpointLoad:
+    """MAJOR C: legacy ``job_done`` markers written BEFORE the 5-dim change lack
+    ``model_role``/``model_id``.  ``_load()`` must never ``KeyError`` on them; a
+    partial marker is treated as INCOMPLETE so the job safely re-runs.
+    """
+
+    def test_legacy_3field_job_done_loads_without_crash(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        cp.write_text(
+            json.dumps({"type": "job_done", "task_id": "t1",
+                        "config": "single", "seed": 42}) + "\n",
+            encoding="utf-8",
+        )
+        # Must NOT raise KeyError('model_role').
+        store = CheckpointStore(cp)
+        # Legacy marker → treated incomplete → job re-runs (job_done == False).
+        assert store.job_done(
+            "t1", "single", "tested_agents", "openai/gpt-4o-mini", 42
+        ) is False
+        assert store.n_done_jobs == 0
+
+    def test_legacy_and_valid_records_mixed(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        legacy = json.dumps({"type": "job_done", "task_id": "t1",
+                             "config": "single", "seed": 1})
+        valid = json.dumps({"type": "job_done", "task_id": "t2",
+                            "config": "single", "model_role": "tested_agents",
+                            "model_id": "openai/gpt-4o-mini", "seed": 2})
+        cp.write_text(legacy + "\n" + valid + "\n", encoding="utf-8")
+
+        store = CheckpointStore(cp)
+        # Legacy record ignored (re-run), valid 5-dim record honoured.
+        assert store.n_done_jobs == 1
+        assert store.job_done("t2", "single", "tested_agents",
+                              "openai/gpt-4o-mini", 2)
+        assert not store.job_done("t1", "single", "tested_agents",
+                                  "openai/gpt-4o-mini", 1)
+
+    def test_legacy_marker_causes_rerun_not_false_skip(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        cp.write_text(
+            json.dumps({"type": "job_done", "task_id": "t1",
+                        "config": "single", "seed": 42}) + "\n",
+            encoding="utf-8",
+        )
+        seen: List[str] = []
+
+        def rec(task, config, client, **kwargs):
+            seen.append(task.id)
+            return [make_run(task.id, config,
+                             seed=client.config["seeds"]["global"])]
+
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], run_task_fn=rec,
+        )
+        result = runner.run()
+        # The legacy job re-runs (safe) rather than being falsely skipped.
+        assert result["completed"] == 1
+        assert seen == ["t1"]

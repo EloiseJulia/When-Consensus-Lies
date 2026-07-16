@@ -132,15 +132,27 @@ class CheckpointStore:
                     continue  # corrupt line — skip, do not crash
                 rtype = rec.get("type")
                 if rtype == "job_done":
-                    self._done_jobs.add(
-                        job_key(
-                            rec["task_id"],
-                            rec["config"],
-                            rec["model_role"],
-                            rec["model_id"],
-                            int(rec["seed"]),
+                    # MAJOR C: legacy (pre 5-dim) job_done markers written before
+                    # this change lack model_role/model_id.  Never crash on them —
+                    # treat a marker missing any identity field as INCOMPLETE so
+                    # the job re-runs (and cache-hits make it cheap) rather than
+                    # falsely-skipping or KeyError-ing on load.
+                    if not all(
+                        k in rec for k in ("task_id", "config", "model_role", "model_id", "seed")
+                    ):
+                        continue  # legacy/partial marker → re-run on next invocation
+                    try:
+                        self._done_jobs.add(
+                            job_key(
+                                rec["task_id"],
+                                rec["config"],
+                                rec["model_role"],
+                                rec["model_id"],
+                                int(rec["seed"]),
+                            )
                         )
-                    )
+                    except (TypeError, ValueError):
+                        continue  # malformed seed etc. → treat as incomplete
                 elif rtype == "cost_delta":
                     # BLOCKER 2: replay the persisted ledger so the aggregate
                     # budget continues from the running total across resumes.
@@ -322,7 +334,8 @@ class RpmThrottler:
 # ── Throttled-client wrapper ─────────────────────────────────────────────────
 
 class _ThrottledClient:
-    """Duck-type LLMClient wrapper adding per-model RPM throttling and day-cap guard.
+    """Duck-type LLMClient wrapper adding per-model RPM throttling, day-cap guard,
+    and PER-COMPLETION cost journaling.
 
     Exposes the same interface as LLMClient (``complete()``, ``config``,
     ``cache_dir``, ``offline``) so it can be passed directly to ``run_task()``.
@@ -331,6 +344,13 @@ class _ThrottledClient:
     raises ``DayCapped`` immediately without touching the underlying client.
     This propagates cleanly through ``run_task()`` to the runner's catch block,
     where the model is registered and all future jobs for it are also skipped.
+
+    BLOCKER B (crash-safe cost): each ``complete()`` measures the incremental
+    cost the underlying client actually incurred and durably journals it via
+    ``cost_sink`` IMMEDIATELY — before the surrounding job returns.  A crash
+    after a paid completion but before ``mark_job_done`` therefore cannot lose
+    that spend (the ledger entry is already fsync'd), and re-runs cache-hit at
+    zero incremental cost so there is no double-count.
     """
 
     def __init__(
@@ -338,10 +358,12 @@ class _ThrottledClient:
         underlying: LLMClient,
         throttler: RpmThrottler,
         day_capped_models: Set[str],
+        cost_sink: Optional[Callable[[float], None]] = None,
     ) -> None:
         self._c = underlying
         self._throttler = throttler
         self._day_capped = day_capped_models
+        self._cost_sink = cost_sink
 
     @property
     def config(self) -> Dict[str, Any]:
@@ -355,6 +377,10 @@ class _ThrottledClient:
     def offline(self) -> bool:
         return self._c.offline
 
+    @staticmethod
+    def _cost_of(client: Any) -> float:
+        return float(getattr(client, "_total_cost_usd", 0.0) or 0.0)
+
     def complete(
         self,
         role: str,
@@ -365,7 +391,7 @@ class _ThrottledClient:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
     ) -> Any:
-        """Throttle + day-cap guard, then delegate to underlying LLMClient."""
+        """Throttle + day-cap guard, delegate, then journal incremental cost."""
         # Resolve slug for per-model throttling/day-cap checks
         if model is not None:
             slug = model
@@ -377,15 +403,24 @@ class _ThrottledClient:
             raise DayCapped(slug)
 
         self._throttler.acquire(slug)
-        return self._c.complete(
-            role=role,
-            prompt=prompt,
-            seed=seed,
-            max_retries=max_retries,
-            family=family,
-            model=model,
-            temperature=temperature,
-        )
+        cost_before = self._cost_of(self._c)
+        try:
+            result = self._c.complete(
+                role=role,
+                prompt=prompt,
+                seed=seed,
+                max_retries=max_retries,
+                family=family,
+                model=model,
+                temperature=temperature,
+            )
+        finally:
+            # Journal whatever spend actually landed on the underlying client,
+            # even if complete() ultimately raised after a paid call.
+            delta = self._cost_of(self._c) - cost_before
+            if delta > 0.0 and self._cost_sink is not None:
+                self._cost_sink(delta)
+        return result
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -399,6 +434,15 @@ ALL_CONFIGS: List[str] = [
     "verifier",
     "interpretation-diverse",
 ]
+
+#: Configs whose executed work is a POOL of distinct models (harness/run.py
+#: ``run_mad(homogeneous=False)``).  A single scalar model_id cannot describe
+#: such a job, so BLOCKER A binds NOTHING for these and instead keys the job by
+#: a canonical POOL identity derived from the configured heterogeneous pool — so
+#: the checkpoint key and the actually-executed work stay consistent (two
+#: different pools ⇒ different keys; the model sweep is NOT applied here, which
+#: prevents distinct keys from executing identical work).
+POOL_CONFIGS: Set[str] = {"heterogeneous-MAD"}
 
 #: Conservative default RPM (well below GitHub Models per-minute caps).
 DEFAULT_RPM: int = 20
@@ -501,6 +545,35 @@ class Runner:
             model_id = "unknown"
         return [("tested_agents", model_id)]
 
+    def _pool_identity(self) -> str:
+        """Canonical identity for a heterogeneous (pool) config's executed work.
+
+        BLOCKER A: a heterogeneous config invokes a POOL of distinct models, so a
+        single scalar model_id cannot describe it.  We key such a job by a stable
+        string derived from the configured heterogeneous pool slugs (sorted for
+        order-independence).  Two different pools ⇒ different identity ⇒ distinct
+        keys; the same pool ⇒ same key.  This keeps the checkpoint key consistent
+        with the work ``run_task`` actually executes for the config.
+        """
+        try:
+            pool = self._base_client.config["roles"]["tested_agents"]["heterogeneous"]
+            slugs = sorted(m["model"] for m in pool)
+        except (KeyError, IndexError, TypeError):
+            slugs = ["unknown"]
+        return "pool:" + "+".join(slugs)
+
+    def _models_for_config(self, cfg_name: str) -> List[Tuple[str, str]]:
+        """Return the ``(model_role, model_id)`` grid dimension for *cfg_name*.
+
+        BLOCKER A: homogeneous-style configs (which invoke a SINGLE tested model)
+        sweep the configured ``models`` list; a pool config (heterogeneous-MAD)
+        yields exactly ONE cell keyed by the pool identity — never the per-model
+        sweep, which would make several distinct keys execute identical pool work.
+        """
+        if cfg_name in POOL_CONFIGS:
+            return [("tested_agents", self._pool_identity())]
+        return list(self._models)
+
     def _default_client_factory(
         self, job_config: Dict[str, Any], remaining_budget_usd: Optional[float]
     ) -> LLMClient:
@@ -522,30 +595,40 @@ class Runner:
         )
 
     @staticmethod
-    def _job_cost(client: Any) -> float:
-        """Incremental USD cost incurred by a per-job client (starts at 0)."""
-        return float(getattr(client, "_total_cost_usd", 0.0) or 0.0)
-
-    @staticmethod
     def _bind_model(
-        job_config: Dict[str, Any], model_role: str, model_id: str
+        job_config: Dict[str, Any],
+        cfg_name: str,
+        model_role: str,
+        model_id: str,
     ) -> None:
-        """Bind this grid cell's model into the per-job config copy.
+        """Bind this grid cell's ``(model_role, model_id)`` into the per-job config.
 
-        BLOCKER 1: so a distinct ``model_id`` in the grid runs genuinely
-        distinct work (and therefore is a distinct, not-yet-done job), the
-        tested-agents homogeneous baseline is overridden to the grid's model.
-        The family is derived from the ``family/model`` slug prefix (matching
-        ``config.yaml`` conventions).  Only mutates the deep-copied per-job
-        config — never shared state.  A no-op for non tested-agents roles.
+        BLOCKER A: so a distinct grid cell runs genuinely distinct work (and is
+        therefore a distinct, not-yet-done job), the invoked model for the cell's
+        role is overridden in the deep-copied per-job config:
+
+        * ``tested_agents`` → overrides the *homogeneous* pool to exactly this
+          model, which controls single / sc / homogeneous-MAD / verifier /
+          interpretation-diverse (all of which resolve tested_agents via the
+          homogeneous baseline).
+        * any other role (constructor / judge / code_reviewer / …) → overrides
+          that role's ``{family, model}`` entry.
+        * POOL configs (heterogeneous-MAD) → NO binding: the executed work is the
+          configured heterogeneous pool and the job is keyed by pool identity, so
+          binding a scalar here would desync key ↔ work.
+
+        Only mutates the per-job copy — never shared state.
         """
-        if model_role != "tested_agents":
-            return
+        if cfg_name in POOL_CONFIGS:
+            return  # pool identity cell — executed work is the configured pool
         family = model_id.split("/", 1)[0] if "/" in model_id else model_id
         try:
             roles = job_config.setdefault("roles", {})
-            tested = roles.setdefault("tested_agents", {})
-            tested["homogeneous"] = [{"family": family, "model": model_id}]
+            if model_role == "tested_agents":
+                tested = roles.setdefault("tested_agents", {})
+                tested["homogeneous"] = [{"family": family, "model": model_id}]
+            else:
+                roles[model_role] = {"family": family, "model": model_id}
         except (AttributeError, TypeError):
             pass  # malformed config — leave untouched; run_task will surface it
 
@@ -554,15 +637,16 @@ class Runner:
     def enumerate_grid(self) -> List[Tuple[str, str, str, str, int]]:
         """Return the full job grid as ``(task_id, config, model_role, model_id, seed)``.
 
-        BLOCKER 1: the grid is the cross-product of task × config × MODEL × seed,
-        matching the five-dimensional AgentRun identity.  The order
-        task → config → model → seed is deterministic across restarts so resume
-        skips exactly the right jobs.
+        BLOCKER 1/A: the grid is the cross-product of task × config × MODEL × seed,
+        matching the five-dimensional AgentRun identity, where the MODEL dimension
+        is config-aware (per-model sweep for homogeneous configs, single pool
+        identity for heterogeneous pool configs).  The deterministic order
+        task → config → model → seed makes resume skip exactly the right jobs.
         """
         grid: List[Tuple[str, str, str, str, int]] = []
         for task in self._cfg.tasks:
             for cfg_name in self._cfg.configs:
-                for model_role, model_id in self._models:
+                for model_role, model_id in self._models_for_config(cfg_name):
                     for seed in self._cfg.seeds:
                         grid.append((task.id, cfg_name, model_role, model_id, seed))
         return grid
@@ -668,7 +752,7 @@ class Runner:
             # makes a different model_id real, distinct work (BLOCKER 1).
             job_config = copy.deepcopy(self._base_client.config)
             job_config["seeds"]["global"] = seed
-            self._bind_model(job_config, model_role, model_id)
+            self._bind_model(job_config, cfg_name, model_role, model_id)
 
             # Pass the REMAINING aggregate budget so the per-job pre-auth guard is
             # a true sub-cap of the whole-run cap (BLOCKER 2).
@@ -679,18 +763,23 @@ class Runner:
                 )
             job_client = self._client_factory(job_config, remaining_budget)
 
-            # Wrap with throttler + day-cap guard (shared set across jobs)
+            # Wrap with throttler + day-cap guard (shared set across jobs).
+            # BLOCKER B: the ledger is journaled PER PAID completion via
+            # ``cost_sink`` — NOT once after the whole job returns — so a crash
+            # after paid completions but before job_done cannot undercount the
+            # aggregate.  On resume the job re-runs and cache-hits cost $0
+            # (delta == 0 → not journaled), so there is no double-count either.
             wrapped = _ThrottledClient(
-                job_client, self._throttler, self._day_capped_models
+                job_client,
+                self._throttler,
+                self._day_capped_models,
+                cost_sink=self._store.add_cost,
             )
 
             # ── Execute job with infra-error retry ────────────────────────────
             try:
                 labeled_runs = self._run_job_with_retry(task, cfg_name, wrapped)
             except BudgetExceeded as exc:
-                # Persist whatever this job actually spent before it tripped the
-                # sub-cap, so the aggregate ledger stays accurate on resume.
-                self._store.add_cost(self._job_cost(job_client))
                 print(
                     f"[RUNNER] Budget exceeded: {exc}. Checkpointing and stopping."
                 )
@@ -703,7 +792,6 @@ class Runner:
                     "day_capped_models": day_capped,
                 }
             except DayCapped as exc:
-                self._store.add_cost(self._job_cost(job_client))
                 model_slug: str = getattr(exc, "model_slug", str(exc))
                 if model_slug not in day_capped:
                     day_capped.append(model_slug)
@@ -716,7 +804,6 @@ class Runner:
                 failed += 1
                 continue
             except Exception as exc:
-                self._store.add_cost(self._job_cost(job_client))
                 print(
                     f"[RUNNER] INFRA error on job "
                     f"({task_id!r}, {cfg_name!r}, {model_id!r}, seed={seed}): {exc}"
@@ -724,12 +811,13 @@ class Runner:
                 failed += 1
                 continue
 
-            # ── Checkpoint: cost ledger, runs, then job_done marker ────────────
-            # Persist this job's incurred cost FIRST (aggregate ledger), then each
-            # AgentRun (fsync), then the job_done marker.  If a crash occurs before
-            # job_done, the job re-runs on resume and cache-hits make ZERO new HTTP
-            # calls (so _total_cost_usd == 0 on the rerun → no double-count).
-            self._store.add_cost(self._job_cost(job_client))
+            # ── Checkpoint: runs, then job_done marker ─────────────────────────
+            # Cost has ALREADY been journaled per paid completion (BLOCKER B) via
+            # the wrapper's ``cost_sink``, so we only persist each AgentRun (fsync)
+            # then the job_done marker here.  If a crash occurs before job_done,
+            # the job re-runs on resume and cache-hits make ZERO new HTTP calls
+            # (delta == 0 → not journaled), so there is neither undercount (paid
+            # cost already in the ledger) nor double-count.
             for run, label in labeled_runs:
                 run.label = label
                 self._store.add_run(run)
