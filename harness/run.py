@@ -114,7 +114,10 @@ def answer_format_instruction(domain: str) -> str:
             'End your response with EXACTLY one of these formats:\n'
             '  FINAL ANSWER: $<amount>  (e.g. FINAL ANSWER: $42.00)\n'
             '  OR a standalone JSON object: {"amount": <number>}\n'
-            'This structured format is required for automated scoring.'
+            'This structured format is required for automated scoring.\n'
+            'If you show any reasoning first, keep it brief and make sure the '
+            'FINAL ANSWER (or JSON) is OUTSIDE and AFTER any reasoning, as the '
+            'LAST thing in your response.'
         )
     elif domain in ("code_spec", "data_analysis"):
         return (

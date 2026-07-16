@@ -496,12 +496,16 @@ def label_policy_domain(run: AgentRun, task: Task) -> str:
     from bench.policy_qa import get_checkers_and_candidates
     
     # Extract numeric answer from output.
-    # FROZEN CONTRACT (prereg §7): the structured-answer grammar and its conflict
-    # semantics operate on the RAW output with NO <think>-region exclusion. Do NOT
-    # preprocess/strip reasoning here — disagreeing amounts ANYWHERE → I_perp,
-    # byte-for-byte as pre-registered. (Reasoning-wrapper handling for policy_qa
-    # would be a contract change requiring a pre-registration amendment.)
-    amount = _extract_numeric_from_output(run.output)
+    # AMENDMENT 04 (owner-signed 2026-07-16, SHA 999ce21): strip <think> reasoning
+    # BEFORE applying the UNCHANGED FINAL-ANSWER/JSON numeric grammar. Only the
+    # model's actual final answer (outside reasoning) is extracted, so a scratch
+    # number inside <think> can no longer falsely conflict with the real FINAL
+    # ANSWER (which over-produced I_perp for reasoning models). The numeric grammar,
+    # exact-cent matching, and "disagreeing amounts across the REMAINING markers →
+    # I_perp" rule are byte-for-byte UNCHANGED — only the candidate input is
+    # pre-processed. _strip_reasoning is nesting-aware: nested/unclosed/truncated
+    # <think> → recover nothing → I_perp (reasoning-internal numbers never exposed).
+    amount = _extract_numeric_from_output(_strip_reasoning(run.output))
     if amount is None:
         # No clear numeric answer found
         return "I_perp"
