@@ -118,6 +118,32 @@ def test_golden_overtime_anchor_amounts():
     assert not checkers[i0].check({"amount": 950.00}).passed
 
 
+def test_golden_paymileage_k2_amounts():
+    """GOLDEN: pin the four k=2 (policy_paymileage_001) amounts to exact cents.
+
+    Independence-delta and distinctness assertions alone would stay green under
+    coordinated value drift; this pins the absolute values so any drift fails.
+
+    I0 = OT@35h + round-up $63.00  = $1063.00 (all-target, non-default)
+    I1 = OT@35h + exact-cent $62.40 = $1062.40 (mileage_rounding defaulted)
+    I2 = OT@40h + round-up $63.00  = $1013.00 (overtime_threshold defaulted)
+    I3 = OT@40h + exact-cent $62.40 = $1012.40 (combined-default)
+    """
+    assert REFERENCE_ANSWERS["pay_ot35_roundup"] == {"amount": 1063.00}
+    assert REFERENCE_ANSWERS["pay_ot35_exact"] == {"amount": 1062.40}
+    assert REFERENCE_ANSWERS["pay_ot40_roundup"] == {"amount": 1013.00}
+    assert REFERENCE_ANSWERS["pay_ot40_exact"] == {"amount": 1012.40}
+
+    # The k=2 variant surfaces all four amounts on the correct interpretations.
+    task = next(t for t in generate_tasks()
+                if t.id == "policy_paymileage_001_k2_all")
+    _, candidates, _ = get_checkers_and_candidates("policy_qa", task)
+    assert candidates["I0"] == {"amount": 1063.00}
+    assert candidates["I1"] == {"amount": 1062.40}
+    assert candidates["I2"] == {"amount": 1013.00}
+    assert candidates["I3"] == {"amount": 1012.40}
+
+
 def test_reversed_property_natural_default_is_foil():
     """REVERSED property: for every family, the model's natural/population default
     answer FAILS the I0 (non-default) target checker and PASSES only the
