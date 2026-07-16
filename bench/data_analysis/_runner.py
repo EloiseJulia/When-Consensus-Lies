@@ -273,12 +273,21 @@ def supervisor_main():
     # Run ONE candidate worker per test case (no multiplexing)
     for test_num, tc in enumerate(test_cases, 1):
         # Create isolated sandbox directory for worker cwd
-        sandbox_dir = tempfile.mkdtemp(prefix="data_analysis_sandbox_")
-        
-        # Create temp files for input/output communication
-        fd_in, input_file = tempfile.mkstemp(prefix=f"data_analysis_input_{test_num}_", suffix=".json")
+        sandbox_dir = tempfile.mkdtemp(prefix="dachk_sbx_")
+
+        # Create temp files for input/output communication.
+        # ISOLATION FIX: use an opaque prefix ("dachk_") that does NOT contain
+        # "data_analysis" or "verdict". A candidate may spawn a *detached*
+        # descendant that globs the shared temp root for "*data_analysis*" /
+        # "*verdict*" files and overwrites them with a forged payload; such a
+        # descendant can outlive its own worker (it is only tree-killed on the
+        # timeout path). Opaque, non-matching names ensure it can never target a
+        # LATER worker's result file, eliminating cross-test contamination. The
+        # primary forgery defense (stdout verdict + strict status=="ok" check) is
+        # unchanged; this only fixes test isolation.
+        fd_in, input_file = tempfile.mkstemp(prefix=f"dachk_in_{test_num}_", suffix=".json")
         os.close(fd_in)
-        fd_out, output_file = tempfile.mkstemp(prefix=f"data_analysis_output_{test_num}_", suffix=".json")
+        fd_out, output_file = tempfile.mkstemp(prefix=f"dachk_out_{test_num}_", suffix=".json")
         os.close(fd_out)
         
         try:
