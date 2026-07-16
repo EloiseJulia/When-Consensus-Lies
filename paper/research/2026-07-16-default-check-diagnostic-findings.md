@@ -37,10 +37,19 @@ intermediate structure. The CD measure's DISCRIMINATION appears in the CROSS-MOD
 condition: strong traps make DIFFERENT models converge on the SAME wrong foil (CD=1.0 = genuine
 convergent delusion), while subtler traps make them SPLIT (CD≈0.5). This is exactly the report's thesis
 (convergence on the *same* wrong interpretation *across agents*).
-→ **Provisional O2 answer:** CD=1.0 on strong traps is a MIX of (a) genuine cross-agent same-wrong
-convergence AND (b) a homogeneous single-model determinism effect. The CLEAN convergent-delusion signal is
-the HETEROGENEOUS / cross-model condition. Recommend leading with cross-model convergent delusion; treat
-homogeneous saturation as determinism-confounded. **Confirm after the reasoner arm completes.**
+→ **Provisional O2 answer (owner-endorsed direction, 2026-07-16; headline NOT locked until reasoner arm):**
+CD=1.0 on strong traps is a MIX of (a) genuine cross-agent same-wrong convergence AND (b) a homogeneous
+single-model determinism effect. The CLEAN convergent-delusion signal is the HETEROGENEOUS / cross-model
+condition. **Lead with cross-model convergent delusion** (independent model families landing on the SAME
+wrong foil under a strong shared prior: CD=1.0 strong, ~0.5 subtle) — this preempts the "just single-model
+determinism" attack.
+→ **⭐ FAKE-REDUNDANCY reframe (owner, connects to report §2.4):** do NOT treat homogeneous saturation as a
+confound to hide — reframe it as the **ρ→1 fake-redundancy demonstration**: same-model sampling (SC /
+homogeneous-MAD) has near-perfect error correlation → effective sample size ≈ 1 → aggregation cannot
+help. Homogeneous CD≈1.0 IS that phenomenon; heterogeneous cross-family convergence is the genuine
+convergent delusion. Both are pre-registered (prereg §1 H1a lists SC, homogeneous-MAD, heterogeneous-MAD,
+verifier; §8 has `method` as a factor), so leading with cross-model is a FRAMING refinement within the
+registered design — **no amendment needed, LOGGED** (decision-log row 35). **Confirm after the reasoner arm.**
 - Caveat: `diag_casesort_001` saturated even heterogeneously (both models default to Python `sorted()`
   case-sensitive) → it is less "subtle" than intended (a semi-strong trap); note/maybe reclassify.
 - `diag_geomean_001`: the weak model RESOLVED to the target (→I0=1.0) — its default-pull toward arithmetic
