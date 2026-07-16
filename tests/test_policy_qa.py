@@ -53,9 +53,9 @@ def test_checkers_exist():
         "refund_fullbase", "refund_merchbase",
         # policy_discount_001 (k=1, discount_basis axis)
         "discount_additive", "discount_sequential",
-        # policy_paymileage_001 (k=2, overtime_threshold + mileage_rate axes)
-        "pay_ot35_contract", "pay_ot35_irs",
-        "pay_ot40_contract", "pay_ot40_irs",
+        # policy_paymileage_001 (k=2, overtime_threshold + mileage_rounding axes)
+        "pay_ot35_roundup", "pay_ot35_exact",
+        "pay_ot40_roundup", "pay_ot40_exact",
     ]
     for checker_id in required_checkers:
         assert checker_id in CHECKERS, f"Missing checker: {checker_id}"
@@ -203,19 +203,23 @@ def test_malformed_powerset_rejected():
 def test_k2_axes_independent():
     """k=2 pay+mileage: the two external conventions are ADDITIVELY INDEPENDENT.
 
-    The overtime delta (I0-I2) equals (I1-I3), and the mileage delta (I0-I1)
-    equals (I2-I3): deleting one axis does not change the other's contribution.
-    All four amounts are pairwise distinct.
+    The wages component depends only on overtime_threshold (1000/950); the
+    mileage-reimbursement component is a fixed $62.40 sub-total whose only
+    disputed element is the rounding rule (round-up $63.00 vs exact $62.40) and
+    references neither hours nor wages. So the overtime delta (I0-I2) equals
+    (I1-I3)=50.00, and the rounding delta (I0-I1) equals (I2-I3)=0.60: deleting
+    one axis does not change the other's contribution. All four amounts are
+    pairwise distinct (rounding delta 0.60 differs from overtime delta 50.00).
     """
     a = {k: REFERENCE_ANSWERS[k]["amount"] for k in (
-        "pay_ot35_contract", "pay_ot35_irs", "pay_ot40_contract", "pay_ot40_irs"
+        "pay_ot35_roundup", "pay_ot35_exact", "pay_ot40_roundup", "pay_ot40_exact"
     )}
-    I0, I1, I2, I3 = (a["pay_ot35_contract"], a["pay_ot35_irs"],
-                      a["pay_ot40_contract"], a["pay_ot40_irs"])
-    # overtime delta constant across mileage settings
+    I0, I1, I2, I3 = (a["pay_ot35_roundup"], a["pay_ot35_exact"],
+                      a["pay_ot40_roundup"], a["pay_ot40_exact"])
+    # overtime delta constant across rounding settings
     assert round(I0 - I2, 2) == round(I1 - I3, 2) == 50.00
-    # mileage delta constant across overtime settings
-    assert round(I0 - I1, 2) == round(I2 - I3, 2) == 4.50
+    # rounding delta constant across overtime settings
+    assert round(I0 - I1, 2) == round(I2 - I3, 2) == 0.60
     # pairwise distinct with margin well above the 0.01 checker tolerance
     vals = sorted([I0, I1, I2, I3])
     for i in range(len(vals)):
@@ -233,8 +237,8 @@ def test_amounts_pairwise_distinct_per_family():
         "tip": ["tip_posttax", "tip_pretax"],
         "refund": ["refund_fullbase", "refund_merchbase"],
         "discount": ["discount_additive", "discount_sequential"],
-        "paymileage": ["pay_ot35_contract", "pay_ot35_irs",
-                       "pay_ot40_contract", "pay_ot40_irs"],
+        "paymileage": ["pay_ot35_roundup", "pay_ot35_exact",
+                       "pay_ot40_roundup", "pay_ot40_exact"],
     }
     SAFETY_FLOOR = 0.05
     for name, ids in families.items():
@@ -303,8 +307,8 @@ def test_100pct_reference_candidates_distinguishable():
         ["tip_posttax", "tip_pretax"],
         ["refund_fullbase", "refund_merchbase"],
         ["discount_additive", "discount_sequential"],
-        ["pay_ot35_contract", "pay_ot35_irs",
-         "pay_ot40_contract", "pay_ot40_irs"],
+        ["pay_ot35_roundup", "pay_ot35_exact",
+         "pay_ot40_roundup", "pay_ot40_exact"],
     ]
     for group in family_groups:
         for target_id in group:
@@ -369,20 +373,25 @@ def test_prompt_vs_latent_spec():
 
 
 def test_no_prompt_leakage_k2():
-    """The stacked k=2 family's prompt_core must not leak either axis's convention
-    (concrete threshold hours or per-mile rate), so deleting an axis truly removes
-    its disambiguator."""
+    """The stacked k=2 family's prompt_core must not leak either DISPUTED
+    convention: the overtime threshold hours or the mileage rounding rule. The
+    per-mile RATE is deliberately GIVEN in the core (it is not a disputed axis),
+    so deleting an axis truly removes only its disambiguator."""
     core = problem_pay_mileage_001().prompt_core
     assert "35 hours" not in core, "k=2 core leaks the 35h contract threshold"
     assert "40 hours" not in core, "k=2 core leaks the 40h default threshold"
-    assert "0.70" not in core and "0.655" not in core, "k=2 core leaks a mileage rate"
+    # The rounding rule (the second disputed axis) must not appear in the core.
+    assert "whole dollar" not in core, "k=2 core leaks the round-up rule"
+    assert "rounded up" not in core.lower(), "k=2 core leaks the round-up rule"
+    # The rate IS given in the core (not disputed); confirm it is present.
+    assert "$0.60 per mile" in core, "k=2 core must state the given per-mile rate"
 
-    # When mileage_rate is the ONLY deleted axis, the $0.70 clause value is gone.
+    # When mileage_rounding is the ONLY deleted axis, the round-up clause is gone.
     tasks = generate_tasks()
-    mileage_only = next(t for t in tasks
-                        if t.id == "policy_paymileage_001_k1_mileage_rate")
-    assert "0.70" not in mileage_only.prompt, \
-        "mileage_rate deleted but '$0.70/mile' still present in prompt"
+    rounding_only = next(t for t in tasks
+                         if t.id == "policy_paymileage_001_k1_mileage_rounding")
+    assert "whole dollar" not in rounding_only.prompt, \
+        "mileage_rounding deleted but the round-up rule still present in prompt"
 
 
 def test_structured_answer_checker_exact_cent():

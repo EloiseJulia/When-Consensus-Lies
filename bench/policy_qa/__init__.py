@@ -141,11 +141,15 @@ class StructuredAnswerChecker(GoldChecker):
 #   policy_discount_001   axis discount_basis      I0 additive=73.00 / def sequential=74.80
 #
 # Multi-axis family (k=2 -> 2^2 = 4 interps; two INDEPENDENT external conventions):
-#   policy_paymileage_001 axes overtime_threshold + mileage_rate
-#     I0 OT@35h + $0.70/mi = 1070.00 [all-target]
-#     I1 OT@35h + IRS $0.655/mi = 1065.50 [mileage defaulted]
-#     I2 OT@40h + $0.70/mi = 1020.00 [overtime defaulted]
-#     I3 OT@40h + IRS $0.655/mi = 1015.50 [combined-default]
+#   policy_paymileage_001 axes overtime_threshold + mileage_rounding
+#   (mileage RATE is GIVEN in the prompt at $0.60/mi on 104 mi = $62.40; only a
+#    METHOD is disputed, so — unlike a disputed rate — the default is timeless:
+#    exact-cent currency is THE universal default; the stated non-default clause
+#    rounds the reimbursement UP to the next whole dollar = $63.00.)
+#     I0 OT@35h + round-up $63.00 = 1063.00 [all-target]
+#     I1 OT@35h + exact-cent $62.40 = 1062.40 [mileage_rounding defaulted]
+#     I2 OT@40h + round-up $63.00 = 1013.00 [overtime defaulted]
+#     I3 OT@40h + exact-cent $62.40 = 1012.40 [combined-default]
 #
 # Amended invariant (Amendment 03), per variant deleting S (|S|=k'):
 #   len(key_questions) == k'
@@ -427,30 +431,46 @@ def problem_discount_001():
 
 
 def problem_pay_mileage_001():
-    """k=2 family, axes overtime_threshold + mileage_rate.
+    """k=2 family, axes overtime_threshold + mileage_rounding.
 
-    H1_external: BOTH conventions are EXTERNAL (union-contract overtime threshold
-    and travel-policy mileage rate); the model defaults on both when both are
-    deleted.
+    H1_external: BOTH conventions are EXTERNAL house policy (union-contract
+    overtime threshold and a travel-policy rounding rule); the model defaults on
+    both when both are deleted.
 
-    INDEPENDENCE (verified): total = wages(overtime_threshold) + mileage(mileage_rate)
-    is ADDITIVELY SEPARABLE. The wages component depends only on the overtime
-    threshold (1000 at 35h, 950 at 40h) and the mileage component depends only on
-    the mileage rate (70.00 at $0.70/mi, 65.50 at $0.655/mi). Deleting one axis
-    leaves the other component's amount unchanged:
+    WHY THE SECOND AXIS IS TIMELESS (answering the auditor's mileage-rate
+    objection): the per-mile RATE is GIVEN in the prompt ($0.60/mi on 104 mi =
+    $62.40 exact), so the rate is NOT ambiguous. The only disputed thing is a
+    METHOD: how the reimbursement is rounded. The natural default is the ONE
+    timeless universal currency convention — settle to the exact cent ($62.40).
+    The stated non-default clause is a specific generous house rule — round the
+    mileage reimbursement UP to the next whole dollar ($63.00). Deleting that
+    clause leaves exactly ONE plausible default (exact cents), not a family of
+    year-/employer-dependent numbers, so the reversal is fair: a human reading
+    the full latent_spec (which states the round-up rule) agrees the user wanted
+    $63.00.
+
+    INDEPENDENCE (verified): total = wages(overtime_threshold)
+    + mileage_reimbursement(mileage_rounding) is ADDITIVELY SEPARABLE. The wages
+    component depends only on the overtime threshold (1000.00 at 35h, 950.00 at
+    40h). The mileage component is a FIXED $62.40 sub-total (104 mi * $0.60/mi)
+    that depends only on the rounding rule (63.00 rounded up, 62.40 exact) and
+    references NEITHER hours NOR wages. Deleting/varying one axis leaves the
+    other component's amount unchanged:
         overtime delta  = 50.00 constant   (I0-I2 = I1-I3 = 50.00)
-        mileage  delta  =  4.50 constant   (I0-I1 = I2-I3 =  4.50)
+        rounding delta  =  0.60 constant   (I0-I1 = I2-I3 =  0.60)
+    Because the rounding delta (0.60) differs from the overtime delta (50.00)
+    and from 0, all four 2x2 combinations are pairwise distinct.
 
     2 req classes -> 2^2 = 4 interpretations:
-      I0  OT@35h + $0.70/mi = 1070.00 [all-target]
-      I1  OT@35h + IRS $0.655/mi = 1065.50 [mileage_rate defaulted]
-      I2  OT@40h + $0.70/mi = 1020.00 [overtime_threshold defaulted]
-      I3  OT@40h + IRS $0.655/mi = 1015.50 [combined-default]
+      I0  OT@35h + round-up $63.00 = 1063.00 [all-target]
+      I1  OT@35h + exact-cent $62.40 = 1062.40 [mileage_rounding defaulted]
+      I2  OT@40h + round-up $63.00 = 1013.00 [overtime_threshold defaulted]
+      I3  OT@40h + exact-cent $62.40 = 1012.40 [combined-default]
 
     Combinatorial variants from generate_tasks:
       k0                                 -> {I0}
       k1 delete overtime_threshold       -> {I0, I2}
-      k1 delete mileage_rate             -> {I0, I1}
+      k1 delete mileage_rounding         -> {I0, I1}
       k2 delete both                     -> {I0, I1, I2, I3}
     """
     return FullSpec(
@@ -460,9 +480,9 @@ def problem_pay_mileage_001():
         prompt_core=(
             "An employee worked 45 hours this week at a base pay rate of $20.00 "
             "per hour (overtime hours are paid at 1.5 times the base rate), and "
-            "also drove 100 miles for work that are reimbursed. Compute the "
-            "employee's total pay for the week (gross wages plus mileage "
-            "reimbursement), rounded to the nearest cent."
+            "also drove 104 miles for work that are reimbursed at $0.60 per mile. "
+            "Compute the employee's total pay for the week (gross wages plus "
+            "mileage reimbursement), rounded to the nearest cent."
         ),
         requirement_classes=[
             RequirementClass(
@@ -474,11 +494,11 @@ def problem_pay_mileage_001():
                 ],
             ),
             RequirementClass(
-                id="mileage_rate",
-                description="Per-mile reimbursement rate",
+                id="mileage_rounding",
+                description="How the mileage reimbursement is rounded",
                 clauses=[
-                    "Per the employer's travel policy, work mileage is reimbursed "
-                    "at the contract rate of $0.70 per mile."
+                    "Per the employer's travel policy, the mileage reimbursement "
+                    "is rounded UP to the next whole dollar."
                 ],
             ),
         ],
@@ -486,46 +506,48 @@ def problem_pay_mileage_001():
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NON-default: contract overtime after 35h + $0.70/mi (target, all-target). "
-                    "1000.00 + 70.00 = $1070.00."
+                    "NON-default: contract overtime after 35h + mileage rounded up "
+                    "to the next whole dollar (target, all-target). "
+                    "1000.00 + 63.00 = $1063.00."
                 ),
                 is_target=True,
-                gold_check="pay_ot35_contract",
+                gold_check="pay_ot35_roundup",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "Partial default: overtime after 35h + IRS standard $0.655/mi "
-                    "(mileage_rate defaulted). 1000.00 + 65.50 = $1065.50."
+                    "Partial default: overtime after 35h + exact-cent mileage "
+                    "(mileage_rounding defaulted). 1000.00 + 62.40 = $1062.40."
                 ),
                 is_target=False,
-                gold_check="pay_ot35_irs",
-                opened_by="mileage_rate",
+                gold_check="pay_ot35_exact",
+                opened_by="mileage_rounding",
             ),
             InterpretationBranch(
                 id="I2",
                 description=(
-                    "Partial default: standard FLSA overtime after 40h + $0.70/mi "
-                    "(overtime_threshold defaulted). 950.00 + 70.00 = $1020.00."
+                    "Partial default: standard FLSA overtime after 40h + mileage "
+                    "rounded up (overtime_threshold defaulted). "
+                    "950.00 + 63.00 = $1013.00."
                 ),
                 is_target=False,
-                gold_check="pay_ot40_contract",
+                gold_check="pay_ot40_roundup",
                 opened_by="overtime_threshold",
             ),
             InterpretationBranch(
                 id="I3",
                 description=(
                     "MODEL DEFAULT [combined-default]: standard FLSA overtime after 40h + "
-                    "IRS standard $0.655/mi (both defaulted). 950.00 + 65.50 = $1015.50."
+                    "exact-cent mileage (both defaulted). 950.00 + 62.40 = $1012.40."
                 ),
                 is_target=False,
-                gold_check="pay_ot40_irs",
-                opened_by="overtime_threshold,mileage_rate",
+                gold_check="pay_ot40_exact",
+                opened_by="overtime_threshold,mileage_rounding",
             ),
         ],
         key_questions=[
             "After how many hours per week does overtime begin (the contract threshold)?",
-            "At what rate is work mileage reimbursed (the travel-policy rate)?",
+            "How is the mileage reimbursement rounded (the travel-policy rule)?",
         ],
     )
 
@@ -555,11 +577,11 @@ REFERENCE_ANSWERS = {
     "discount_additive": {"amount": 73.00},    # I0 (non-default: additive)
     "discount_sequential": {"amount": 74.80},  # I1 [combined-default] (sequential)
 
-    # Pay + mileage (policy_paymileage_001) — axes overtime_threshold + mileage_rate
-    "pay_ot35_contract": {"amount": 1070.00},  # I0 (all-target)
-    "pay_ot35_irs": {"amount": 1065.50},       # I1 (mileage defaulted)
-    "pay_ot40_contract": {"amount": 1020.00},  # I2 (overtime defaulted)
-    "pay_ot40_irs": {"amount": 1015.50},       # I3 [combined-default]
+    # Pay + mileage (policy_paymileage_001) — axes overtime_threshold + mileage_rounding
+    "pay_ot35_roundup": {"amount": 1063.00},   # I0 (all-target: 35h contract + round-up)
+    "pay_ot35_exact": {"amount": 1062.40},     # I1 (mileage_rounding defaulted: exact cents)
+    "pay_ot40_roundup": {"amount": 1013.00},   # I2 (overtime defaulted: 40h + round-up)
+    "pay_ot40_exact": {"amount": 1012.40},     # I3 [combined-default] (40h + exact cents)
 }
 
 
@@ -638,8 +660,8 @@ def generate_tasks() -> List[Task]:
     for suffix, delete_ids in [
         ("_k0",                    []),
         ("_k1_overtime_threshold", ["overtime_threshold"]),
-        ("_k1_mileage_rate",       ["mileage_rate"]),
-        ("_k2_all",                ["overtime_threshold", "mileage_rate"]),
+        ("_k1_mileage_rounding",   ["mileage_rounding"]),
+        ("_k2_all",                ["overtime_threshold", "mileage_rounding"]),
     ]:
         spec_copy = FullSpec(
             domain=pm_spec.domain,
@@ -740,10 +762,10 @@ def get_task_specific_foils(task_id_base: str) -> List[Any]:
 
     elif "policy_paymileage" in task_id_base:
         return [
+            {"amount": 1037.50},  # between the two clusters, far from all four
             {"amount": 1050.00},  # far from all four
-            {"amount": 1042.75},  # between clusters
-            1070.00,              # bare number, wrong structure
-            {"total": 1070.00},   # wrong key
+            1063.00,              # bare number, wrong structure
+            {"total": 1063.00},   # wrong key
         ]
 
     else:

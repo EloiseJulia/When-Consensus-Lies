@@ -244,20 +244,20 @@ def test_golden_policy_qa():
     """Part 1 golden — policy_qa, 5 controlled agents, frozen hand-computed values.
 
     Task: policy_paymileage_001_k2_all  (ambiguity_level=2, reversed k=2 family)
-      I0 = OT after 35 h + $0.70/mi → $1070.00  (target, all-target)
-           Arithmetic: (35*$20 + 10*$30) + 100*$0.70 = $1000 + $70 = $1070
-      I1 = OT after 35 h + IRS $0.655/mi → $1065.50  (mileage defaulted)
-           Arithmetic: (35*$20 + 10*$30) + 100*$0.655 = $1000 + $65.50 = $1065.50
-      I2 = OT after 40 h + $0.70/mi → $1020.00  (overtime defaulted)
-           Arithmetic: (40*$20 + 5*$30) + 100*$0.70 = $950 + $70 = $1020
+      I0 = OT after 35 h + mileage rounded UP to whole $ → $1063.00  (target, all-target)
+           Arithmetic: (35*$20 + 10*$30) + ceil($0.60*104=$62.40)=$63.00 = $1000 + $63.00 = $1063.00
+      I1 = OT after 35 h + exact-cent mileage → $1062.40  (mileage_rounding defaulted)
+           Arithmetic: (35*$20 + 10*$30) + 104*$0.60 = $1000 + $62.40 = $1062.40
+      I2 = OT after 40 h + mileage rounded up → $1013.00  (overtime defaulted)
+           Arithmetic: (40*$20 + 5*$30) + $63.00 = $950 + $63.00 = $1013.00
 
     Format: "FINAL ANSWER: $<amount>" (the STRUCTURED format accepted by
     harness/label.py's _extract_numeric_from_output path).
 
     Controlled distribution (5 agents):
-      agents 0–2 : FINAL ANSWER: $1065.50 → label I1
-      agent  3   : FINAL ANSWER: $1070.00 → label I0  (target)
-      agent  4   : FINAL ANSWER: $1020.00 → label I2
+      agents 0–2 : FINAL ANSWER: $1062.40 → label I1
+      agent  3   : FINAL ANSWER: $1063.00 → label I0  (target)
+      agent  4   : FINAL ANSWER: $1013.00 → label I2
 
     HAND CALCULATIONS
     ─────────────────
@@ -281,9 +281,9 @@ def test_golden_policy_qa():
     task = next(t for t in tasks if t.id == "policy_paymileage_001_k2_all")
 
     _, candidates, _ = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]   # 1070.0
-    i1_amount = candidates["I1"]["amount"]   # 1065.50
-    i2_amount = candidates["I2"]["amount"]   # 1020.0
+    i0_amount = candidates["I0"]["amount"]   # 1063.00
+    i1_amount = candidates["I1"]["amount"]   # 1062.40
+    i2_amount = candidates["I2"]["amount"]   # 1013.00
 
     controlled_runs = [
         _make_run(task.id, f"FINAL ANSWER: ${i1_amount:.2f}", seed=300, conf=0.80),  # → I1
