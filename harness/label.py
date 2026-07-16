@@ -4,6 +4,7 @@ Phase 2: EXECUTABLE-SIGNAL labeling via domain gold checkers.
 Each domain uses deterministic gold checkers (NO LLM) to assign labels.
 """
 
+import ast
 import hashlib
 import json
 import math
@@ -11,6 +12,41 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Dict, List, Optional
 from common.schema import AgentRun, Task
+
+
+# ── Reasoning-wrapper stripping ────────────────────────────────────────────────
+# Reasoning models (e.g. deepseek-r1) emit their chain-of-thought inside
+# <think>...</think> (or <thinking>...</thinking>) BEFORE the final answer. The
+# reasoning text routinely contains words like 'def'/'return' and even
+# illustrative code/number snippets that must NOT be mistaken for the answer.
+_REASONING_CLOSED_RE = re.compile(
+    r'<think(?:ing)?>.*?</think(?:ing)?>', re.DOTALL | re.IGNORECASE
+)
+# A dangling, unclosed reasoning block = the model was truncated mid-thought and
+# never produced a final answer. Everything from the tag to EOF is reasoning.
+_REASONING_DANGLING_RE = re.compile(
+    r'<think(?:ing)?>.*\Z', re.DOTALL | re.IGNORECASE
+)
+
+
+def _strip_reasoning(output: str) -> str:
+    """Remove chain-of-thought wrappers so the FINAL answer is what we extract.
+
+    - Closed <think>...</think> blocks are removed entirely (the real answer is
+      emitted AFTER </think>).
+    - An UNCLOSED trailing <think> (truncated generation) removes everything from
+      the tag onward, so a truncated-mid-reasoning output becomes empty rather
+      than having its reasoning prose mis-executed as code.
+
+    This is EXTRACTION normalization ONLY: it never fabricates or alters an
+    answer — it only discards reasoning text that precedes the real answer, so
+    it cannot change gold/label semantics for a well-formed answer.
+    """
+    if not output:
+        return output
+    cleaned = _REASONING_CLOSED_RE.sub('', output)
+    cleaned = _REASONING_DANGLING_RE.sub('', cleaned)
+    return cleaned
 
 
 def _stable_index(text: str, modulo: int) -> int:
@@ -38,41 +74,65 @@ def _mock_label_fallback(run: AgentRun, task: Task) -> str:
     return task.interpretations[label_idx].id
 
 
+def _looks_like_python(code: str) -> bool:
+    """True iff *code* parses as a Python module (guards prose→code misfires)."""
+    try:
+        ast.parse(code)
+    except (SyntaxError, ValueError):
+        return False
+    return True
+
+
+# Matches a fenced code block: ```python / ```py / ``` then body up to closing ```.
+# The language tag and any trailing info-string on the opening line are optional.
+_CODE_FENCE_RE = re.compile(
+    r'```(?:python|py)?[^\n]*\r?\n(.*?)```',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def _extract_code_from_output(output: str) -> Optional[str]:
     """Extract Python code from agent output (code fence or raw code).
-    
-    Strategy:
-    1. Look for ```python ... ``` or ``` ... ``` code fences
-    2. If no fence, treat entire output as code (agent may output raw code)
-    3. Return the extracted code, or None if output is clearly not code
+
+    Robust to reasoning-model wrappers and multi-block outputs:
+    1. Strip <think>...</think> reasoning first (a truncated/unclosed think with
+       no final answer therefore yields no code — correctly None, instead of the
+       old behaviour that returned the whole reasoning prose as "code").
+    2. Prefer the LAST fenced ```python``` block. run.py's answer_format
+       instruction asks for a SINGLE ```python block; when a (reasoning) model
+       nonetheless emits several, the final block is the intended answer, not an
+       earlier illustrative snippet.
+    3. If no fence, accept the raw body ONLY if it actually parses as Python and
+       contains a code construct — this recovers fence-less code answers while
+       refusing to treat reasoning/explanatory prose as code.
+
+    Returns the extracted code, or None if no plausible code answer is present.
+    NOTE: this hardens EXTRACTION only; the gold checkers and exact-match
+    semantics that decide correctness are unchanged. A block that is extracted
+    but wrong/garbage still fails its checker and labels I_perp.
     """
-    # Try to find code fence (```python or just ```)
-    # Pattern: ```python? ... ``` (non-greedy, multiline, case-insensitive)
-    # Need to handle both ``` and ```python
-    fence_pattern = r'```(?:python)?\s*\n(.*?)\n```'
-    match = re.search(fence_pattern, output, re.DOTALL | re.IGNORECASE)
-    
-    if match:
-        return match.group(1).strip()
-    
-    # Try simpler fence without language specifier
-    fence_pattern2 = r'```\s*\n?(.*?)\n?```'
-    match2 = re.search(fence_pattern2, output, re.DOTALL | re.IGNORECASE)
-    
-    if match2:
-        return match2.group(1).strip()
-    
-    # No fence found. Check if output looks like code (has 'def ' or common Python keywords)
-    # If it's clearly prose (long sentences, no code structure), return None
-    if 'def ' in output or 'return ' in output or 'import ' in output:
-        # Looks like raw code
-        return output.strip()
-    
-    # Check if it's very short and might be code
-    if len(output.strip()) < 500 and ('=' in output or '(' in output):
-        return output.strip()
-    
-    # Likely prose or explanation, not code
+    if not output:
+        return None
+
+    cleaned = _strip_reasoning(output)
+
+    # 1) Prefer the LAST non-empty fenced code block.
+    fences = [m.strip() for m in _CODE_FENCE_RE.findall(cleaned)]
+    fences = [f for f in fences if f]
+    if fences:
+        return fences[-1]
+
+    # 2) No fence: accept raw code only if it genuinely parses as Python and
+    #    looks like code (not reasoning prose).
+    body = cleaned.strip()
+    if not body:
+        return None
+    if _looks_like_python(body) and re.search(
+        r'\b(?:def|class|return|import|from|lambda)\b|=', body
+    ):
+        return body
+
+    # Likely prose or explanation, not code.
     return None
 
 
@@ -413,8 +473,12 @@ def label_policy_domain(run: AgentRun, task: Task) -> str:
     """
     from bench.policy_qa import get_checkers_and_candidates
     
-    # Extract numeric answer from output
-    amount = _extract_numeric_from_output(run.output)
+    # Extract numeric answer from output. Strip reasoning wrappers first so an
+    # illustrative number inside a <think> block cannot spuriously conflict with
+    # (and thereby suppress) the real FINAL ANSWER / JSON emitted after </think>.
+    # This is pre-processing ONLY: the structured-answer grammar in
+    # _extract_numeric_from_output (the pre-registered contract) is unchanged.
+    amount = _extract_numeric_from_output(_strip_reasoning(run.output))
     if amount is None:
         # No clear numeric answer found
         return "I_perp"
