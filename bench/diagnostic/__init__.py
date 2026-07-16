@@ -29,11 +29,12 @@ Why each subtler trap's default-pull is weaker than its strong counterpart:
       (case-SENSITIVE ASCII, uppercase before lowercase), while "alphabetical" colloquially
       means case-INSENSITIVE — a genuine ~50/50 split, neither reading overwhelmingly
       dominant, and chosen so set-iteration / codepoint order does NOT alias either reading.
-  diag_quartile_001   (vs data_activeusers): the first quartile (Q1) has several widely
-      used definitions giving DIFFERENT numbers on the same data — numpy.percentile
-      (linear/inclusive, R-7) vs Excel PERCENTILE.EXC / statistics.quantiles default
-      (exclusive, R-6). A genuine methodological split, far weaker than an external KPI
-      threshold no model guesses.
+  diag_geomean_001    (vs data_activeusers): averaging a series of GROWTH FACTORS splits
+      genuinely between the arithmetic mean (naive default) and the geometric mean (the
+      rate-aware correct choice for multiplicative data) — a real methodological ~50/50
+      split, far weaker than an external KPI threshold no model guesses. BOTH readings are
+      PURE-STDLIB implementable (statistics.mean / statistics.geometric_mean), so the
+      isolated -S sandbox (no numpy/pandas) cannot corrupt the label.
   diag_stddev_001     (vs data_activeusers): sample (n-1) vs population (n) std is a classic
       genuine split (numpy ddof=0 vs pandas/statistics.stdev n-1) → weak default.
 """
@@ -177,34 +178,35 @@ def problem_case_sort():
     )
 
 
-def problem_quartile():
-    """data_analysis subtler trap: first-quartile (Q1) estimation method.
+def problem_geomean():
+    """data_analysis subtler trap: averaging a series of GROWTH FACTORS.
 
-    Target I0 = EXCLUSIVE method (Excel PERCENTILE.EXC / R type-6 / Python
-    statistics.quantiles DEFAULT method='exclusive'). Default foil = INCLUSIVE
-    linear-interpolation method (numpy.percentile default / R type-7 / Excel
-    PERCENTILE.INC). SUBTLER because Q1 has several widely-used definitions that give
-    DIFFERENT numbers on the same data: numpy users get linear/inclusive, while
-    Excel-EXC / textbook / stdlib users get exclusive — a genuine methodological ~50/50
-    split, neither reading overwhelmingly dominant.
+    Target I0 = GEOMETRIC mean (the correct average for multiplicative growth rates).
+    Default foil = ARITHMETIC mean (statistics.mean — the naive default). SUBTLER because
+    both are natural readings of "average growth": naive code averages arithmetically,
+    while a rate-aware minority uses the geometric mean — a genuine ~50/50 split, neither
+    overwhelmingly dominant. CRUCIALLY both readings are PURE-STDLIB (statistics.mean /
+    statistics.geometric_mean, or a manual prod**(1/n)), so the isolated -S DataChecker
+    sandbox (no numpy/pandas) labels every natural implementation correctly rather than
+    forcing a numpy-based impl to I_perp.
     """
     return FullSpec(
         domain="data_analysis",
-        task_id="diag_quartile_001",
+        task_id="diag_geomean_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `quartile(data)` that returns the first quartile (Q1, the "
-            "25th percentile) of the dataset [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], as a string "
-            "rounded to 2 decimal places."
+            "Write a function `average_growth(factors)` that returns the average growth "
+            "factor for the multiplicative series [1.0, 2.0, 4.0] (each value is a "
+            "period-over-period growth factor), as a string rounded to 2 decimal places."
         ),
         requirement_classes=[
             RequirementClass(
-                id="quartile_method",
-                description="Which quartile estimation method to use",
+                id="mean_type",
+                description="Which mean to use for multiplicative growth factors",
                 clauses=[
-                    "Use the EXCLUSIVE method (as in Excel's PERCENTILE.EXC and Python's "
-                    "statistics.quantiles default, method='exclusive'): interpolate at "
-                    "rank position (n+1)/4, excluding the dataset endpoints."
+                    "Use the GEOMETRIC mean (the n-th root of the product of the factors, "
+                    "i.e. the correct average for multiplicative growth rates), NOT the "
+                    "arithmetic mean."
                 ],
             ),
         ],
@@ -212,25 +214,26 @@ def problem_quartile():
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NON-default: exclusive-method Q1 (target). [1..10] -> '2.75'."
+                    "NON-default: geometric mean (target). "
+                    "[1.0,2.0,4.0] -> (1*2*4)**(1/3) -> '2.00'."
                 ),
                 is_target=True,
-                gold_check="quartile_exclusive",
+                gold_check="growth_geometric",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "MODEL DEFAULT [combined-default]: inclusive linear-interpolation Q1 "
-                    "(numpy.percentile default, R type-7). [1..10] -> '3.25'."
+                    "MODEL DEFAULT [combined-default]: arithmetic mean. "
+                    "[1.0,2.0,4.0] -> 7/3 -> '2.33'."
                 ),
                 is_target=False,
-                gold_check="quartile_inclusive",
-                opened_by="quartile_method",
+                gold_check="growth_arithmetic",
+                opened_by="mean_type",
             ),
         ],
         key_questions=[
-            "Which quartile method: exclusive (Excel PERCENTILE.EXC / stdlib default) or "
-            "inclusive linear interpolation (numpy.percentile default / R type-7)?",
+            "Which mean for multiplicative growth factors: geometric (n-th root of the "
+            "product) or arithmetic (sum ÷ n)?",
         ],
     )
 
@@ -314,16 +317,16 @@ def sort_names(names):
     return sorted(names)
 """,
 
-    # -- diag_quartile_001 ----------------------------------------------------
-    "quartile_exclusive": """
-def quartile(data):
+    # -- diag_geomean_001 -----------------------------------------------------
+    "growth_geometric": """
+def average_growth(factors):
     import statistics
-    return f"{statistics.quantiles(data, n=4, method='exclusive')[0]:.2f}"
+    return f"{statistics.geometric_mean(factors):.2f}"
 """,
-    "quartile_inclusive": """
-def quartile(data):
+    "growth_arithmetic": """
+def average_growth(factors):
     import statistics
-    return f"{statistics.quantiles(data, n=4, method='inclusive')[0]:.2f}"
+    return f"{statistics.mean(factors):.2f}"
 """,
 
     # -- diag_stddev_001 ------------------------------------------------------
@@ -365,16 +368,16 @@ TEST_CASES: Dict[str, List[Tuple[Any, Any]]] = {
         (["dog", "Cat", "ant", "Bee"], ["Bee", "Cat", "ant", "dog"]),
     ],
 
-    # -- diag_quartile_001 (input is a single list arg) -----------------------
-    "quartile_exclusive": [
-        ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "2.75"),
-        ([10, 20, 30, 40, 50, 60, 70], "20.00"),
-        ([3, 7, 8, 5, 12, 14, 21, 13, 18], "6.00"),
+    # -- diag_geomean_001 (input is a single list arg) ------------------------
+    "growth_geometric": [
+        ([1.0, 2.0, 4.0], "2.00"),
+        ([2.0, 8.0], "4.00"),
+        ([1.0, 4.0, 16.0], "4.00"),
     ],
-    "quartile_inclusive": [
-        ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "3.25"),
-        ([10, 20, 30, 40, 50, 60, 70], "25.00"),
-        ([3, 7, 8, 5, 12, 14, 21, 13, 18], "7.00"),
+    "growth_arithmetic": [
+        ([1.0, 2.0, 4.0], "2.33"),
+        ([2.0, 8.0], "5.00"),
+        ([1.0, 4.0, 16.0], "7.00"),
     ],
 
     # -- diag_stddev_001 ------------------------------------------------------
@@ -394,8 +397,8 @@ ENTRYPOINTS: Dict[str, str] = {
     "weekday_iso_monday": "day_number",
     "casesort_ci": "sort_names",
     "casesort_cased": "sort_names",
-    "quartile_exclusive": "quartile",
-    "quartile_inclusive": "quartile",
+    "growth_geometric": "average_growth",
+    "growth_arithmetic": "average_growth",
     "std_sample": "spread",
     "std_population": "spread",
 }
@@ -447,18 +450,18 @@ def sort_names(names):
     return sorted(names, key=len)
 """,
         ]
-    if task_id_base == "diag_quartile_001":
+    if task_id_base == "diag_geomean_001":
         return [
-            # Median (Q2) instead of Q1; 0 checkers.
+            # Harmonic mean (a third mean) — matches neither reading; 0 checkers.
             """
-def quartile(data):
+def average_growth(factors):
     import statistics
-    return f"{statistics.median(data):.2f}"
+    return f"{statistics.harmonic_mean(factors):.2f}"
 """,
-            # Mean instead of a quartile; 0 checkers.
+            # Max factor instead of a mean; 0 checkers.
             """
-def quartile(data):
-    return f"{sum(data) / len(data):.2f}"
+def average_growth(factors):
+    return f"{max(factors):.2f}"
 """,
         ]
     if task_id_base == "diag_stddev_001":
@@ -482,7 +485,7 @@ def spread(data):
 # TASK GENERATION + CHECKER/CANDIDATE LOADING + LABELING
 # ============================================================================
 
-_PROBLEMS = [problem_weekday, problem_case_sort, problem_quartile, problem_stddev]
+_PROBLEMS = [problem_weekday, problem_case_sort, problem_geomean, problem_stddev]
 
 
 def generate_tasks() -> List[Task]:
