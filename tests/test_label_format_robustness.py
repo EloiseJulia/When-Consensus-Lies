@@ -11,8 +11,11 @@ Guarantees asserted here:
     interpretation): reasoning-wrapped, prose-surrounded, or agreeing blocks.
   * Genuinely off-axis, truncated, nested/unclosed reasoning, disagreeing
     multi-block, and non-code-language fences all STILL label I_perp.
-  * The policy_qa path is UNCHANGED (frozen prereg §7): disagreeing amounts
-    anywhere (incl. inside <think>) → I_perp, with no reasoning-region exclusion.
+  * The policy_qa path applies AMENDMENT 04 (owner-signed 2026-07-16): <think>
+    reasoning is stripped BEFORE the UNCHANGED FINAL-ANSWER/JSON numeric grammar,
+    so a <think>-internal scratch number no longer conflicts with the real FINAL
+    ANSWER; two DIFFERENT real FINAL answers still → I_perp, and an unclosed
+    <think> exposes nothing (nesting-aware) → I_perp.
 
 Fully offline / deterministic (no network, no LLM judge).
 """
@@ -273,11 +276,17 @@ def test_truncated_reasoning_invoice_still_i_perp():
     assert label == "I_perp", f"Truncated reasoning must stay I_perp, got {label}"
 
 
-# ── policy_qa: FROZEN prereg §7 — reasoning is NOT excluded (revert of MAJOR 3) ─
+# ── policy_qa: AMENDMENT 04 (owner-signed 2026-07-16) — <think>-strip re-enabled ─
+#
+# A04 strips <think> reasoning BEFORE the UNCHANGED FINAL-ANSWER/JSON numeric
+# grammar, so a scratch number inside <think> can no longer falsely conflict with
+# the real FINAL ANSWER. The grammar, exact-cent matching, and "disagreeing REAL
+# amounts → I_perp" rule are byte-for-byte unchanged; only the input is stripped.
 
-def test_policy_think_marker_conflict_stays_i_perp_frozen_contract():
-    """FROZEN §7: a FINAL ANSWER inside <think> that disagrees with the final
-    marker → I_perp (reasoning regions are NOT excluded; byte-for-byte §7)."""
+def test_policy_think_scratch_number_now_recovers_real_final_answer_a04():
+    """A04 (i): a FINAL ANSWER inside <think> that differs from the REAL final
+    marker is now STRIPPED — only the real FINAL ANSWER outside <think> is
+    extracted → its interpretation (NOT I_perp). Was I_perp under old §7."""
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     from bench.policy_qa import get_checkers_and_candidates as pol_refs
@@ -293,12 +302,53 @@ def test_policy_think_marker_conflict_stays_i_perp_frozen_contract():
         logit_conf=None, seed=910,
     )
     label = label_run(run, task)
-    assert label == "I_perp", \
-        f"Frozen §7: disagreeing markers (incl. in-think) → I_perp, got {label}"
+    assert label == "I0", \
+        f"A04: <think> scratch number stripped, real FINAL ANSWER → I0, got {label}"
+
+
+def test_policy_two_different_real_final_answers_still_i_perp_a04():
+    """A04 (ii): two DIFFERENT real FINAL answers OUTSIDE <think> still conflict
+    → I_perp. Stripping reasoning does NOT relax the genuine-conflict rule."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    from bench.policy_qa import get_checkers_and_candidates as pol_refs
+    _checkers, candidates, _foils = pol_refs(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    out = (
+        f"FINAL ANSWER: ${i0_amount:.2f}\n"
+        f"FINAL ANSWER: ${i0_amount + 100:.2f}"
+    )
+    run = AgentRun(
+        task_id=task.id, config="single", model_role="tested_agents",
+        model_id="test-model", output=out, label="", verbalized_conf=0.9,
+        logit_conf=None, seed=912,
+    )
+    assert label_run(run, task) == "I_perp", \
+        "A04: two different REAL FINAL answers still → I_perp"
+
+
+def test_policy_unclosed_think_number_no_real_answer_is_i_perp_a04():
+    """A04 (iii): an UNCLOSED/truncated <think> containing a number and NO real
+    answer outside it recovers nothing (nesting-aware strip drops the open tail)
+    → I_perp. Reasoning-internal numbers are never exposed as an answer."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    from bench.policy_qa import get_checkers_and_candidates as pol_refs
+    _checkers, candidates, _foils = pol_refs(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    out = f"<think>Let me compute... FINAL ANSWER: ${i0_amount:.2f}"  # never closed
+    run = AgentRun(
+        task_id=task.id, config="single", model_role="tested_agents",
+        model_id="test-model", output=out, label="", verbalized_conf=0.9,
+        logit_conf=None, seed=913,
+    )
+    assert label_run(run, task) == "I_perp", \
+        "A04: unclosed <think> with only an in-think number → I_perp (no exposure)"
 
 
 def test_policy_plain_final_answer_still_labels():
-    """Sanity: a clean single FINAL ANSWER still labels to its interpretation."""
+    """A04 (iv) / no-regression: a compliant output with NO <think> labels to its
+    interpretation exactly as before (strip is a no-op on reasoning-free text)."""
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     from bench.policy_qa import get_checkers_and_candidates as pol_refs
