@@ -44,7 +44,24 @@ Run ONLY the cells that carry reasoner-critical evidence not yet obtained:
 ## C. Sequencing (this holds until the reasoner arm completes AND the I_perp fix lands)
 1. NOW (parallel, no reasoner cap needed): labeler/answer-format fix (offline) → re-run the AFFECTED
    non-reasoner items (weak models / cached) to confirm I_perp recovery. [in progress: slice/labeler-format-fix]
-2. After cap reset (~24h): resume the runner for the ESSENTIAL reasoner cells (A) only.
-3. Re-assess O2 saturation + H1/H2 regime tags WITH reasoner data → finalize the findings.
-4. THEN: reversed spot-check gate → owner sign-off → registered mini-pilot → registered run (with the
+   - ⭐ FINDING (labeler diagnosis 2026-07-16): the cached I_perp cases were GENUINE, not labeler bugs —
+     (i) mistral-small on `code_invoice` produced genuinely OFF-AXIS output (mixed half-even+GAAP-paren)
+     matching no interpretation → I_perp correct (CDenum=0 is real; the 3-part combinatorial task is too
+     hard for the weak model — a task-difficulty note, not a bug); (ii) deepseek-r1 TRUNCATED mid-`<think>`
+     (exhausted its token budget, never emitted a final answer). The labeler fix removes real LATENT
+     extraction bugs (would mislabel a reasoner emitting a properly-wrapped correct answer) and preserves
+     genuine I_perp. So `code_invoice`/mistral will NOT "recover" on re-run (it was never a labeler bug).
+2. ⭐ PREREQUISITE before the reasoner arm — RAISE reasoner `max_completion_tokens`. Root cause of the
+   deepseek-r1 truncation: the client defaults `max_tokens_per_call=4096` and sends it as
+   `max_completion_tokens` for reasoning models (common/llm.py:104,421). Reasoning tokens count toward this,
+   so 4096 is exhausted mid-reasoning on complex tasks. Before the reasoner-arm resume, set a HIGHER reasoner
+   budget (e.g. 8192-16384) in the diagnostic driver (and the registered-run runner config) so reasoners
+   complete reasoning + emit the answer. The daily cap is on request COUNT not tokens, so a higher per-call
+   budget does NOT worsen the cap. Essential reasoner cells (A) are mostly SHORT tasks, so truncation risk is
+   low there; consider EXCLUDING `code_invoice` from the reasoner arm (too complex/off-axis; k-gradient is
+   demoted to secondary anyway).
+3. After cap reset (~24h): resume the runner for the ESSENTIAL reasoner cells (A) only, with the raised
+   reasoner token budget.
+4. Re-assess O2 saturation + H1/H2 regime tags WITH reasoner data → finalize the findings.
+5. THEN: reversed spot-check gate → owner sign-off → registered mini-pilot → registered run (with the
    reasoner-budget schedule from B).
