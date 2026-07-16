@@ -36,6 +36,16 @@ from harness.label import label_run as _default_label_run
 from harness.run import run_task as _default_run_task
 
 
+class LedgerWriteError(Exception):
+    """Raised when the aggregate cost-ledger journal write fails.
+
+    Treated as a PERMANENT (non-retried) infra failure for the job: retrying
+    would re-run the completion, cache-hit at $0 incremental cost, and silently
+    lose the original spend from the aggregate.  Failing closed instead keeps the
+    accounting honest — the job is reported failed and is NOT marked done.
+    """
+
+
 # ── AgentRun identity helpers ────────────────────────────────────────────────
 
 def run_identity(run: AgentRun) -> str:
@@ -391,7 +401,23 @@ class _ThrottledClient:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
     ) -> Any:
-        """Throttle + day-cap guard, delegate, then journal incremental cost."""
+        """Throttle + day-cap guard, delegate, then journal incremental cost.
+
+        Cost is journaled PER PAID completion via ``cost_sink`` (fsync'd), so a
+        crash after paid completions but before the job is marked done cannot
+        undercount the aggregate on resume.
+
+        FAIL-CLOSED ledger write: if the journal write itself raises, a permanent
+        ``LedgerWriteError`` is surfaced so the job is treated as an infra failure
+        and is NEVER retried into a $0 cache-hit that would silently lose the
+        spend (the auditor's logic hole).
+
+        ACCEPTED LIMITATION (Manager decision-log row 31): a hard SIGKILL between
+        the paid HTTP call and the fsync'd journal write can lose at most ONE
+        call's cost (~$0.0001) from the ledger.  This is deliberately NOT guarded
+        by worst-case pre-authorization / reserve-settle, because RATE LIMITS —
+        not dollars — are the binding constraint for this research cost-guard.
+        """
         # Resolve slug for per-model throttling/day-cap checks
         if model is not None:
             slug = model
@@ -414,12 +440,30 @@ class _ThrottledClient:
                 model=model,
                 temperature=temperature,
             )
-        finally:
-            # Journal whatever spend actually landed on the underlying client,
-            # even if complete() ultimately raised after a paid call.
+        except BaseException:
+            # The underlying call itself failed.  Best-effort journal any spend
+            # that still landed (partial charge), then propagate the ORIGINAL
+            # error — a sink error here must not mask the real failure.
             delta = self._cost_of(self._c) - cost_before
             if delta > 0.0 and self._cost_sink is not None:
+                try:
+                    self._cost_sink(delta)
+                except Exception:
+                    pass
+            raise
+
+        # Success path: journal the incremental cost.  FAIL CLOSED — if the
+        # journal write raises, convert it into a permanent LedgerWriteError so
+        # the job fails (not marked done, not retried into a $0 cache-hit).
+        delta = self._cost_of(self._c) - cost_before
+        if delta > 0.0 and self._cost_sink is not None:
+            try:
                 self._cost_sink(delta)
+            except Exception as exc:
+                raise LedgerWriteError(
+                    "aggregate cost-ledger write failed; failing job closed to "
+                    "avoid silently losing spend on a resume cache-hit"
+                ) from exc
         return result
 
 
@@ -524,11 +568,21 @@ class Runner:
             client_factory if client_factory is not None
             else self._default_client_factory
         )
-        # BLOCKER 1: resolve the model dimension of the grid.  Default = the
+        # BLOCKER 1/A: resolve the model dimension of the grid.  Default = the
         # single homogeneous tested-agents baseline from the base config.
         self._models: List[Tuple[str, str]] = (
             list(cfg.models) if cfg.models else self._default_models()
         )
+        # BLOCKER A (round 3): harness.run.run_task only ever invokes the
+        # tested_agents role, so the grid must enumerate ONLY that role.  Reject
+        # any other role up-front rather than letting a cell be marked done for
+        # work run_task never executes.
+        bad_roles = sorted({r for (r, _m) in self._models if r != "tested_agents"})
+        if bad_roles:
+            raise ValueError(
+                "Runner grid only supports the 'tested_agents' role that "
+                f"run_task invokes; got unsupported role(s): {bad_roles}"
+            )
 
     def _default_models(self) -> List[Tuple[str, str]]:
         """Derive the default ``(model_role, model_id)`` grid dimension.
@@ -548,27 +602,32 @@ class Runner:
     def _pool_identity(self) -> str:
         """Canonical identity for a heterogeneous (pool) config's executed work.
 
-        BLOCKER A: a heterogeneous config invokes a POOL of distinct models, so a
-        single scalar model_id cannot describe it.  We key such a job by a stable
-        string derived from the configured heterogeneous pool slugs (sorted for
-        order-independence).  Two different pools ⇒ different identity ⇒ distinct
-        keys; the same pool ⇒ same key.  This keeps the checkpoint key consistent
-        with the work ``run_task`` actually executes for the config.
+        BLOCKER B (round 3): ``run_mad`` assigns pool members to agent
+        indices/seeds in LIST ORDER and passes each member's ``family`` AND
+        ``model`` to ``complete()``, so both the ORDER and each ``(family,
+        model)`` pair are execution-relevant.  The identity therefore serializes
+        the ORDERED pool of ``(family, model)`` entries — reordering the pool, or
+        changing any member's family or model, changes the key (no false-skip).
+        A single scalar model_id could never describe this pool job.
         """
         try:
             pool = self._base_client.config["roles"]["tested_agents"]["heterogeneous"]
-            slugs = sorted(m["model"] for m in pool)
+            entries = [f"{m['family']}|{m['model']}" for m in pool]  # ORDER-preserving
         except (KeyError, IndexError, TypeError):
-            slugs = ["unknown"]
-        return "pool:" + "+".join(slugs)
+            entries = ["unknown"]
+        return "pool:[" + ";".join(entries) + "]"
 
     def _models_for_config(self, cfg_name: str) -> List[Tuple[str, str]]:
         """Return the ``(model_role, model_id)`` grid dimension for *cfg_name*.
 
-        BLOCKER A: homogeneous-style configs (which invoke a SINGLE tested model)
-        sweep the configured ``models`` list; a pool config (heterogeneous-MAD)
-        yields exactly ONE cell keyed by the pool identity — never the per-model
-        sweep, which would make several distinct keys execute identical pool work.
+        BLOCKER A: ``harness.run.run_task`` only ever invokes the ``tested_agents``
+        role, so the grid enumerates ONLY that role — never roles run_task does
+        not use (which could be marked done without ever running).  A single
+        tested config invokes ONE tested model, so it sweeps the configured
+        ``models``.  A pool config (heterogeneous-MAD) invokes a POOL of models,
+        so it yields exactly ONE cell keyed by the ordered pool identity — never
+        the per-model sweep, which would make several distinct keys execute
+        identical pool work.
         """
         if cfg_name in POOL_CONFIGS:
             return [("tested_agents", self._pool_identity())]
@@ -601,34 +660,35 @@ class Runner:
         model_role: str,
         model_id: str,
     ) -> None:
-        """Bind this grid cell's ``(model_role, model_id)`` into the per-job config.
+        """Bind this grid cell's tested model into the per-job config copy.
 
-        BLOCKER A: so a distinct grid cell runs genuinely distinct work (and is
-        therefore a distinct, not-yet-done job), the invoked model for the cell's
-        role is overridden in the deep-copied per-job config:
+        BLOCKER A (round 3): ``harness.run.run_task`` invokes ONLY the
+        ``tested_agents`` role, so the grid only ever carries that role.  The
+        tested single-model configs (single / sc / homogeneous-MAD / verifier /
+        interpretation-diverse) resolve ``tested_agents`` via the *homogeneous*
+        baseline, so overriding that baseline to the grid cell's model makes a
+        distinct ``model_id`` run genuinely distinct work (a distinct, not-yet-
+        done job).  There is deliberately NO arbitrary-role binding: enumerating a
+        role run_task never invokes would let a cell be marked done without ever
+        running that role's work.
 
-        * ``tested_agents`` → overrides the *homogeneous* pool to exactly this
-          model, which controls single / sc / homogeneous-MAD / verifier /
-          interpretation-diverse (all of which resolve tested_agents via the
-          homogeneous baseline).
-        * any other role (constructor / judge / code_reviewer / …) → overrides
-          that role's ``{family, model}`` entry.
-        * POOL configs (heterogeneous-MAD) → NO binding: the executed work is the
-          configured heterogeneous pool and the job is keyed by pool identity, so
-          binding a scalar here would desync key ↔ work.
+        POOL configs (heterogeneous-MAD) are a no-op: the executed work is the
+        configured heterogeneous pool and the job is keyed by the ordered pool
+        identity, so binding a scalar here would desync key ↔ work.
 
         Only mutates the per-job copy — never shared state.
         """
         if cfg_name in POOL_CONFIGS:
             return  # pool identity cell — executed work is the configured pool
+        if model_role != "tested_agents":
+            # Defensive: the grid is validated to tested_agents-only in __init__,
+            # so this is unreachable; never silently rebind another role.
+            return
         family = model_id.split("/", 1)[0] if "/" in model_id else model_id
         try:
             roles = job_config.setdefault("roles", {})
-            if model_role == "tested_agents":
-                tested = roles.setdefault("tested_agents", {})
-                tested["homogeneous"] = [{"family": family, "model": model_id}]
-            else:
-                roles[model_role] = {"family": family, "model": model_id}
+            tested = roles.setdefault("tested_agents", {})
+            tested["homogeneous"] = [{"family": family, "model": model_id}]
         except (AttributeError, TypeError):
             pass  # malformed config — leave untouched; run_task will surface it
 
@@ -803,6 +863,18 @@ class Runner:
                 )
                 failed += 1
                 continue
+            except LedgerWriteError as exc:
+                # FAIL CLOSED: the cost journal write failed after a paid call.
+                # Do NOT mark done and do NOT retry (retry would cache-hit at $0
+                # and lose the spend).  Report as a job failure so the operator
+                # sees honest accounting rather than a silent under-count.
+                print(
+                    f"[RUNNER] LEDGER WRITE FAILURE on job "
+                    f"({task_id!r}, {cfg_name!r}, {model_id!r}, seed={seed}): {exc}. "
+                    "Failing job closed (not marked done, not retried)."
+                )
+                failed += 1
+                continue
             except Exception as exc:
                 print(
                     f"[RUNNER] INFRA error on job "
@@ -845,9 +917,13 @@ class Runner:
     ) -> List[Tuple[AgentRun, str]]:
         """Execute one job, retrying transient infra errors.
 
-        Permanent errors (``BudgetExceeded``, ``DayCapped``) re-raise immediately
-        and are NEVER retried.  Transient errors sleep with exponential back-off
-        (1s, 2s, 4s, ...) and retry up to ``max_infra_retries - 1`` additional times.
+        Permanent errors (``BudgetExceeded``, ``DayCapped``, ``LedgerWriteError``)
+        re-raise immediately and are NEVER retried.  In particular a
+        ``LedgerWriteError`` must not be retried: the re-run would cache-hit the
+        already-paid completion at $0 incremental cost and silently drop the
+        original spend from the aggregate (fail-closed).  Transient errors sleep
+        with exponential back-off (1s, 2s, 4s, ...) and retry up to
+        ``max_infra_retries - 1`` additional times.
 
         Returns:
             List of ``(AgentRun, label)`` pairs; always non-empty on success.
@@ -865,7 +941,7 @@ class Runner:
                     lbl = self._label_run(run, task)
                     labeled.append((run, lbl))
                 return labeled
-            except (BudgetExceeded, DayCapped):
+            except (BudgetExceeded, DayCapped, LedgerWriteError):
                 raise  # permanent — do not retry, propagate to run()
             except Exception as exc:
                 last_exc = exc

@@ -37,11 +37,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import pytest
 
-from common.llm import BudgetExceeded, DayCapped
+from common.llm import BudgetExceeded, Completion, DayCapped
 from common.schema import AgentRun, Interpretation, Task
+from harness.run import run_task as real_run_task
 from harness.runner import (
     ALL_CONFIGS,
     CheckpointStore,
+    LedgerWriteError,
     POOL_CONFIGS,
     Runner,
     RunnerConfig,
@@ -1429,82 +1431,132 @@ class TestCostLedgerCrashSafety:
         assert CheckpointStore(cp).aggregate_cost_usd == pytest.approx(self.COST)
 
 
-class TestMultiRolePlumbing:
-    """BLOCKER A: a grid cell's ``(model_role, model_id)`` must actually CONTROL
-    the invoked work for EVERY role — not just ``tested_agents``.
+class _RecordingClient:
+    """Duck-typed LLMClient that RECORDS each ``complete()`` call and drives the
+    REAL ``harness.run.run_task`` offline (zero network, zero token).
 
-    ``_bind_model`` binds tested_agents → homogeneous baseline, and any other
-    role → that role's ``{family, model}`` entry.  Two cells that differ only by
-    role must therefore execute DISTINCT work (distinct keys ⇒ distinct work),
-    and completing one must not falsely-skip the other.
+    Resolves the invoked model EXACTLY like ``LLMClient``:
+      * role-routed calls (single / sc / verifier / diverse) pass ``model=None``
+        → resolved via ``model_for_role(role, config)`` (the bound homogeneous
+        baseline), proving each grid cell's model actually controls the call;
+      * MAD passes explicit ``family``/``model`` per pool agent → recorded as-is,
+        proving pool ORDER controls execution order.
+    """
 
-    On the pre-fix ``_bind_model`` (which returned early for non-tested roles) the
-    ``judge`` cell bound nothing, so both cells executed IDENTICAL work — the
-    distinct-work assertion FAILS there.
+    def __init__(self, config, calls, cache_dir="cache",
+                 max_requests_per_min=None, cost_per_call=0.0):
+        self.config = config
+        self.cache_dir = Path(cache_dir)
+        self.offline = True
+        self.max_requests_per_min = max_requests_per_min
+        self._total_cost_usd = 0.0
+        self._cost_per_call = cost_per_call
+        self._calls = calls
+
+    def complete(self, role, prompt, seed=None, max_retries=3,
+                 family=None, model=None, temperature=None):
+        from common.config import model_for_role
+        if model is None:
+            resolved = model_for_role(role, self.config)
+            model = resolved["model"]
+            family = resolved.get("family")
+        self._calls.append({"role": role, "family": family,
+                            "model": model, "seed": seed})
+        self._total_cost_usd += self._cost_per_call
+        return Completion(
+            text="FINAL ANSWER: $1.00", model=model,
+            tokens_in=1, tokens_out=1, cost_usd=self._cost_per_call,
+            logit_conf=None,
+        )
+
+
+def _pool_entries(models: List[str]) -> List[Dict[str, str]]:
+    """Build a heterogeneous pool ``[{family, model}, ...]`` from slug list."""
+    return [{"family": m.split("/", 1)[0], "model": m} for m in models]
+
+
+class TestGridRoleRestriction:
+    """BLOCKER A (round 3): ``harness.run.run_task`` invokes ONLY the
+    ``tested_agents`` role, so the grid must NOT enumerate any other role — a
+    non-tested cell could otherwise be marked done for work run_task never ran.
+
+    On the pre-fix (round-2) code an arbitrary role (e.g. ``judge``) was accepted
+    and bound; here it is rejected up-front.
+    """
+
+    def test_grid_rejects_non_tested_role(self, tmp_path):
+        with pytest.raises(ValueError, match="tested_agents"):
+            _make_runner(
+                [make_task("t1")], tmp_path,
+                models=[("judge", "meta/llama-3.3-70b-instruct")],
+            )
+
+    def test_grid_accepts_tested_role(self, tmp_path):
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            models=[("tested_agents", "openai/gpt-4o-mini")],
+        )
+        assert len(runner.enumerate_grid()) == 1
+
+
+class TestRealRunTaskModelPlumbing:
+    """BLOCKER A (round 3), auditor's methodological point: drive the REAL
+    ``run_task`` with a RECORDING client to PROVE each grid cell's model actually
+    controls the invoked model (not merely that the config dict was mutated).
     """
 
     _MODELS = [
         ("tested_agents", "openai/gpt-4o-mini"),
-        ("judge", "meta/llama-3.3-70b-instruct"),
+        ("tested_agents", "meta/llama-3.3-70b-instruct"),
     ]
 
-    def _recording_run(self, seen):
-        def run(task, config, client, **kwargs):
-            cfg = client.config
-            tested = cfg["roles"]["tested_agents"]["homogeneous"][0]["model"]
-            judge = cfg["roles"]["judge"]["model"]
-            seen.append((tested, judge))
-            return [make_run(task.id, config, model=tested,
-                             seed=cfg["seeds"]["global"])]
-        return run
+    def _factory(self, tmp_path, calls):
+        def factory(job_config, remaining_budget):
+            return _RecordingClient(
+                job_config, calls, cache_dir=str(tmp_path / "cache"),
+            )
+        return factory
 
-    def test_two_roles_execute_distinct_work(self, tmp_path):
-        cp = tmp_path / "cp.jsonl"
-        seen: List[tuple] = []
+    def test_each_cell_model_controls_real_invocation(self, tmp_path):
+        calls: List[Dict[str, Any]] = []
         runner, _ = _make_runner(
-            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            [make_task("t1", domain="policy_qa")], tmp_path,
             configs=["single"], seeds=[42], models=self._MODELS,
-            run_task_fn=self._recording_run(seen),
+            run_task_fn=real_run_task, client_factory=self._factory(tmp_path, calls),
         )
-        # Two distinct grid cells (differ only by role) for the same task/seed.
-        assert len(runner.enumerate_grid()) == 2
         result = runner.run()
-
         assert result["completed"] == 2
-        assert len(seen) == 2
-        # The two cells bound DIFFERENT roles → different executed work.
-        assert seen[0] != seen[1], "distinct role cells must execute distinct work"
-        # tested_agents cell overrode the tested model; judge cell overrode judge.
-        judges = {j for (_t, j) in seen}
-        assert "meta/llama-3.3-70b-instruct" in judges
 
-    def test_two_roles_no_false_skip_on_resume(self, tmp_path):
+        # Grid order is task→config→model→seed, so cell 0 = openai, cell 1 = llama.
+        assert len(calls) == 2
+        assert calls[0]["model"] == "openai/gpt-4o-mini"
+        assert calls[1]["model"] == "meta/llama-3.3-70b-instruct"
+        # Real run_task always routes via the tested_agents role.
+        assert all(c["role"] == "tested_agents" for c in calls)
+
+    def test_stored_runs_reflect_the_invoked_model(self, tmp_path):
         cp = tmp_path / "cp.jsonl"
-        # Pre-complete ONLY the tested_agents cell.
-        CheckpointStore(cp).mark_job_done(
-            "t1", "single", "tested_agents", "openai/gpt-4o-mini", 42
-        )
-        seen: List[tuple] = []
+        calls: List[Dict[str, Any]] = []
         runner, _ = _make_runner(
-            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            [make_task("t1", domain="policy_qa")], tmp_path, checkpoint_path=cp,
             configs=["single"], seeds=[42], models=self._MODELS,
-            run_task_fn=self._recording_run(seen),
+            run_task_fn=real_run_task, client_factory=self._factory(tmp_path, calls),
         )
-        result = runner.run()
-
-        # The judge cell (distinct key) must still run — no silent skip.
-        assert result["completed"] == 1
-        assert result["skipped"] == 1
-        assert len(seen) == 1
-        assert seen[0][1] == "meta/llama-3.3-70b-instruct"
+        runner.run()
+        stored = {rec["model_id"] for rec in CheckpointStore(cp).all_runs()}
+        assert stored == {"openai/gpt-4o-mini", "meta/llama-3.3-70b-instruct"}
 
 
 class TestHeterogeneousPoolIdentity:
-    """BLOCKER A: a heterogeneous (pool) config invokes a POOL of distinct
-    models, so a single scalar model_id cannot describe it.  Such configs are
-    keyed by a canonical POOL identity and the per-model sweep is NOT applied —
-    so several distinct grid keys can never collapse onto identical pool work.
+    """BLOCKER A/B: a heterogeneous (pool) config invokes a POOL of models in
+    LIST ORDER, so it is keyed by an ORDER-SENSITIVE identity over ``(family,
+    model)`` entries (round-3 fix).  The per-model sweep is NOT applied, so
+    distinct grid keys can never collapse onto identical pool work, and a pool
+    REORDER changes both the key and the executed order (no false-skip).
     """
+
+    A = "openai/gpt-4o-mini"
+    B = "meta/llama-3.3-70b-instruct"
 
     def test_pool_config_is_recognized(self):
         assert "heterogeneous-MAD" in POOL_CONFIGS
@@ -1512,17 +1564,14 @@ class TestHeterogeneousPoolIdentity:
     def test_pool_config_yields_single_pool_cell(self, tmp_path):
         # Even with a 2-model sweep, a pool config must yield exactly ONE cell
         # per (task, seed), keyed by the pool identity — never the per-model sweep.
-        models = [
-            ("tested_agents", "openai/gpt-4o-mini"),
-            ("tested_agents", "meta/llama-3.3-70b-instruct"),
-        ]
+        models = [("tested_agents", self.A), ("tested_agents", self.B)]
         runner, _ = _make_runner(
             [make_task("t1")], tmp_path,
             configs=["heterogeneous-MAD"], seeds=[42], models=models,
         )
         grid = runner.enumerate_grid()
         assert len(grid) == 1, "pool config must not fan out over the model sweep"
-        (task_id, cfg_name, model_role, model_id, seed) = grid[0]
+        (_tid, cfg_name, model_role, model_id, _seed) = grid[0]
         assert cfg_name == "heterogeneous-MAD"
         assert model_role == "tested_agents"
         assert model_id.startswith("pool:"), "pool cell keyed by pool identity"
@@ -1533,25 +1582,44 @@ class TestHeterogeneousPoolIdentity:
             configs=["heterogeneous-MAD"], seeds=[42],
         )
         pool_id = runner.enumerate_grid()[0][3]
-        # Every configured heterogeneous model appears in the pool identity.
         pool = runner._base_client.config["roles"]["tested_agents"]["heterogeneous"]
         for member in pool:
             assert member["model"] in pool_id
+
+    def test_pool_identity_is_order_sensitive(self, tmp_path):
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["heterogeneous-MAD"], seeds=[42],
+        )
+        roles = runner._base_client.config["roles"]["tested_agents"]
+        roles["heterogeneous"] = _pool_entries([self.A, self.B])
+        id_ab = runner._pool_identity()
+        roles["heterogeneous"] = _pool_entries([self.B, self.A])
+        id_ba = runner._pool_identity()
+        assert id_ab != id_ba, "reordering the pool MUST change the identity"
+
+    def test_pool_identity_includes_family(self, tmp_path):
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["heterogeneous-MAD"], seeds=[42],
+        )
+        roles = runner._base_client.config["roles"]["tested_agents"]
+        roles["heterogeneous"] = [{"family": "openai", "model": self.A}]
+        id1 = runner._pool_identity()
+        roles["heterogeneous"] = [{"family": "CHANGED", "model": self.A}]
+        id2 = runner._pool_identity()
+        assert id1 != id2, "changing a member's family MUST change the identity"
 
     def test_bind_model_is_noop_for_pool_config(self):
         from common.config import load_config
         cfg = load_config()
         before = json.dumps(cfg["roles"]["tested_agents"], sort_keys=True)
-        Runner._bind_model(cfg, "heterogeneous-MAD", "tested_agents", "pool:x+y")
+        Runner._bind_model(cfg, "heterogeneous-MAD", "tested_agents", "pool:x")
         after = json.dumps(cfg["roles"]["tested_agents"], sort_keys=True)
         assert before == after, "pool config must NOT rebind — work is the pool"
 
     def test_homogeneous_and_pool_keys_never_collide(self, tmp_path):
-        # A homogeneous sweep + a pool config together → distinct keys for all.
-        models = [
-            ("tested_agents", "openai/gpt-4o-mini"),
-            ("tested_agents", "meta/llama-3.3-70b-instruct"),
-        ]
+        models = [("tested_agents", self.A), ("tested_agents", self.B)]
         runner, _ = _make_runner(
             [make_task("t1")], tmp_path,
             configs=["single", "heterogeneous-MAD"], seeds=[7], models=models,
@@ -1562,19 +1630,136 @@ class TestHeterogeneousPoolIdentity:
         keys = {job_key(*cell) for cell in grid}
         assert len(keys) == 3, "all grid keys must be distinct (no collision)"
 
+    def _run_pool_order(self, tmp_path, order, calls, checkpoint_path=None):
+        """Build+run a heterogeneous-MAD runner whose pool is in *order*, driving
+        the REAL run_task with a recording client; return (key, result)."""
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        runner, cp = _make_runner(
+            [make_task("t1", domain="policy_qa")], tmp_path,
+            checkpoint_path=checkpoint_path,
+            configs=["heterogeneous-MAD"], seeds=[42],
+            run_task_fn=real_run_task,
+            client_factory=lambda jc, rb: _RecordingClient(
+                jc, calls, cache_dir=str(tmp_path / "cache")),
+        )
+        runner._base_client.config["roles"]["tested_agents"]["heterogeneous"] = \
+            _pool_entries(order)
+        key = job_key(*runner.enumerate_grid()[0])
+        result = runner.run()
+        return key, result
+
+    def test_pool_reorder_changes_key_and_execution_order(self, tmp_path):
+        calls_ab: List[Dict[str, Any]] = []
+        calls_ba: List[Dict[str, Any]] = []
+        key_ab, res_ab = self._run_pool_order(
+            tmp_path / "ab", [self.A, self.B], calls_ab)
+        key_ba, res_ba = self._run_pool_order(
+            tmp_path / "ba", [self.B, self.A], calls_ba)
+
+        assert res_ab["completed"] == 1 and res_ba["completed"] == 1
+        # (B) Reordering the pool changes the checkpoint key (no false-skip).
+        assert key_ab != key_ba, "pool reorder MUST change the key"
+        # ...and changes the actual first-round execution order in run_mad.
+        assert calls_ab[0]["model"] == self.A
+        assert calls_ba[0]["model"] == self.B
+        assert calls_ab[0]["model"] != calls_ba[0]["model"]
+
+    def test_pool_reorder_no_false_skip_on_shared_checkpoint(self, tmp_path):
+        cp = tmp_path / "shared.jsonl"
+        calls_ab: List[Dict[str, Any]] = []
+        calls_ba: List[Dict[str, Any]] = []
+        # Complete order [A, B] first.
+        key_ab, res_ab = self._run_pool_order(
+            tmp_path / "w", [self.A, self.B], calls_ab, checkpoint_path=cp)
+        assert res_ab["completed"] == 1
+        # Resume the SAME checkpoint with order [B, A]: different key → must RUN,
+        # not be silently skipped as already-done.
+        key_ba, res_ba = self._run_pool_order(
+            tmp_path / "w", [self.B, self.A], calls_ba, checkpoint_path=cp)
+        assert key_ab != key_ba
+        assert res_ba["completed"] == 1, "reordered pool must not be false-skipped"
+        assert res_ba["skipped"] == 0
+
     def test_pool_config_runs_and_marks_done(self, tmp_path):
         cp = tmp_path / "cp.jsonl"
+        calls: List[Dict[str, Any]] = []
         runner, _ = _make_runner(
-            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            [make_task("t1", domain="policy_qa")], tmp_path, checkpoint_path=cp,
             configs=["heterogeneous-MAD"], seeds=[42],
+            run_task_fn=real_run_task,
+            client_factory=lambda jc, rb: _RecordingClient(
+                jc, calls, cache_dir=str(tmp_path / "cache")),
         )
         result = runner.run()
         assert result["completed"] == 1
         pool_id = runner.enumerate_grid()[0][3]
-        # Resume is idempotent: the pool cell is now skipped, not re-run.
         assert CheckpointStore(cp).job_done(
             "t1", "heterogeneous-MAD", "tested_agents", pool_id, 42
         )
+
+
+class TestLedgerWriteFailClosed:
+    """Manager scope ruling (decision-log row 31): per-call fsync'd journaling is
+    SUFFICIENT; a hard-crash losing ≤1 call (~$0.0001) is an ACCEPTED limitation.
+    BUT a ledger WRITE failure must FAIL CLOSED — the job is treated as a
+    permanent infra failure (not marked done, NOT retried into a $0 cache-hit
+    that would silently lose the original spend).
+    """
+
+    def test_ledger_write_failure_fails_job_closed_not_retried(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        calls: List[Dict[str, Any]] = []
+
+        def factory(job_config, remaining_budget):
+            return _RecordingClient(
+                job_config, calls, cache_dir=str(tmp_path / "cache"),
+                cost_per_call=0.10,
+            )
+
+        runner, _ = _make_runner(
+            [make_task("t1", domain="policy_qa")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], max_infra_retries=3,
+            run_task_fn=real_run_task, client_factory=factory,
+        )
+        # Force the aggregate cost-ledger journal write to fail.
+        def boom(delta):
+            raise OSError("simulated ledger write failure (disk full)")
+        runner._store.add_cost = boom
+
+        result = runner.run()
+
+        # FAIL CLOSED: reported as a failure, NOT completed.
+        assert result["completed"] == 0
+        assert result["failed"] == 1
+        # Job NOT marked done → it will not be silently treated as finished.
+        assert not CheckpointStore(cp).job_done(
+            "t1", "single", "tested_agents", "openai/gpt-4o-mini", 42
+        )
+        # NOT retried: run_task invoked exactly ONCE (a retry would cache-hit at
+        # $0 and lose the original spend). max_infra_retries=3 proves permanence.
+        assert len(calls) == 1
+
+    def test_ledger_write_error_is_permanent_not_retried_unit(self, tmp_path):
+        """Unit-level: LedgerWriteError from the wrapper is raised straight out of
+        _run_job_with_retry (never retried)."""
+        from common.config import load_config
+
+        calls: List[Dict[str, Any]] = []
+        runner, _ = _make_runner(
+            [make_task("t1", domain="policy_qa")], tmp_path,
+            configs=["single"], seeds=[42], max_infra_retries=3,
+            run_task_fn=real_run_task,
+        )
+        rec = _RecordingClient(load_config(), calls, cost_per_call=0.10)
+
+        def boom(delta):
+            raise OSError("disk full")
+
+        wrapped = _ThrottledClient(rec, RpmThrottler(0), set(), cost_sink=boom)
+        with pytest.raises(LedgerWriteError):
+            runner._run_job_with_retry(make_task("t1", domain="policy_qa"),
+                                       "single", wrapped)
+        assert len(calls) == 1, "must not retry a fail-closed ledger error"
 
 
 class TestLegacyCheckpointLoad:
