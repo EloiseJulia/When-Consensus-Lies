@@ -26,8 +26,8 @@ instrument), instead of saturating at 1.0.
 | id (base)          | domain        | I0 (target, non-default)                | default foil (wrong)                | regime      | weaker-default rationale vs the strong trap |
 |--------------------|---------------|-----------------------------------------|-------------------------------------|-------------|---------------------------------------------|
 | diag_weekday_001   | code_spec     | US business calendar: Sunday=1..Sat=7   | ISO-8601 Monday=1..Sun=7            | H1_external | Strong trap `code_quarter` (calendar quarters) is a near-universal single default; here BOTH weekday conventions are pervasive — Python `isoweekday()` is Monday-first, but Excel `WEEKDAY` default & US calendars are Sunday-first — so a meaningful minority independently picks each → split, CD<1. |
-| diag_unique_001    | code_spec     | first-occurrence (insertion) order      | sorted ascending                    | H1_external | Strong trap `code_getitems` (Python 0-based/exclusive) is the overwhelming default; "return the unique items" genuinely splits in the wild between `sorted(set(...))` and order-preserving `dict.fromkeys(...)` (and unordered `list(set(...))` → I⊥), so no single dominant default. |
-| diag_avgnonzero_001| data_analysis | average over ACTIVE (non-zero) users    | average over all users (sum/len)    | H1_external | Strong trap `data_activeusers` uses an ARBITRARY external KPI threshold (>=3) essentially no model guesses; here both "per user" (÷len) and "per active user" (÷nonzero) are natural readings of "average sessions", so the default is far weaker. |
+| diag_casesort_001  | code_spec     | case-INSENSITIVE alphabetical order     | Python `sorted()` case-sensitive ASCII (upper before lower) | H1_external | Naive code reaches for `sorted()` (case-sensitive), but "alphabetical" colloquially means case-insensitive → genuine ~50/50 split, neither dominant. Inputs mix cases so ASCII order and case-insensitive order DIFFER on every case (no aliasing; `list(set())`/codepoint order cannot masquerade as either reading). |
+| diag_quartile_001  | data_analysis | exclusive-method Q1 (Excel PERCENTILE.EXC / stdlib `quantiles` default) | inclusive linear-interp Q1 (numpy.percentile default / R-7) | H1_external | Q1 has several widely-used definitions giving DIFFERENT numbers on the same data — numpy users get linear/inclusive, Excel-EXC/textbook/stdlib users get exclusive. Genuine methodological ~50/50 split, far weaker than an arbitrary external KPI threshold. |
 | diag_stddev_001    | data_analysis | sample std (Bessel, ÷ n-1)              | population std (÷ n)                | H1_external | Classic genuine split: numpy defaults population (ddof=0), pandas/`statistics.stdev` sample (n-1). Models genuinely disagree → weak default. Much weaker pull than an external policy threshold. |
 
 Distinguishability: every reference implementation passes ONLY its own checker across
@@ -55,21 +55,23 @@ H2 resolution: `data_typical_001_k1_central_tendency`.
 Subtler traps (Deliverable 1): the 4 above.
 
 ### Pool (owner ruling — reasoner-vs-weaker weighted; gpt-4o-mini EXCLUDED)
-- Homogeneous within-ensemble convergence via config `sc` (k=5, temperature 0.7):
-  - `deepseek/deepseek-r1` (reasoner), `mistral-ai/mistral-small-2503` (weak),
-    `meta/llama-3.3-70b-instruct` (weak).
+- Homogeneous within-ensemble convergence via config `sc` (k=5, temperature 0.7),
+  REASONER-WEIGHTED (both reasoners + one weak):
+  - `deepseek/deepseek-r1` (reasoner), `openai/o4-mini` (reasoner),
+    `mistral-ai/mistral-small-2503` (weak).
 - Heterogeneous diverse pool via config `single` (temperature 0.0, one independent
   sample per family): `deepseek/deepseek-r1`, `openai/o4-mini`,
   `mistral-ai/mistral-small-2503`, `meta/llama-3.3-70b-instruct` (4-family pool).
 - Single reasoner resolution pass (H2) = the `single` runs of the two reasoners on the
-  H2 task (o4-mini appears ONLY as single passes to cap reasoner cost).
+  H2 task.
 - **`openai/gpt-4o-mini` is EXCLUDED** — protects its daily cap for the registered mini-pilot.
 
 Two Runner invocations share ONE checkpoint + cache (resumable/idempotent):
-- Pass A: `configs=["sc"]`, models = 3 homogeneous → 11×3×5 = 165 calls.
+- Pass A: `configs=["sc"]`, models = 3 homogeneous (2 reasoner + 1 weak) → 11×3×5 = 165 calls.
 - Pass B: `configs=["single"]`, models = 4 pool → 11×4×1 = 44 calls.
-Estimated live budget per model (≈209 calls): deepseek-r1 66, o4-mini 11,
-mistral-small 66, llama-70b 66. Nominal cost ≈ $0.30, hard cap $0.50 (Runner stops
+Estimated live budget per model (≈209 calls): deepseek-r1 66, o4-mini 66,
+mistral-small 66, llama-70b 11 → **reasoner total 132 ≥ weak total 77** (reasoner-weighted).
+Nominal cost ≈ $0.30, hard cap $0.50 (Runner stops
 cleanly + resumes). RPM throttled conservatively (default 10). GitHub Models is
 free/rate-limited, so calls (not dollars) are the binding constraint.
 

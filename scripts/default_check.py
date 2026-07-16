@@ -80,10 +80,13 @@ H2_TASK_ID = "data_typical_001_k1_central_tendency"
 
 # Pool (owner ruling): reasoner-vs-weaker weighted, gpt-4o-mini EXCLUDED.
 # Homogeneous within-ensemble convergence (config "sc", k=5, temperature 0.7).
+# REASONER-WEIGHTED: BOTH reasoners in the sc ensemble alongside ONE weak model, so the
+# within-ensemble convergence signal is dominated by reasoners (that is what validates
+# H1/H2). llama stays in the heterogeneous single-pass pool only.
 HOMOGENEOUS_MODELS: List[Tuple[str, str]] = [
     ("tested_agents", "deepseek/deepseek-r1"),          # reasoner
+    ("tested_agents", "openai/o4-mini"),                # reasoner
     ("tested_agents", "mistral-ai/mistral-small-2503"), # weak
-    ("tested_agents", "meta/llama-3.3-70b-instruct"),   # weak
 ]
 
 # Heterogeneous diverse pool (config "single", one independent sample per family).

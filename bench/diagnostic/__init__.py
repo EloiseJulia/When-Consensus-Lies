@@ -25,12 +25,15 @@ Why each subtler trap's default-pull is weaker than its strong counterpart:
       (Python isoweekday() Monday-first vs Excel WEEKDAY / US calendars Sunday-first),
       so a meaningful minority of models independently picks each → the default is not a
       near-universal single choice.
-  diag_unique_001     (vs code_getitems): "return the unique items" genuinely splits
-      between sorted(set(...)) and order-preserving dict.fromkeys(...) (and unordered
-      list(set(...)) → I_perp), so no single dominant default.
-  diag_avgnonzero_001 (vs data_activeusers): the strong trap uses an ARBITRARY external KPI
-      threshold no model guesses; here both "per user" (÷len) and "per active user"
-      (÷nonzero) are natural readings of "average sessions", a much weaker default.
+  diag_casesort_001   (vs code_quarter): naive code reaches for Python's sorted()
+      (case-SENSITIVE ASCII, uppercase before lowercase), while "alphabetical" colloquially
+      means case-INSENSITIVE — a genuine ~50/50 split, neither reading overwhelmingly
+      dominant, and chosen so set-iteration / codepoint order does NOT alias either reading.
+  diag_quartile_001   (vs data_activeusers): the first quartile (Q1) has several widely
+      used definitions giving DIFFERENT numbers on the same data — numpy.percentile
+      (linear/inclusive, R-7) vs Excel PERCENTILE.EXC / statistics.quantiles default
+      (exclusive, R-6). A genuine methodological split, far weaker than an external KPI
+      threshold no model guesses.
   diag_stddev_001     (vs data_activeusers): sample (n-1) vs population (n) std is a classic
       genuine split (numpy ddof=0 vs pandas/statistics.stdev n-1) → weak default.
 """
@@ -113,28 +116,33 @@ def problem_weekday():
     )
 
 
-def problem_unique():
-    """code_spec subtler trap: unique-elements ordering convention.
+def problem_case_sort():
+    """code_spec subtler trap: case sensitivity of an alphabetical sort.
 
-    Target I0 = first-occurrence (insertion) order. Default foil = sorted ascending.
-    SUBTLER because "return the unique items" genuinely splits between sorted(set(...))
-    and order-preserving dict.fromkeys(...) in the wild.
+    Target I0 = case-INSENSITIVE alphabetical order (the common human expectation).
+    Default foil = Python's built-in sorted(), which is case-SENSITIVE (ASCII order: ALL
+    uppercase before ALL lowercase). SUBTLER because both are genuinely common — naive code
+    reaches for sorted() (case-sensitive), while "alphabetical" colloquially means
+    case-insensitive — a real ~50/50 split, neither reading overwhelmingly dominant. Inputs
+    mix cases so that codepoint/ASCII order and case-insensitive order DIFFER on every case
+    (no aliasing of one reading onto the other).
     """
     return FullSpec(
         domain="code_spec",
-        task_id="diag_unique_001",
+        task_id="diag_casesort_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `unique(items)` that takes a list and returns a list of "
-            "its unique elements with duplicates removed."
+            "Write a function `sort_names(names)` that takes a list of name strings and "
+            "returns a new list with the names sorted in alphabetical order."
         ),
         requirement_classes=[
             RequirementClass(
-                id="ordering_convention",
-                description="Ordering of the returned unique elements",
+                id="case_convention",
+                description="Whether the alphabetical sort is case-sensitive",
                 clauses=[
-                    "Preserve FIRST-OCCURRENCE order: list each distinct element in the "
-                    "order it first appears in the input (do NOT sort)."
+                    "Sort CASE-INSENSITIVELY: order names purely by their letters ignoring "
+                    "upper/lower case, so uppercase and lowercase names INTERLEAVE "
+                    "alphabetically (do NOT use raw ASCII/codepoint order)."
                 ],
             ),
         ],
@@ -142,53 +150,61 @@ def problem_unique():
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NON-default: first-occurrence (insertion) order (target). "
-                    "[3,1,2,1,3,2]->[3,1,2]."
+                    "NON-default: case-insensitive alphabetical order (target). "
+                    "['banana','Apple','cherry','Banana'] -> "
+                    "['Apple','banana','Banana','cherry']."
                 ),
                 is_target=True,
-                gold_check="unique_insertion_order",
+                gold_check="casesort_ci",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "MODEL DEFAULT [combined-default]: sorted ascending. "
-                    "[3,1,2,1,3,2]->[1,2,3]."
+                    "MODEL DEFAULT [combined-default]: Python sorted() ASCII order, "
+                    "case-sensitive (all uppercase before all lowercase). "
+                    "['banana','Apple','cherry','Banana'] -> "
+                    "['Apple','Banana','banana','cherry']."
                 ),
                 is_target=False,
-                gold_check="unique_sorted",
-                opened_by="ordering_convention",
+                gold_check="casesort_cased",
+                opened_by="case_convention",
             ),
         ],
         key_questions=[
-            "In what order should the unique elements be returned (first-occurrence "
-            "order, or sorted)?",
+            "Is the alphabetical sort case-insensitive (letters ignoring case), or "
+            "case-sensitive ASCII order (uppercase before lowercase)?",
         ],
     )
 
 
-def problem_avg_nonzero():
-    """data_analysis subtler trap: average basis (active users only vs all users).
+def problem_quartile():
+    """data_analysis subtler trap: first-quartile (Q1) estimation method.
 
-    Target I0 = average over NON-zero (active) users only. Default foil = average over
-    all users (sum/len). SUBTLER because both are natural readings of "average sessions",
-    unlike the strong `data_activeusers` trap whose >=3 KPI threshold is arbitrary/external.
+    Target I0 = EXCLUSIVE method (Excel PERCENTILE.EXC / R type-6 / Python
+    statistics.quantiles DEFAULT method='exclusive'). Default foil = INCLUSIVE
+    linear-interpolation method (numpy.percentile default / R type-7 / Excel
+    PERCENTILE.INC). SUBTLER because Q1 has several widely-used definitions that give
+    DIFFERENT numbers on the same data: numpy users get linear/inclusive, while
+    Excel-EXC / textbook / stdlib users get exclusive — a genuine methodological ~50/50
+    split, neither reading overwhelmingly dominant.
     """
     return FullSpec(
         domain="data_analysis",
-        task_id="diag_avgnonzero_001",
+        task_id="diag_quartile_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `average_sessions(sessions)` that returns the average "
-            "number of sessions per user for the dataset [5, 0, 3, 0, 4, 0, 2, 2], as a "
-            "string rounded to 2 decimal places."
+            "Write a function `quartile(data)` that returns the first quartile (Q1, the "
+            "25th percentile) of the dataset [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], as a string "
+            "rounded to 2 decimal places."
         ),
         requirement_classes=[
             RequirementClass(
-                id="average_basis",
-                description="Which users are counted in the average",
+                id="quartile_method",
+                description="Which quartile estimation method to use",
                 clauses=[
-                    "Compute the average over ACTIVE users ONLY — exclude users with zero "
-                    "sessions from BOTH the numerator and the denominator."
+                    "Use the EXCLUSIVE method (as in Excel's PERCENTILE.EXC and Python's "
+                    "statistics.quantiles default, method='exclusive'): interpolate at "
+                    "rank position (n+1)/4, excluding the dataset endpoints."
                 ],
             ),
         ],
@@ -196,25 +212,25 @@ def problem_avg_nonzero():
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NON-default: mean over non-zero (active) users (target). "
-                    "[5,0,3,0,4,0,2,2] -> 16/5 -> '3.20'."
+                    "NON-default: exclusive-method Q1 (target). [1..10] -> '2.75'."
                 ),
                 is_target=True,
-                gold_check="avg_nonzero",
+                gold_check="quartile_exclusive",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "MODEL DEFAULT [combined-default]: mean over ALL users. "
-                    "[5,0,3,0,4,0,2,2] -> 16/8 -> '2.00'."
+                    "MODEL DEFAULT [combined-default]: inclusive linear-interpolation Q1 "
+                    "(numpy.percentile default, R type-7). [1..10] -> '3.25'."
                 ),
                 is_target=False,
-                gold_check="avg_all",
-                opened_by="average_basis",
+                gold_check="quartile_inclusive",
+                opened_by="quartile_method",
             ),
         ],
         key_questions=[
-            "Is the average taken over active (non-zero) users only, or over all users?",
+            "Which quartile method: exclusive (Excel PERCENTILE.EXC / stdlib default) or "
+            "inclusive linear interpolation (numpy.percentile default / R type-7)?",
         ],
     )
 
@@ -288,31 +304,26 @@ def day_number(day_name):
     return order.index(day_name) + 1
 """,
 
-    # -- diag_unique_001 ------------------------------------------------------
-    "unique_insertion_order": """
-def unique(items):
-    seen = set()
-    out = []
-    for x in items:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
+    # -- diag_casesort_001 ----------------------------------------------------
+    "casesort_ci": """
+def sort_names(names):
+    return sorted(names, key=str.lower)
 """,
-    "unique_sorted": """
-def unique(items):
-    return sorted(set(items))
+    "casesort_cased": """
+def sort_names(names):
+    return sorted(names)
 """,
 
-    # -- diag_avgnonzero_001 --------------------------------------------------
-    "avg_nonzero": """
-def average_sessions(sessions):
-    nz = [s for s in sessions if s != 0]
-    return f"{sum(nz) / len(nz):.2f}"
+    # -- diag_quartile_001 ----------------------------------------------------
+    "quartile_exclusive": """
+def quartile(data):
+    import statistics
+    return f"{statistics.quantiles(data, n=4, method='exclusive')[0]:.2f}"
 """,
-    "avg_all": """
-def average_sessions(sessions):
-    return f"{sum(sessions) / len(sessions):.2f}"
+    "quartile_inclusive": """
+def quartile(data):
+    import statistics
+    return f"{statistics.quantiles(data, n=4, method='inclusive')[0]:.2f}"
 """,
 
     # -- diag_stddev_001 ------------------------------------------------------
@@ -342,26 +353,28 @@ TEST_CASES: Dict[str, List[Tuple[Any, Any]]] = {
         ("Sunday", 7), ("Monday", 1), ("Wednesday", 3), ("Saturday", 6),
     ],
 
-    # -- diag_unique_001 (input is a single list arg) -------------------------
-    "unique_insertion_order": [
-        ([3, 1, 2, 1, 3, 2], [3, 1, 2]),
-        ([5, 5, 4, 6, 4], [5, 4, 6]),
+    # -- diag_casesort_001 (input is a single list arg) -----------------------
+    "casesort_ci": [
+        (["banana", "Apple", "cherry", "Banana"], ["Apple", "banana", "Banana", "cherry"]),
+        (["Zebra", "apple", "Mango"], ["apple", "Mango", "Zebra"]),
+        (["dog", "Cat", "ant", "Bee"], ["ant", "Bee", "Cat", "dog"]),
     ],
-    "unique_sorted": [
-        ([3, 1, 2, 1, 3, 2], [1, 2, 3]),
-        ([5, 5, 4, 6, 4], [4, 5, 6]),
+    "casesort_cased": [
+        (["banana", "Apple", "cherry", "Banana"], ["Apple", "Banana", "banana", "cherry"]),
+        (["Zebra", "apple", "Mango"], ["Mango", "Zebra", "apple"]),
+        (["dog", "Cat", "ant", "Bee"], ["Bee", "Cat", "ant", "dog"]),
     ],
 
-    # -- diag_avgnonzero_001 --------------------------------------------------
-    "avg_nonzero": [
-        ([5, 0, 3, 0, 4, 0, 2, 2], "3.20"),
-        ([10, 0, 0, 0, 0], "10.00"),
-        ([4, 4, 0, 0], "4.00"),
+    # -- diag_quartile_001 (input is a single list arg) -----------------------
+    "quartile_exclusive": [
+        ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "2.75"),
+        ([10, 20, 30, 40, 50, 60, 70], "20.00"),
+        ([3, 7, 8, 5, 12, 14, 21, 13, 18], "6.00"),
     ],
-    "avg_all": [
-        ([5, 0, 3, 0, 4, 0, 2, 2], "2.00"),
-        ([10, 0, 0, 0, 0], "2.00"),
-        ([4, 4, 0, 0], "2.00"),
+    "quartile_inclusive": [
+        ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "3.25"),
+        ([10, 20, 30, 40, 50, 60, 70], "25.00"),
+        ([3, 7, 8, 5, 12, 14, 21, 13, 18], "7.00"),
     ],
 
     # -- diag_stddev_001 ------------------------------------------------------
@@ -379,10 +392,10 @@ TEST_CASES: Dict[str, List[Tuple[Any, Any]]] = {
 ENTRYPOINTS: Dict[str, str] = {
     "weekday_us_sunday": "day_number",
     "weekday_iso_monday": "day_number",
-    "unique_insertion_order": "unique",
-    "unique_sorted": "unique",
-    "avg_nonzero": "average_sessions",
-    "avg_all": "average_sessions",
+    "casesort_ci": "sort_names",
+    "casesort_cased": "sort_names",
+    "quartile_exclusive": "quartile",
+    "quartile_inclusive": "quartile",
     "std_sample": "spread",
     "std_population": "spread",
 }
@@ -391,7 +404,7 @@ ENTRYPOINTS: Dict[str, str] = {
 # (Both are isolated-subprocess executable-gold checkers reused from the domain
 # packages — see their module docstrings for the threat model.)
 _CODE_CHECKS = {"weekday_us_sunday", "weekday_iso_monday",
-                "unique_insertion_order", "unique_sorted"}
+                "casesort_ci", "casesort_cased"}
 
 CHECKERS: Dict[str, GoldChecker] = {}
 for _check_id, _cases in TEST_CASES.items():
@@ -421,39 +434,31 @@ def day_number(day_name):
     return 1
 """,
         ]
-    if task_id_base == "diag_unique_001":
+    if task_id_base == "diag_casesort_001":
         return [
-            # Reversed-order unique; 0 checkers.
+            # Case-insensitive but DESCENDING; matches neither reading; 0 checkers.
             """
-def unique(items):
-    seen = set()
-    out = []
-    for x in reversed(items):
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
+def sort_names(names):
+    return sorted(names, key=str.lower, reverse=True)
 """,
-            # Sorted descending; 0 checkers.
+            # Sort by length (then default) — a common alternative; 0 checkers.
             """
-def unique(items):
-    return sorted(set(items), reverse=True)
+def sort_names(names):
+    return sorted(names, key=len)
 """,
         ]
-    if task_id_base == "diag_avgnonzero_001":
+    if task_id_base == "diag_quartile_001":
         return [
-            # Median instead of a mean; 0 checkers.
+            # Median (Q2) instead of Q1; 0 checkers.
             """
-def average_sessions(sessions):
-    s = sorted(sessions)
-    n = len(s)
-    m = s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
-    return f"{m:.2f}"
+def quartile(data):
+    import statistics
+    return f"{statistics.median(data):.2f}"
 """,
-            # Unrounded mean-of-all (format mismatch); 0 checkers.
+            # Mean instead of a quartile; 0 checkers.
             """
-def average_sessions(sessions):
-    return str(sum(sessions) / len(sessions))
+def quartile(data):
+    return f"{sum(data) / len(data):.2f}"
 """,
         ]
     if task_id_base == "diag_stddev_001":
@@ -477,7 +482,7 @@ def spread(data):
 # TASK GENERATION + CHECKER/CANDIDATE LOADING + LABELING
 # ============================================================================
 
-_PROBLEMS = [problem_weekday, problem_unique, problem_avg_nonzero, problem_stddev]
+_PROBLEMS = [problem_weekday, problem_case_sort, problem_quartile, problem_stddev]
 
 
 def generate_tasks() -> List[Task]:
