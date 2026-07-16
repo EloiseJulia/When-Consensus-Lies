@@ -73,11 +73,39 @@ a material source of uncertainty (no rule/metric change).
 - The combinatorial interpretation structure (Amdt 03) and its metric-integrity guardrail (partial-default
   convergence still counts as a genuine enumerated wrong label — it is NOT `I_perp`).
 
+## ⭐ Answer-format labeling clarification (added 2026-07-16 — motivates the I_perp rate; owner sign-off)
+The 2026-07-16 default-check diagnostic showed WHY the enumerated-vs-frozen split matters empirically: on
+`code_invoice` the weak model produced genuinely off-axis output (enumerated CD = 0.0 = no real
+convergence; frozen would report 1.0 spurious `I_perp` "convergence"), and reasoning models (deepseek-r1)
+often WRAP the answer in `<think>…</think>` reasoning or exhaust their token budget mid-reasoning. To keep
+`I_perp` meaning "genuinely non-compliant / off-axis" (not "answer present but the extractor missed it"),
+we clarify the labeling EXTRACTION (executable gold + the exact-match grammar are UNCHANGED — only how the
+candidate answer is located in the raw text):
+- **Code/data domains (NOT pre-registered in §7 — implemented, gold-preserving, PR #21):** strip
+  `<think>` reasoning (nesting-aware; nested/unclosed/truncated → recover nothing → `I_perp`); consider
+  only python/unlabeled code fences; run ALL candidate blocks through the gold checkers — exactly one → its
+  label, agreeing blocks → that label, DISAGREEING blocks → `I_perp` (never guess by position); the prompt
+  now asks for exactly ONE code block. Auditor-verified: ZERO existing diagnostic labels changed (pure
+  robustness for future wrapped answers). This needs no amendment (code/data extraction is not in §7) — it
+  is recorded here for completeness because it affects the measured `I_perp` rate.
+- **⭐ policy_qa (PRE-REGISTERED §7) — PROPOSED, owner sign-off required:** currently the frozen §7
+  contract counts disagreeing amounts across markers → `I_perp` INCLUDING numbers that appear inside a
+  reasoning `<think>` block. For reasoning models this over-produces `I_perp` (a scratch number in
+  `<think>` conflicts with the real FINAL ANSWER). **Proposal:** strip `<think>` reasoning BEFORE applying
+  the UNCHANGED FINAL-ANSWER/JSON numeric grammar, so only the model's actual final answer is extracted
+  (a `<think>`-internal number can no longer falsely conflict). This is faithful to §7's INTENT (catch a
+  model giving two different FINAL answers, not reasoning scratch vs final) but it is technically a §7
+  behavior change → it is REVERTED in code pending this sign-off (frozen §7 preserved byte-for-byte until
+  approved). Approve to re-enable the policy_qa `<think>`-strip.
+
 ## Sign-off
 - [ ] Owner approves the I_perp primary treatment (PRIMARY = enumerated-wrong only, I_perp in N but
       ineligible as the convergent label; SENSITIVITY A = frozen metric with I_perp eligible; SENSITIVITY
       B = drop I_perp from N; DIAGNOSTIC = per-condition I_perp rate with a >20% investigate-before-trust
       gate). Metric DEFINITION remains frozen.
+- [ ] Owner approves the answer-format labeling clarification: (a) the code/data reasoning-wrapper +
+      single-block extraction (already implemented, gold-preserving, no §7 change) is acknowledged; and
+      (b) the policy_qa `<think>`-strip proposal is APPROVED (re-enable) or DECLINED (keep frozen §7 as-is).
 - [ ] Committed as the amendment of record BEFORE any full-scale run.
 
 Amendment status: **DRAFT — awaiting owner sign-off.** Metric definitions remain frozen regardless.
