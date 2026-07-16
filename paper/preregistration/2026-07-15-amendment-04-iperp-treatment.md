@@ -1,4 +1,4 @@
-# Pre-Registration Amendment 04 — I_perp treatment in the primary metric  (DRAFT, owner sign-off required)
+# Pre-Registration Amendment 04 — I_perp treatment in the primary metric  (✅ SIGNED 2026-07-16)
 
 > Amends the FROZEN pre-registration `paper/preregistration/2026-07-15-prereg.md` (freeze SHA `c0a0393`),
 > §3 (Metrics) reporting/treatment layer only. **The frozen metric DEFINITION in `harness/metrics.py`
@@ -88,24 +88,27 @@ candidate answer is located in the raw text):
   now asks for exactly ONE code block. Auditor-verified: ZERO existing diagnostic labels changed (pure
   robustness for future wrapped answers). This needs no amendment (code/data extraction is not in §7) — it
   is recorded here for completeness because it affects the measured `I_perp` rate.
-- **⭐ policy_qa (PRE-REGISTERED §7) — PROPOSED, owner sign-off required:** currently the frozen §7
-  contract counts disagreeing amounts across markers → `I_perp` INCLUDING numbers that appear inside a
-  reasoning `<think>` block. For reasoning models this over-produces `I_perp` (a scratch number in
-  `<think>` conflicts with the real FINAL ANSWER). **Proposal:** strip `<think>` reasoning BEFORE applying
-  the UNCHANGED FINAL-ANSWER/JSON numeric grammar, so only the model's actual final answer is extracted
-  (a `<think>`-internal number can no longer falsely conflict). This is faithful to §7's INTENT (catch a
-  model giving two different FINAL answers, not reasoning scratch vs final) but it is technically a §7
-  behavior change → it is REVERTED in code pending this sign-off (frozen §7 preserved byte-for-byte until
-  approved). Approve to re-enable the policy_qa `<think>`-strip.
+- **⭐ policy_qa (PRE-REGISTERED §7) — ✅ APPROVED (owner-signed 2026-07-16), TO BE RE-ENABLED in code:**
+  the frozen §7 contract counts disagreeing amounts across markers → `I_perp` INCLUDING numbers that appear
+  inside a reasoning `<think>` block. For reasoning models this over-produces `I_perp` (a scratch number in
+  `<think>` conflicts with the real FINAL ANSWER). **Approved change:** strip `<think>` reasoning BEFORE
+  applying the UNCHANGED FINAL-ANSWER/JSON numeric grammar, so only the model's actual final answer is
+  extracted (a `<think>`-internal number can no longer falsely conflict). This is faithful to §7's INTENT
+  (catch a model giving two different FINAL answers, not reasoning scratch vs final). Owner approved
+  re-enabling the policy_qa `<think>`-strip; it will be RE-ENABLED via a cross-family-audited PR (the
+  nesting-aware `_strip_reasoning` already merged in PR #21 will be applied to `label_policy_domain`).
 
 ## Sign-off
-- [ ] Owner approves the I_perp primary treatment (PRIMARY = enumerated-wrong only, I_perp in N but
+- [x] Owner approves the I_perp primary treatment (PRIMARY = enumerated-wrong only, I_perp in N but
       ineligible as the convergent label; SENSITIVITY A = frozen metric with I_perp eligible; SENSITIVITY
       B = drop I_perp from N; DIAGNOSTIC = per-condition I_perp rate with a >20% investigate-before-trust
-      gate). Metric DEFINITION remains frozen.
-- [ ] Owner approves the answer-format labeling clarification: (a) the code/data reasoning-wrapper +
-      single-block extraction (already implemented, gold-preserving, no §7 change) is acknowledged; and
-      (b) the policy_qa `<think>`-strip proposal is APPROVED (re-enable) or DECLINED (keep frozen §7 as-is).
-- [ ] Committed as the amendment of record BEFORE any full-scale run.
+      gate). Metric DEFINITION remains frozen. — **signed 2026-07-16 (@EloiseJulia, "批准（按草案）").**
+- [x] Owner approves the answer-format labeling clarification: (a) the code/data reasoning-wrapper +
+      single-block extraction (already implemented PR #21, gold-preserving, no §7 change) is acknowledged;
+      and (b) the policy_qa `<think>`-strip proposal is **APPROVED (re-enable)**. — **signed 2026-07-16
+      (@EloiseJulia, "批准（重新启用 policy_qa 的 <think> 剥离）").**
+- [x] Committed as the amendment of record BEFORE any full-scale run.
 
-Amendment status: **DRAFT — awaiting owner sign-off.** Metric definitions remain frozen regardless.
+Amendment status: **APPROVED & IN EFFECT** (owner-signed 2026-07-16). Metric definitions remain frozen.
+Amendment commit SHA: recorded by the commit that flips this status (see the immediately-following commit
+on `main`).
