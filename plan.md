@@ -61,3 +61,21 @@ block (recovered), first-vs-last fence, prose+code_invoice, truncated think (sta
 I_perp), and a genuine mixed-convention off-axis output (stays I_perp — no false
 recovery). Plus a cache-backed regression assertion that the fix doesn't relabel the real
 mistral off-axis outputs.
+
+## STEP 4 — Cross-family audit response (SAFETY-FIRST; prefer I_perp over guessing)
+- **BLOCKER 1** (`_strip_reasoning`): made nesting-aware via depth tracking; keeps ONLY
+  text outside a properly-closed reasoning block. Nested/unclosed/unmatched → contents
+  discarded, never exposed → no false recovery of reasoning-internal code.
+- **BLOCKER 2** (multi-block): (a) restrict eligible fences to python/py/unlabeled ONLY
+  (reject text/json/…); (b) `_extract_code_candidates` returns ALL eligible blocks and
+  `_label_code_candidates` resolves each via gold checkers — agreeing → that label,
+  disagreeing → I_perp (NO positional guessing); (c) `run.py` instruction now requires
+  EXACTLY ONE ```python block (code/data only).
+- **MAJOR 3**: REVERTED policy_qa `<think>`-strip — restored frozen prereg §7 exactly
+  (`_extract_numeric_from_output(run.output)`, disagreeing amounts anywhere → I_perp).
+  Reasoning-strip is now code/data ONLY. Policy instruction text also reverted.
+- **MAJOR 4**: replaced the tautological cache test with an EXACT pinned label-multiset
+  regression per model (mistral I_perp:12/I6:1/I7:5; deepseek I_perp:5/I4:1; o4-mini and
+  llama pinned too) — no blanket-accept; false recovery/loss changes a count and fails.
+- Diagnostic labeler (`bench/diagnostic`) updated to the same hardened helpers.
+

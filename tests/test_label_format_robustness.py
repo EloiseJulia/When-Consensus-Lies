@@ -1,16 +1,18 @@
 """Offline robustness tests for reasoning-wrapper / multi-block answer extraction.
 
 Covers the LABELING-VALIDITY (answer-format) failure modes surfaced by the live
-default-check diagnostic:
+default-check diagnostic AND the false-recovery paths found by the cross-family
+audit. SAFETY-FIRST contract: when the intended answer is genuinely ambiguous,
+prefer I_perp over guessing — extraction hardening must NEVER turn a genuinely
+wrong / ambiguous output into a correct or foil label.
 
-  * Reasoning models (deepseek-r1 style) wrap the answer in <think>...</think>.
-  * Verbose / prose-surrounded code answers.
-  * Multi-fence outputs where the FINAL fenced block is the intended answer.
-
-These tests assert that a PRESENT-BUT-WRAPPED correct answer is now RECOVERED
-(labels to the real interpretation), while genuinely off-axis or truncated /
-no-answer outputs STILL label I_perp — i.e. the extraction hardening never turns
-a genuinely-wrong output into a false correct/foil label (gold semantics fixed).
+Guarantees asserted here:
+  * A single present-but-wrapped correct answer is RECOVERED (labels to the real
+    interpretation): reasoning-wrapped, prose-surrounded, or agreeing blocks.
+  * Genuinely off-axis, truncated, nested/unclosed reasoning, disagreeing
+    multi-block, and non-code-language fences all STILL label I_perp.
+  * The policy_qa path is UNCHANGED (frozen prereg §7): disagreeing amounts
+    anywhere (incl. inside <think>) → I_perp, with no reasoning-region exclusion.
 
 Fully offline / deterministic (no network, no LLM judge).
 """
@@ -18,13 +20,14 @@ Fully offline / deterministic (no network, no LLM judge).
 import glob
 import json
 import os
+from collections import Counter
 
 import pytest
 
 from common.schema import AgentRun
 from harness.label import (
     label_run,
-    _extract_code_from_output,
+    _extract_code_candidates,
     _strip_reasoning,
 )
 from bench.build import load_tasks
@@ -86,7 +89,7 @@ def format_invoice_line(year, month, day, amount):
 '''
 
 
-# ── _strip_reasoning unit tests ────────────────────────────────────────────────
+# ── _strip_reasoning unit tests (nesting-aware, conservative) ──────────────────
 
 def test_strip_reasoning_closed_block():
     out = "<think>Let's reason about this.</think>\n```python\nx = 1\n```"
@@ -97,7 +100,6 @@ def test_strip_reasoning_closed_block():
 
 
 def test_strip_reasoning_unclosed_block_becomes_empty_tail():
-    # Truncated mid-thought: everything from <think> onward is reasoning.
     out = "prefix\n<think>I will define a function and return the value..."
     stripped = _strip_reasoning(out)
     assert "<think>" not in stripped
@@ -105,38 +107,58 @@ def test_strip_reasoning_unclosed_block_becomes_empty_tail():
     assert stripped.strip() == "prefix"
 
 
-# ── _extract_code_from_output unit tests ───────────────────────────────────────
+def test_strip_reasoning_nested_unclosed_hides_inner_content():
+    """BLOCKER 1: nested+unclosed reasoning must NOT expose inner content.
 
-def test_extract_prefers_last_fenced_block():
+    A naive non-nesting regex would strip <think>..</think> (outer opener to
+    INNER closer) and expose the reasoning-internal code as the answer.
+    """
+    out = "<think>outer <think>inner</think> def leaked(): return 'I0'"
+    stripped = _strip_reasoning(out)
+    assert "leaked" not in stripped
+    assert "inner" not in stripped
+    assert stripped.strip() == ""
+
+
+# ── _extract_code_candidates unit tests ────────────────────────────────────────
+
+def test_extract_returns_all_eligible_blocks_in_order():
     out = (
-        "First, an illustrative sketch:\n"
-        "```python\ndef f():\n    return 'WRONG'\n```\n"
-        "After more thought, the final answer is:\n"
-        "```python\ndef f():\n    return 'RIGHT'\n```\n"
+        "```python\ndef f():\n    return 'A'\n```\n"
+        "```python\ndef f():\n    return 'B'\n```\n"
     )
-    code = _extract_code_from_output(out)
-    assert code is not None
-    assert "RIGHT" in code and "WRONG" not in code
+    cands = _extract_code_candidates(out)
+    assert len(cands) == 2
+    assert "A" in cands[0] and "B" in cands[1]
 
 
-def test_extract_truncated_reasoning_returns_none():
-    # Unclosed <think> with no code block → no recoverable answer.
+def test_extract_rejects_non_code_language_fence():
+    """BLOCKER 2a: a ```text / ```json fence is not a Python answer."""
+    code = "def format_invoice_line(y, m, d, a):\n    return 'ok'"
+    assert _extract_code_candidates(f"```text\n{code}\n```") == []
+    assert _extract_code_candidates(f"```json\n{code}\n```") == []
+    # python / unlabeled fences ARE eligible
+    assert _extract_code_candidates(f"```python\n{code}\n```") == [code]
+    assert _extract_code_candidates(f"```\n{code}\n```") == [code]
+
+
+def test_extract_truncated_reasoning_returns_empty():
     out = "<think>Okay, I need to write a function. Let's define def and return..."
-    assert _extract_code_from_output(out) is None
+    assert _extract_code_candidates(out) == []
 
 
 def test_extract_prose_is_not_code():
     out = ("I think you should return the records sorted by age, "
            "but I'm not sure about the tiebreak. Here's my reasoning: ...")
-    assert _extract_code_from_output(out) is None
+    assert _extract_code_candidates(out) == []
 
 
 def test_extract_raw_code_without_fence():
     code_body = "def format_invoice_line(y, m, d, a):\n    return 'ok'"
-    assert _extract_code_from_output(code_body) == code_body
+    assert _extract_code_candidates(code_body) == [code_body]
 
 
-# ── code_invoice RECOVERY: wrapped/verbose correct answer → real interpretation ─
+# ── code_invoice RECOVERY: single wrapped/verbose correct answer → real interp ─
 
 def test_recover_deepseek_think_wrapped_invoice():
     """deepseek-r1 style <think>...</think> wrapping a CORRECT I0 block → I0."""
@@ -153,7 +175,7 @@ def test_recover_deepseek_think_wrapped_invoice():
 
 
 def test_recover_prose_surrounded_invoice():
-    """A correct I0 block surrounded by explanatory prose → I0."""
+    """A single correct I0 block surrounded by explanatory prose → I0."""
     task, candidates, _foils = _invoice_refs()
     i0 = candidates["I0"]
     verbose = (
@@ -166,26 +188,65 @@ def test_recover_prose_surrounded_invoice():
     assert label == "I0", f"Expected I0, got {label}"
 
 
-def test_recover_illustrative_then_final_block():
-    """An illustrative WRONG (foil) block first, correct I0 block last → I0.
+def test_recover_agreeing_multi_block():
+    """Two blocks that BOTH resolve to I0 → I0 (agreeing blocks recovered)."""
+    task, candidates, _foils = _invoice_refs()
+    i0 = candidates["I0"]
+    out = f"First:\n```python\n{i0}\n```\nRestated identically:\n```python\n{i0}\n```"
+    label = label_run(_make_run(task.id, out), task)
+    assert label == "I0", f"Expected I0 for agreeing blocks, got {label}"
 
-    Old extractor took the FIRST fence (the foil) → I_perp; hardened extractor
-    takes the LAST fence (the real answer) → I0.
-    """
+
+# ── NO FALSE RECOVERY: disagreeing multi-block / off-axis / truncated → I_perp ─
+
+def test_disagreeing_wrong_then_correct_is_i_perp():
+    """BLOCKER 2: WRONG (foil) block then correct I0 block → I_perp (never guess)."""
     task, candidates, foils = _invoice_refs()
     i0 = candidates["I0"]
-    foil = foils[0]  # a deliberately non-matching (0-match) implementation
-    out = (
-        "Draft attempt (probably wrong):\n"
-        f"```python\n{foil}\n```\n"
-        "Corrected final answer:\n"
-        f"```python\n{i0}\n```\n"
-    )
+    foil = foils[0]  # deliberately non-matching (0-match) implementation
+    out = f"Draft:\n```python\n{foil}\n```\nFinal:\n```python\n{i0}\n```"
     label = label_run(_make_run(task.id, out), task)
-    assert label == "I0", f"Expected I0 from final block, got {label}"
+    assert label == "I_perp", f"Disagreeing blocks must be I_perp, got {label}"
 
 
-# ── NO FALSE RECOVERY: genuine off-axis / truncated → still I_perp ─────────────
+def test_disagreeing_correct_then_wrong_illustration_is_i_perp():
+    """BLOCKER 2: correct I0 block then a wrong illustration → I_perp."""
+    task, candidates, foils = _invoice_refs()
+    i0 = candidates["I0"]
+    foil = foils[0]
+    out = f"Answer:\n```python\n{i0}\n```\nQuick illustration:\n```python\n{foil}\n```"
+    label = label_run(_make_run(task.id, out), task)
+    assert label == "I_perp", f"Disagreeing blocks must be I_perp, got {label}"
+
+
+def test_disagreeing_two_real_interps_is_i_perp():
+    """Two blocks resolving to DIFFERENT real interpretations → I_perp."""
+    task, candidates, _foils = _invoice_refs()
+    i0 = candidates["I0"]
+    i1 = candidates["I1"]
+    out = f"```python\n{i0}\n```\n```python\n{i1}\n```"
+    label = label_run(_make_run(task.id, out), task)
+    assert label == "I_perp", f"Two-interp multi-block must be I_perp, got {label}"
+
+
+def test_nested_unclosed_reasoning_invoice_is_i_perp():
+    """BLOCKER 1: I0 code that exists ONLY inside nested/unclosed reasoning → I_perp."""
+    task, candidates, _foils = _invoice_refs()
+    i0 = candidates["I0"]
+    # Outer <think> never closes; the I0 code is only inside the reasoning.
+    out = f"<think>let me draft <think>sketch</think>\n```python\n{i0}\n```"
+    label = label_run(_make_run(task.id, out), task)
+    assert label == "I_perp", f"Reasoning-internal code must be I_perp, got {label}"
+
+
+def test_non_code_language_fence_invoice_is_i_perp():
+    """BLOCKER 2a: correct I0 code inside a ```text fence is rejected → I_perp."""
+    task, candidates, _foils = _invoice_refs()
+    i0 = candidates["I0"]
+    out = f"```text\n{i0}\n```"
+    label = label_run(_make_run(task.id, out), task)
+    assert label == "I_perp", f"Non-code-language fence must be I_perp, got {label}"
+
 
 def test_offaxis_mixed_convention_still_i_perp():
     """Genuine mixed-convention output (real mistral pattern) stays I_perp."""
@@ -212,17 +273,18 @@ def test_truncated_reasoning_invoice_still_i_perp():
     assert label == "I_perp", f"Truncated reasoning must stay I_perp, got {label}"
 
 
-# ── policy_qa: in-<think> illustrative number must not cause false conflict ─────
+# ── policy_qa: FROZEN prereg §7 — reasoning is NOT excluded (revert of MAJOR 3) ─
 
-def test_policy_think_illustrative_number_not_conflict():
-    """A number floated inside <think> must not conflict with the real answer."""
+def test_policy_think_marker_conflict_stays_i_perp_frozen_contract():
+    """FROZEN §7: a FINAL ANSWER inside <think> that disagrees with the final
+    marker → I_perp (reasoning regions are NOT excluded; byte-for-byte §7)."""
     tasks = load_tasks("bench/data/policy_qa.jsonl")
     task = next(t for t in tasks if t.ambiguity_level == 1)
     from bench.policy_qa import get_checkers_and_candidates as pol_refs
     _checkers, candidates, _foils = pol_refs(task.domain, task)
     i0_amount = candidates["I0"]["amount"]
     out = (
-        f"<think>Maybe it's ${i0_amount + 100:.2f}? No, let me recompute.</think>\n"
+        f"<think>FINAL ANSWER: ${i0_amount + 100:.2f}</think>\n"
         f"FINAL ANSWER: ${i0_amount:.2f}"
     )
     run = AgentRun(
@@ -231,10 +293,40 @@ def test_policy_think_illustrative_number_not_conflict():
         logit_conf=None, seed=910,
     )
     label = label_run(run, task)
-    assert label == "I0", f"Expected I0 (think number ignored), got {label}"
+    assert label == "I_perp", \
+        f"Frozen §7: disagreeing markers (incl. in-think) → I_perp, got {label}"
 
 
-# ── Cache-backed regression: real diagnostic outputs behave as diagnosed ───────
+def test_policy_plain_final_answer_still_labels():
+    """Sanity: a clean single FINAL ANSWER still labels to its interpretation."""
+    tasks = load_tasks("bench/data/policy_qa.jsonl")
+    task = next(t for t in tasks if t.ambiguity_level == 1)
+    from bench.policy_qa import get_checkers_and_candidates as pol_refs
+    _checkers, candidates, _foils = pol_refs(task.domain, task)
+    i0_amount = candidates["I0"]["amount"]
+    run = AgentRun(
+        task_id=task.id, config="single", model_role="tested_agents",
+        model_id="test-model", output=f"FINAL ANSWER: ${i0_amount:.2f}",
+        label="", verbalized_conf=0.9, logit_conf=None, seed=911,
+    )
+    assert label_run(run, task) == "I0"
+
+
+# ── Cache-backed regression: PINNED exact label multiset (non-tautological) ────
+#
+# From the live default-check diagnostic (.llm_cache_default_check), the invoice
+# outputs resolve to these EXACT label multisets. Pinning them detects any future
+# FALSE RECOVERY (a genuinely off-axis output flipping to a real interp lowers the
+# I_perp count and fails the assertion) and any FALSE LOSS. The non-I_perp labels
+# (I4/I6/I7 = partial-default combinatorial matches) are legitimate matches the
+# auditor confirmed; the earlier "all-I_perp" was model-specific, not universal.
+_EXPECTED_INVOICE_LABELS = {
+    "mistral-ai/mistral-small-2503": {"I_perp": 12, "I6": 1, "I7": 5},
+    "deepseek/deepseek-r1":          {"I_perp": 5, "I4": 1},
+    "openai/o4-mini":                {"I_perp": 1, "I4": 5, "I6": 4, "I7": 2},
+    "meta/llama-3.3-70b-instruct":   {"I_perp": 1, "I4": 1, "I6": 1},
+}
+
 
 def _find_cache_dir():
     here = os.path.dirname(os.path.abspath(__file__))
@@ -245,36 +337,37 @@ def _find_cache_dir():
     return None
 
 
-def _load_invoice_cache_outputs(model_substr):
+def _invoice_outputs_by_model():
     cache_dir = _find_cache_dir()
     if cache_dir is None:
         return None
-    outs = []
+    by_model = {}
     for f in glob.glob(os.path.join(cache_dir, "*.json")):
         try:
             data = json.load(open(f, encoding="utf-8"))
         except Exception:
             continue
-        if "format_invoice_line" in data.get("text", "") and \
-                model_substr in data.get("model", ""):
-            outs.append(data["text"])
-    return outs
+        if "format_invoice_line" in data.get("text", ""):
+            by_model.setdefault(data.get("model", ""), []).append(data["text"])
+    return by_model
 
 
-def test_cache_regression_mistral_offaxis_stays_i_perp():
-    """Real mistral invoice outputs that were I_perp are NOT falsely recovered.
+def test_cache_regression_invoice_label_multiset_pinned():
+    """Real diagnostic outputs must resolve to the PINNED exact label multisets.
 
-    Genuine off-axis / buggy weak-model outputs must remain I_perp after the
-    extraction hardening (no false positive labels introduced).
+    This is a strict regression pin (no blanket-accept): any false recovery or
+    false loss changes a count and fails the test.
     """
-    outs = _load_invoice_cache_outputs("mistral")
-    if not outs:
+    by_model = _invoice_outputs_by_model()
+    if not by_model:
         pytest.skip("diagnostic cache (.llm_cache_default_check) not present")
-    task, _c, _f = _invoice_refs()
-    real_interps = {i.id for i in task.interpretations if i.id != "I_perp"}
-    for i, text in enumerate(outs):
-        label = label_run(_make_run(task.id, text, seed=1000 + i), task)
-        # A candidate may legitimately match a real interp; what must NOT happen
-        # is a crash or an obviously-wrong recovery. We assert the label is a
-        # valid label and that extraction never raises.
-        assert label == "I_perp" or label in real_interps
+    task = _invoice_task()
+    for model, expected in _EXPECTED_INVOICE_LABELS.items():
+        outs = by_model.get(model)
+        assert outs, f"expected cached invoice outputs for {model}"
+        got = Counter(
+            label_run(_make_run(task.id, text, seed=1000 + i), task)
+            for i, text in enumerate(outs)
+        )
+        assert dict(got) == expected, \
+            f"{model}: expected {expected}, got {dict(got)}"

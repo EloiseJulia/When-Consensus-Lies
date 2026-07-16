@@ -14,39 +14,58 @@ from typing import Dict, List, Optional
 from common.schema import AgentRun, Task
 
 
-# ── Reasoning-wrapper stripping ────────────────────────────────────────────────
+# ── Reasoning-wrapper stripping (nesting-aware) ────────────────────────────────
 # Reasoning models (e.g. deepseek-r1) emit their chain-of-thought inside
 # <think>...</think> (or <thinking>...</thinking>) BEFORE the final answer. The
 # reasoning text routinely contains words like 'def'/'return' and even
 # illustrative code/number snippets that must NOT be mistaken for the answer.
-_REASONING_CLOSED_RE = re.compile(
-    r'<think(?:ing)?>.*?</think(?:ing)?>', re.DOTALL | re.IGNORECASE
-)
-# A dangling, unclosed reasoning block = the model was truncated mid-thought and
-# never produced a final answer. Everything from the tag to EOF is reasoning.
-_REASONING_DANGLING_RE = re.compile(
-    r'<think(?:ing)?>.*\Z', re.DOTALL | re.IGNORECASE
-)
+#
+# SAFETY-FIRST (audit BLOCKER 1): a naive non-nesting regex can strip an OUTER
+# opener through an INNER </think>, exposing reasoning-internal content (incl. a
+# correct-looking answer) as if it were the real answer → FALSE recovery. We
+# therefore track reasoning depth and keep ONLY text that is unambiguously
+# OUTSIDE a properly-closed reasoning block. Nested / unclosed (truncated) /
+# unmatched wrappers are treated conservatively: their contents are discarded,
+# never exposed.
+_THINK_TAG_RE = re.compile(r'<(/?)think(?:ing)?>', re.IGNORECASE)
 
 
 def _strip_reasoning(output: str) -> str:
-    """Remove chain-of-thought wrappers so the FINAL answer is what we extract.
+    """Return only the text that lies OUTSIDE complete <think>...</think> blocks.
 
-    - Closed <think>...</think> blocks are removed entirely (the real answer is
-      emitted AFTER </think>).
-    - An UNCLOSED trailing <think> (truncated generation) removes everything from
-      the tag onward, so a truncated-mid-reasoning output becomes empty rather
-      than having its reasoning prose mis-executed as code.
+    Nesting-aware and conservative:
+      - Balanced (possibly nested) blocks: inner reasoning is removed; only
+        depth-0 text survives.
+      - Unclosed trailing reasoning (truncation): everything from the still-open
+        opener to EOF is discarded (no answer to recover there).
+      - Unmatched close tag at depth 0 (malformed): prior accumulated text is
+        discarded — we never expose content whose reasoning-status is ambiguous.
 
-    This is EXTRACTION normalization ONLY: it never fabricates or alters an
-    answer — it only discards reasoning text that precedes the real answer, so
-    it cannot change gold/label semantics for a well-formed answer.
+    EXTRACTION normalization ONLY: it never fabricates or alters an answer, it
+    only discards reasoning text, so it cannot change gold/label semantics for a
+    well-formed answer emitted outside the reasoning wrapper.
     """
     if not output:
         return output
-    cleaned = _REASONING_CLOSED_RE.sub('', output)
-    cleaned = _REASONING_DANGLING_RE.sub('', cleaned)
-    return cleaned
+    kept: List[str] = []
+    depth = 0
+    last = 0
+    for m in _THINK_TAG_RE.finditer(output):
+        if depth == 0:
+            kept.append(output[last:m.start()])
+        last = m.end()
+        if m.group(1) == '/':  # closing tag
+            if depth > 0:
+                depth -= 1
+            else:
+                # Unmatched close at depth 0 → malformed; drop ambiguous prefix.
+                kept = []
+        else:  # opening tag
+            depth += 1
+    if depth == 0:
+        kept.append(output[last:])
+    # depth > 0 → unclosed reasoning at EOF; trailing text is reasoning, dropped.
+    return ''.join(kept)
 
 
 def _stable_index(text: str, modulo: int) -> int:
@@ -83,57 +102,101 @@ def _looks_like_python(code: str) -> bool:
     return True
 
 
-# Matches a fenced code block: ```python / ```py / ``` then body up to closing ```.
-# The language tag and any trailing info-string on the opening line are optional.
+# Matches a fenced code block, capturing the info-string (language) and body.
+# Group 1 = language / info string on the opening line (may be empty).
+# Group 2 = block body up to the closing ```.
 _CODE_FENCE_RE = re.compile(
-    r'```(?:python|py)?[^\n]*\r?\n(.*?)```',
-    re.DOTALL | re.IGNORECASE,
+    r'```([^\n`]*)\r?\n(.*?)```',
+    re.DOTALL,
 )
 
+# Only python / unlabeled fences are eligible code candidates (audit BLOCKER 2a).
+# A `text`/`json`/other-language fence is NOT a Python answer and must be rejected
+# so it can never be executed as code / extracted as the answer.
+_CODE_LANGS = {'', 'python', 'py', 'python3'}
 
-def _extract_code_from_output(output: str) -> Optional[str]:
-    """Extract Python code from agent output (code fence or raw code).
 
-    Robust to reasoning-model wrappers and multi-block outputs:
-    1. Strip <think>...</think> reasoning first (a truncated/unclosed think with
-       no final answer therefore yields no code — correctly None, instead of the
-       old behaviour that returned the whole reasoning prose as "code").
-    2. Prefer the LAST fenced ```python``` block. run.py's answer_format
-       instruction asks for a SINGLE ```python block; when a (reasoning) model
-       nonetheless emits several, the final block is the intended answer, not an
-       earlier illustrative snippet.
-    3. If no fence, accept the raw body ONLY if it actually parses as Python and
-       contains a code construct — this recovers fence-less code answers while
-       refusing to treat reasoning/explanatory prose as code.
+def _extract_code_candidates(output: str) -> List[str]:
+    """Return the list of eligible Python code-answer candidates from *output*.
 
-    Returns the extracted code, or None if no plausible code answer is present.
-    NOTE: this hardens EXTRACTION only; the gold checkers and exact-match
-    semantics that decide correctness are unchanged. A block that is extracted
-    but wrong/garbage still fails its checker and labels I_perp.
+    SAFETY-FIRST (audit BLOCKER 2): does NOT resolve multi-block outputs by
+    position. It returns every eligible candidate block, IN ORDER, and leaves
+    disambiguation to the caller (which runs each through the gold checkers and
+    sends genuinely-ambiguous, disagreeing multi-block outputs to I_perp).
+
+    Eligibility rules:
+      1. Reasoning wrappers are stripped first (nesting-aware, conservative).
+      2. Only ```python / ```py / unlabeled ``` fences are eligible; fences
+         tagged with another language (text, json, ...) are rejected.
+      3. If there is NO eligible fence, the raw body is a single candidate ONLY
+         if it genuinely parses as Python and contains a code construct — this
+         recovers fence-less code answers while refusing to treat prose as code.
+
+    Returns [] when no plausible code answer is present.
+    NOTE: extraction only — the gold checkers decide correctness. An extracted
+    block that is wrong/garbage still fails its checker → I_perp.
     """
     if not output:
-        return None
+        return []
 
     cleaned = _strip_reasoning(output)
 
-    # 1) Prefer the LAST non-empty fenced code block.
-    fences = [m.strip() for m in _CODE_FENCE_RE.findall(cleaned)]
-    fences = [f for f in fences if f]
-    if fences:
-        return fences[-1]
+    candidates: List[str] = []
+    for lang, body in _CODE_FENCE_RE.findall(cleaned):
+        if lang.strip().lower() in _CODE_LANGS:
+            body = body.strip()
+            if body:
+                candidates.append(body)
+    if candidates:
+        return candidates
 
-    # 2) No fence: accept raw code only if it genuinely parses as Python and
-    #    looks like code (not reasoning prose).
+    # No eligible fence: accept raw code only if it genuinely parses as Python
+    # and looks like code (not reasoning/explanatory prose).
     body = cleaned.strip()
-    if not body:
-        return None
-    if _looks_like_python(body) and re.search(
+    if body and _looks_like_python(body) and re.search(
         r'\b(?:def|class|return|import|from|lambda)\b|=', body
     ):
-        return body
+        return [body]
 
-    # Likely prose or explanation, not code.
-    return None
+    return []
+
+
+def _resolve_code_block(candidate_code: str, task: Task, checkers: dict) -> str:
+    """Resolve ONE code block to its interpretation label (or I_perp).
+
+    Runs the block through every interpretation's gold checker; returns the
+    interpretation whose checker UNIQUELY passes, else I_perp (none or multiple).
+    """
+    passed = []
+    for interp in task.interpretations:
+        if interp.id == "I_perp":
+            continue
+        checker = checkers.get(interp.id)
+        if checker is None:
+            continue
+        if checker.check(candidate_code).passed:
+            passed.append(interp.id)
+    return passed[0] if len(passed) == 1 else "I_perp"
+
+
+def _label_code_candidates(candidates: List[str], task: Task, checkers: dict) -> str:
+    """SAFETY-FIRST multi-block resolution (audit BLOCKER 2b) — never guess.
+
+    - No candidate            → I_perp.
+    - Exactly one candidate   → its resolved label.
+    - Multiple candidates:
+        * all resolve to the SAME label → that label (agreeing blocks recovered).
+        * they resolve to DIFFERENT labels → I_perp (genuinely ambiguous —
+          e.g. a correct block + a divergent illustration; we prefer I_perp over
+          positional guessing, so no false recovery and no positional false loss
+          bias either).
+    """
+    if not candidates:
+        return "I_perp"
+    labels = [_resolve_code_block(c, task, checkers) for c in candidates]
+    if len(candidates) == 1:
+        return labels[0]
+    return labels[0] if len(set(labels)) == 1 else "I_perp"
 
 
 # ── Sentinel ──────────────────────────────────────────────────────────────────
@@ -364,9 +427,9 @@ def label_code_domain(run: AgentRun, task: Task) -> str:
     """
     from bench.code_spec import get_checkers_and_candidates
     
-    # Extract code from output
-    candidate_code = _extract_code_from_output(run.output)
-    if candidate_code is None:
+    # Extract eligible code candidate block(s) from output.
+    candidates = _extract_code_candidates(run.output)
+    if not candidates:
         # No code found, label as I_perp
         return "I_perp"
     
@@ -380,29 +443,9 @@ def label_code_domain(run: AgentRun, task: Task) -> str:
             f"label: gold checkers unavailable for code_spec task {task.id}: {e}"
         ) from e
     
-    # Run candidate through each checker
-    passed_interps = []
-    for interp in task.interpretations:
-        if interp.id == "I_perp":
-            continue  # Skip I_perp (it's the default)
-        
-        checker = checkers.get(interp.id)
-        if checker is None:
-            continue
-        
-        result = checker.check(candidate_code)
-        if result.passed:
-            passed_interps.append(interp.id)
-    
-    # Unique match?
-    if len(passed_interps) == 1:
-        return passed_interps[0]
-    elif len(passed_interps) == 0:
-        return "I_perp"
-    else:
-        # Multiple matches (should not happen with 100% distinguishability)
-        # Return I_perp to be conservative
-        return "I_perp"
+    # SAFETY-FIRST multi-block resolution: agreeing blocks recover, disagreeing
+    # (genuinely ambiguous) multi-block outputs → I_perp (never positional guess).
+    return _label_code_candidates(candidates, task, checkers)
 
 
 def label_data_domain(run: AgentRun, task: Task) -> str:
@@ -418,9 +461,9 @@ def label_data_domain(run: AgentRun, task: Task) -> str:
     """
     from bench.data_analysis import get_checkers_and_candidates
     
-    # Extract code from output
-    candidate_code = _extract_code_from_output(run.output)
-    if candidate_code is None:
+    # Extract eligible code candidate block(s) from output.
+    candidates = _extract_code_candidates(run.output)
+    if not candidates:
         # No code found, label as I_perp
         return "I_perp"
     
@@ -434,29 +477,8 @@ def label_data_domain(run: AgentRun, task: Task) -> str:
             f"label: gold checkers unavailable for data_analysis task {task.id}: {e}"
         ) from e
     
-    # Run candidate through each checker
-    passed_interps = []
-    for interp in task.interpretations:
-        if interp.id == "I_perp":
-            continue  # Skip I_perp (it's the default)
-        
-        checker = checkers.get(interp.id)
-        if checker is None:
-            continue
-        
-        result = checker.check(candidate_code)
-        if result.passed:
-            passed_interps.append(interp.id)
-    
-    # Unique match?
-    if len(passed_interps) == 1:
-        return passed_interps[0]
-    elif len(passed_interps) == 0:
-        return "I_perp"
-    else:
-        # Multiple matches (should not happen with 100% distinguishability)
-        # Return I_perp to be conservative
-        return "I_perp"
+    # SAFETY-FIRST multi-block resolution (same policy as code_spec).
+    return _label_code_candidates(candidates, task, checkers)
 
 
 def label_policy_domain(run: AgentRun, task: Task) -> str:
@@ -473,12 +495,13 @@ def label_policy_domain(run: AgentRun, task: Task) -> str:
     """
     from bench.policy_qa import get_checkers_and_candidates
     
-    # Extract numeric answer from output. Strip reasoning wrappers first so an
-    # illustrative number inside a <think> block cannot spuriously conflict with
-    # (and thereby suppress) the real FINAL ANSWER / JSON emitted after </think>.
-    # This is pre-processing ONLY: the structured-answer grammar in
-    # _extract_numeric_from_output (the pre-registered contract) is unchanged.
-    amount = _extract_numeric_from_output(_strip_reasoning(run.output))
+    # Extract numeric answer from output.
+    # FROZEN CONTRACT (prereg §7): the structured-answer grammar and its conflict
+    # semantics operate on the RAW output with NO <think>-region exclusion. Do NOT
+    # preprocess/strip reasoning here — disagreeing amounts ANYWHERE → I_perp,
+    # byte-for-byte as pre-registered. (Reasoning-wrapper handling for policy_qa
+    # would be a contract change requiring a pre-registration amendment.)
+    amount = _extract_numeric_from_output(run.output)
     if amount is None:
         # No clear numeric answer found
         return "I_perp"

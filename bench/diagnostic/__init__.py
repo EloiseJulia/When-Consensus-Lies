@@ -48,8 +48,8 @@ from bench.gold.base import GoldChecker
 from common.schema import Task
 
 # Reuse the frozen executable-signal extractor so diagnostic labeling mirrors the
-# real domain labelers exactly (code fence / raw code extraction).
-from harness.label import _extract_code_from_output
+# real domain labelers exactly (reasoning-strip + multi-block SAFETY-FIRST rules).
+from harness.label import _extract_code_candidates, _label_code_candidates
 
 
 # Diagnostic task ids all carry this prefix so a driver can route labeling here
@@ -546,23 +546,12 @@ def is_diagnostic_task(task: Task) -> bool:
 def label_diagnostic(run: Any, task: Task) -> str:
     """Executable-gold label for a diagnostic task (NEVER an LLM judge).
 
-    Mirrors harness.label.label_code_domain / label_data_domain: extract the candidate
-    code from run.output, run it through EACH interpretation's gold checker, and return
-    the interpretation id whose checker UNIQUELY passes, else "I_perp".
+    Mirrors harness.label.label_code_domain / label_data_domain: extract the eligible
+    candidate code block(s) from run.output and resolve them with the SAFETY-FIRST
+    multi-block policy (agreeing blocks recover; disagreeing/ambiguous → I_perp).
     """
-    candidate_code = _extract_code_from_output(run.output)
-    if candidate_code is None:
+    candidates = _extract_code_candidates(run.output)
+    if not candidates:
         return "I_perp"
     checkers, _, _ = get_checkers_and_candidates(task)
-    passed = []
-    for interp in task.interpretations:
-        if interp.id == "I_perp":
-            continue
-        checker = checkers.get(interp.id)
-        if checker is None:
-            continue
-        if checker.check(candidate_code).passed:
-            passed.append(interp.id)
-    if len(passed) == 1:
-        return passed[0]
-    return "I_perp"
+    return _label_code_candidates(candidates, task, checkers)
