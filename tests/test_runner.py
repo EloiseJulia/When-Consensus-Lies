@@ -2,23 +2,36 @@
 
 # Implementer model family: Claude/Anthropic
 
-ALL tests run FULLY OFFLINE — zero network calls, zero token use.
+ALL tests run FULLY OFFLINE — zero network calls, zero token use. The mocked-429
+day-cap tests monkeypatch ``urllib.request.urlopen`` so no socket is ever opened.
 
-Coverage (per phase3-runner-plan.md requirements):
-  (a) Grid enumeration == AgentRun identity cross-product
+Coverage (per phase3-runner-plan.md requirements + cross-family audit fixes):
+  (a) Grid enumeration == AgentRun identity cross-product (task × config × MODEL × seed)
   (b) Resume skips completed jobs (run→kill→rerun → no dup work, no extra calls)
   (c) RPM limiter paces calls per model
   (d) Simulated day-cap 429 stops that model cleanly + leaves resumable checkpoint
   (e) Crash-mid-run loses ≤1 job
   Plus: budget stop, infra retry discipline, dry-run, I_perp rate diagnostic,
         CheckpointStore unit tests, DayCapped exception properties.
+
+Audit-fix regression tests (real integration paths — would FAIL on the pre-fix code):
+  * TestFiveDimResume     — BLOCKER 1: 5-dim job key (task,config,role,model,seed)
+  * TestMocked429DayCap   — real HTTP 429 UserByModelByDay header drives DayCapped;
+                            asserts token/secret NOT leaked in the exception chain
+  * TestAggregateBudget   — BLOCKER 2: cumulative ledger stops the run across jobs
+                            AND continues (no double-count) across a resume
+  * TestAdditiveThrottle  — MAJOR 3: per-job client inherits the internal limiter
+                            AND the runner's per-model window still applies
 """
 
 from __future__ import annotations
 
 import collections
+import io
 import json
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -36,6 +49,12 @@ from harness.runner import (
     job_key,
     run_identity,
 )
+
+
+# Default model identity carried by the single-model grid (matches config.yaml
+# homogeneous tested-agents baseline and make_run's defaults).
+ROLE = "tested_agents"
+MODEL = "openai/gpt-4o-mini"
 
 
 # ── Test fixtures / helpers ──────────────────────────────────────────────────
@@ -61,8 +80,8 @@ def make_task(task_id: str = "t1", domain: str = "policy_qa") -> Task:
 def make_run(
     task_id: str = "t1",
     config: str = "single",
-    role: str = "tested_agents",
-    model: str = "openai/gpt-4o-mini",
+    role: str = ROLE,
+    model: str = MODEL,
     seed: int = 1,
     label: str = "I0",
 ) -> AgentRun:
@@ -86,12 +105,16 @@ def _make_runner(
     *,
     configs: Optional[List[str]] = None,
     seeds: Optional[List[int]] = None,
+    models: Optional[List[Tuple[str, str]]] = None,
     checkpoint_path: Optional[Path] = None,
     rpm: int = 0,  # 0 = unlimited (no sleep in tests)
     run_task_fn: Optional[Callable] = None,
     label_run_fn: Optional[Callable] = None,
+    client_factory: Optional[Callable] = None,
     max_budget_usd: Optional[float] = None,
     max_infra_retries: int = 3,
+    base_offline: bool = True,
+    base_max_rpm: Optional[int] = None,
 ) -> Tuple[Runner, Path]:
     """Build a Runner with offline LLMClient and fake run_task / label_run."""
     from common.config import load_config
@@ -104,13 +127,15 @@ def _make_runner(
     client = LLMClient(
         cfg_dict,
         cache_dir=str(tmp_path / "cache"),
-        offline=True,
+        offline=base_offline,
+        max_requests_per_min=base_max_rpm,
     )
 
     runner_cfg = RunnerConfig(
         tasks=tasks,
         configs=configs if configs is not None else ["single"],
         seeds=seeds if seeds is not None else [42],
+        models=models,
         checkpoint_path=checkpoint_path,
         rpm=rpm,
         max_budget_usd=max_budget_usd,
@@ -129,6 +154,7 @@ def _make_runner(
         client,
         run_task_fn=run_task_fn if run_task_fn is not None else _default_run,
         label_run_fn=label_run_fn if label_run_fn is not None else _default_label,
+        client_factory=client_factory,
     )
     return runner, checkpoint_path
 
@@ -147,7 +173,8 @@ class TestGridEnumeration:
             configs=["single", "sc"],
             seeds=[1, 2, 3],
         )
-        assert len(runner.enumerate_grid()) == 3 * 2 * 3  # 18
+        # 3 tasks × 2 configs × 1 model × 3 seeds
+        assert len(runner.enumerate_grid()) == 3 * 2 * 1 * 3  # 18
 
     def test_grid_is_exact_cross_product(self, tmp_path):
         tasks = [make_task("t1"), make_task("t2")]
@@ -155,12 +182,28 @@ class TestGridEnumeration:
         seeds = [10, 20]
         runner, _ = _make_runner(tasks, tmp_path, configs=configs, seeds=seeds)
         expected = {
-            (tid, cfg, s)
+            (tid, cfg, ROLE, MODEL, s)
             for tid in ["t1", "t2"]
             for cfg in configs
             for s in seeds
         }
         assert set(runner.enumerate_grid()) == expected
+
+    def test_grid_includes_model_dimension(self, tmp_path):
+        """The grid cross-product includes the (model_role, model_id) dimension."""
+        models = [
+            ("tested_agents", "openai/gpt-4o-mini"),
+            ("tested_agents", "meta/llama-3.3-70b-instruct"),
+        ]
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["single"], seeds=[1], models=models,
+        )
+        grid = runner.enumerate_grid()
+        assert len(grid) == 2  # 1 task × 1 config × 2 models × 1 seed
+        assert {mid for _, _, _, mid, _ in grid} == {
+            "openai/gpt-4o-mini", "meta/llama-3.3-70b-instruct"
+        }
 
     def test_grid_covers_all_standard_configs(self, tmp_path):
         runner, _ = _make_runner(
@@ -169,7 +212,7 @@ class TestGridEnumeration:
         )
         grid = runner.enumerate_grid()
         assert len(grid) == len(ALL_CONFIGS)
-        assert {cfg for _, cfg, _ in grid} == set(ALL_CONFIGS)
+        assert {cfg for _, cfg, _, _, _ in grid} == set(ALL_CONFIGS)
 
     def test_pending_jobs_initially_full_grid(self, tmp_path):
         tasks = [make_task("t1"), make_task("t2")]
@@ -180,7 +223,7 @@ class TestGridEnumeration:
         runner, _ = _make_runner([make_task("t1")], tmp_path)
         grid = runner.enumerate_grid()
         assert len(grid) == 1
-        assert grid[0] == ("t1", "single", 42)
+        assert grid[0] == ("t1", "single", ROLE, MODEL, 42)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,7 +271,7 @@ class TestResumeIdempotency:
         store = CheckpointStore(cp)
         r = make_run("t1", "single", seed=42, label="I0")
         store.add_run(r)
-        store.mark_job_done("t1", "single", 42)
+        store.mark_job_done("t1", "single", ROLE, MODEL, 42)
 
         tasks = [make_task("t1"), make_task("t2"), make_task("t3")]
         runner, _ = _make_runner(
@@ -248,7 +291,7 @@ class TestResumeIdempotency:
         store = CheckpointStore(cp)
         r = make_run("t1", "single", seed=42, label="I0")
         store.add_run(r)
-        store.mark_job_done("t1", "single", 42)
+        store.mark_job_done("t1", "single", ROLE, MODEL, 42)
 
         call_count = [0]
 
@@ -274,6 +317,90 @@ class TestResumeIdempotency:
         # Reload checkpoint
         runner2, _ = _make_runner(tasks, tmp_path, checkpoint_path=cp)
         assert len(runner2.pending_jobs()) == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BLOCKER 1 regression — five-dimensional resume across models
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestFiveDimResume:
+    """BLOCKER 1: the job completion key must carry the FULL AgentRun identity
+    (task × config × model_role × model_id × seed).  Completing one model's job
+    must NOT silently skip a DIFFERENT model's job for the same (task,config,seed).
+
+    On the pre-fix code (job_key omitted model identity) the second model would be
+    wrongly reported as already-done and skipped — this test would FAIL there.
+    """
+
+    _MODELS = [
+        ("tested_agents", "openai/gpt-4o-mini"),
+        ("tested_agents", "meta/llama-3.3-70b-instruct"),
+    ]
+
+    def _recording_run(self, seen: List[str]):
+        def rec_run(task, config, client, **kwargs):
+            # The per-job config binds the grid model into the homogeneous slot.
+            mid = client.config["roles"]["tested_agents"]["homogeneous"][0]["model"]
+            seen.append(mid)
+            return [make_run(task.id, config, model=mid,
+                             seed=client.config["seeds"]["global"])]
+        return rec_run
+
+    def test_job_keys_differ_by_model(self):
+        k1 = job_key("t1", "single", "tested_agents", "openai/gpt-4o-mini", 42)
+        k2 = job_key("t1", "single", "tested_agents", "meta/llama-3.3-70b-instruct", 42)
+        assert k1 != k2, "Job keys must differ when the model differs (BLOCKER 1)"
+
+    def test_job_keys_differ_by_role(self):
+        k1 = job_key("t1", "single", "tested_agents", "openai/gpt-4o-mini", 42)
+        k2 = job_key("t1", "single", "judge", "openai/gpt-4o-mini", 42)
+        assert k1 != k2, "Job keys must differ when the role differs (BLOCKER 1)"
+
+    def test_resume_still_runs_other_model(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        seen: List[str] = []
+
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], models=self._MODELS,
+            run_task_fn=self._recording_run(seen),
+        )
+        # Grid spans BOTH models for the same (task, config, seed).
+        assert len(runner.enumerate_grid()) == 2
+
+        # Pre-complete ONLY the first model's job (simulate a partial run).
+        store = CheckpointStore(cp)
+        store.mark_job_done("t1", "single", "tested_agents", "openai/gpt-4o-mini", 42)
+
+        # Resume with a fresh runner loading the same checkpoint.
+        seen.clear()
+        runner2, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], models=self._MODELS,
+            run_task_fn=self._recording_run(seen),
+        )
+        result = runner2.run()
+
+        # The OTHER model MUST still run — no silent skip.
+        assert "meta/llama-3.3-70b-instruct" in seen
+        assert "openai/gpt-4o-mini" not in seen, "already-done model must be skipped"
+        assert result["completed"] == 1
+        assert result["skipped"] == 1
+
+    def test_both_models_produce_distinct_runs(self, tmp_path):
+        """A full run over 2 models yields 2 distinct AgentRun identities."""
+        cp = tmp_path / "cp.jsonl"
+        seen: List[str] = []
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], models=self._MODELS,
+            run_task_fn=self._recording_run(seen),
+        )
+        result = runner.run()
+        assert result["completed"] == 2
+        store = CheckpointStore(cp)
+        model_ids = {rec["model_id"] for rec in store.all_runs()}
+        assert model_ids == {"openai/gpt-4o-mini", "meta/llama-3.3-70b-instruct"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -363,6 +490,59 @@ class TestRpmThrottler:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# MAJOR 3 regression — additive throttling (internal limiter + runner window)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAdditiveThrottle:
+    """MAJOR 3: per-job clients MUST inherit the base ``max_requests_per_min`` so
+    the internal per-attempt limiter stays active on every HTTP retry, AND the
+    runner's per-model sliding-window throttle is layered ON TOP (additive).
+
+    On the pre-fix code the per-job client dropped ``max_requests_per_min`` (→ None),
+    disabling the internal limiter — this test would FAIL there.
+    """
+
+    def test_per_job_client_inherits_internal_limiter(self, tmp_path):
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["single"], seeds=[42], rpm=5, base_max_rpm=7,
+        )
+        # Runner-level per-model sliding window is present …
+        assert runner._throttler._rpm == 5, "runner window must still apply"
+        # … AND the per-job client inherits the base internal limiter (not None).
+        from common.config import load_config
+        job_client = runner._client_factory(load_config(), None)
+        assert job_client.max_requests_per_min is not None, (
+            "per-job client must keep the internal per-attempt limiter (MAJOR 3)"
+        )
+        assert job_client.max_requests_per_min == 7
+
+    def test_throttled_client_layers_runner_window_on_top(self, tmp_path):
+        """The wrapper still calls the runner throttle even when the underlying
+        client also has its own internal limiter (additive, not either/or)."""
+        from common.config import load_config
+        from common.llm import LLMClient
+
+        acquired: List[str] = []
+
+        class _SpyThrottler(RpmThrottler):
+            def acquire(self, model_slug: str) -> None:
+                acquired.append(model_slug)
+                super().acquire(model_slug)
+
+        client = LLMClient(
+            load_config(), cache_dir=str(tmp_path / "cache"),
+            offline=True, max_requests_per_min=9,
+        )
+        spy = _SpyThrottler(rpm=0)
+        wrapped = _ThrottledClient(client, spy, set())
+        wrapped.complete(role="tested_agents", prompt="x", seed=1)
+
+        assert acquired, "runner throttle must be invoked (layered on top)"
+        assert client.max_requests_per_min == 9, "internal limiter remains active"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # (d) Day-cap stops model cleanly and leaves resumable checkpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -374,7 +554,6 @@ class TestDayCap:
         tasks = [make_task("t1"), make_task("t2"), make_task("t3")]
         cp = tmp_path / "cp.jsonl"
 
-        MODEL = "openai/gpt-4o-mini"
         capped = {"hit": False}
 
         def fake_run(task, config, client, **kwargs):
@@ -392,9 +571,9 @@ class TestDayCap:
         assert MODEL in result["day_capped_models"]
 
         store = CheckpointStore(cp)
-        assert store.job_done("t1", "single", 42), "t1 must be checkpointed"
-        assert not store.job_done("t2", "single", 42), "t2 must NOT be checkpointed"
-        assert not store.job_done("t3", "single", 42), "t3 must NOT be checkpointed"
+        assert store.job_done("t1", "single", ROLE, MODEL, 42), "t1 must be checkpointed"
+        assert not store.job_done("t2", "single", ROLE, MODEL, 42), "t2 must NOT be checkpointed"
+        assert not store.job_done("t3", "single", ROLE, MODEL, 42), "t3 must NOT be checkpointed"
 
     def test_day_cap_resume_retries_pending_jobs(self, tmp_path):
         """After day-cap, pending jobs can be successfully retried on next run."""
@@ -408,7 +587,7 @@ class TestDayCap:
             calls[task.id] += 1
             if first_run[0] and task.id == "t1":
                 first_run[0] = False
-                raise DayCapped("openai/gpt-4o-mini")
+                raise DayCapped(MODEL)
             return [make_run(task.id, config, seed=client.config["seeds"]["global"])]
 
         runner1, _ = _make_runner(
@@ -416,7 +595,7 @@ class TestDayCap:
         )
         result1 = runner1.run()
         assert result1["status"] == "resumable"
-        assert not CheckpointStore(cp).job_done("t1", "single", 42)
+        assert not CheckpointStore(cp).job_done("t1", "single", ROLE, MODEL, 42)
 
         # t2 may have succeeded in the first run (if it ran before the cap flag reset)
         # regardless, on resume the pending job(s) should be reattempted
@@ -430,7 +609,7 @@ class TestDayCap:
         )
         result2 = runner2.run()
         assert result2["status"] == "done"
-        assert CheckpointStore(cp).job_done("t1", "single", 42)
+        assert CheckpointStore(cp).job_done("t1", "single", ROLE, MODEL, 42)
 
     def test_day_cap_not_retried(self, tmp_path):
         """DayCapped is a permanent error — must not be retried by _run_job_with_retry."""
@@ -439,7 +618,7 @@ class TestDayCap:
 
         def always_cap(task, config, client, **kwargs):
             call_count[0] += 1
-            raise DayCapped("openai/gpt-4o-mini")
+            raise DayCapped(MODEL)
 
         runner, _ = _make_runner(
             tasks, tmp_path, run_task_fn=always_cap, max_infra_retries=5
@@ -450,9 +629,9 @@ class TestDayCap:
         assert result["status"] == "resumable"
 
     def test_day_capped_exception_has_model_slug_attribute(self):
-        exc = DayCapped("openai/gpt-4o-mini")
-        assert exc.model_slug == "openai/gpt-4o-mini"
-        assert "openai/gpt-4o-mini" in str(exc)
+        exc = DayCapped(MODEL)
+        assert exc.model_slug == MODEL
+        assert MODEL in str(exc)
         assert "24h" in str(exc)
 
     def test_throttled_client_raises_day_capped_for_known_capped_model(self, tmp_path):
@@ -462,18 +641,147 @@ class TestDayCap:
 
         cfg = load_config()
         client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
-        day_capped: Set[str] = {"openai/gpt-4o-mini"}
+        day_capped: Set[str] = {MODEL}
         throttler = RpmThrottler(rpm=0)
         wrapped = _ThrottledClient(client, throttler, day_capped)
 
         with pytest.raises(DayCapped) as exc_info:
             wrapped.complete(role="tested_agents", prompt="test", seed=1)
-        assert exc_info.value.model_slug == "openai/gpt-4o-mini"
+        assert exc_info.value.model_slug == MODEL
 
     def test_day_capped_importable_from_common_llm(self):
         """DayCapped must be publicly importable from common.llm."""
         from common.llm import DayCapped as DC  # noqa: F401
         assert DC is DayCapped
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mocked HTTP 429 day-cap — REAL online path, token-safety invariant
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMocked429DayCap:
+    """Drives the day-cap through the REAL ``_generate_online`` HTTP path via a
+    mocked 429 response carrying ``x-ratelimit-type=UserByModelByDay`` (NOT by
+    directly raising DayCapped).  Asserts clean stop + resumable checkpoint +
+    NO token/secret leakage in the exception chain (__context__ / __cause__ None).
+
+    No socket is opened — ``urllib.request.urlopen`` is monkeypatched.
+    """
+
+    SECRET = "SECRET_TOKEN_DO_NOT_LEAK_deadbeef"
+
+    def _http_429(self, headers: Dict[str, str]) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(
+            url="https://models.github.ai/inference/chat/completions",
+            code=429,
+            msg="Too Many Requests",
+            hdrs=headers,  # supports .get("x-ratelimit-type")
+            fp=io.BytesIO(b'{"error":"rate limited"}'),
+        )
+
+    def test_daycap_from_mocked_429_no_token_leak(self, tmp_path, monkeypatch):
+        from common.config import load_config
+        from common.llm import LLMClient
+
+        monkeypatch.setenv("GITHUB_MODELS_TOKEN", self.SECRET)
+        monkeypatch.delenv("GH_MODELS_TOKEN", raising=False)
+
+        client = LLMClient(
+            load_config(), cache_dir=str(tmp_path / "cache"), offline=False
+        )
+
+        def fake_urlopen(req, timeout=None):
+            raise self._http_429({"x-ratelimit-type": "UserByModelByDay"})
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        with pytest.raises(DayCapped) as ei:
+            client.complete(role="tested_agents", prompt="hello", seed=1)
+
+        exc = ei.value
+        # Token-safety invariant: DayCapped is raised OUTSIDE any except scope, so
+        # the HTTPError (which can carry auth material) is NOT chained in.
+        assert exc.__context__ is None, "__context__ must be None (no leak chain)"
+        assert exc.__cause__ is None, "__cause__ must be None (no leak chain)"
+        # The secret must not appear anywhere in the exception text.
+        assert self.SECRET not in str(exc)
+        assert self.SECRET not in repr(exc)
+        assert exc.model_slug == MODEL
+
+    def test_regular_429_without_daycap_header_is_retried_then_fails(self, tmp_path, monkeypatch):
+        """A 429 WITHOUT the day-cap header is a transient error (retried), not a
+        permanent DayCapped — distinguishes the two 429 flavors."""
+        from common.config import load_config
+        from common.llm import LLMClient
+
+        monkeypatch.setenv("GITHUB_MODELS_TOKEN", self.SECRET)
+        monkeypatch.delenv("GH_MODELS_TOKEN", raising=False)
+        monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)  # no real backoff
+
+        client = LLMClient(
+            load_config(), cache_dir=str(tmp_path / "cache"), offline=False
+        )
+
+        calls = [0]
+
+        def fake_urlopen(req, timeout=None):
+            calls[0] += 1
+            raise self._http_429({"x-ratelimit-type": "UserByRequest"})  # NOT day cap
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        with pytest.raises(Exception) as ei:
+            client.complete(role="tested_agents", prompt="hello", seed=1)
+        # Must NOT be a DayCapped (regular 429 is transient/retriable).
+        assert not isinstance(ei.value, DayCapped)
+        assert calls[0] > 1, "regular 429 must be retried, not stopped immediately"
+        assert self.SECRET not in str(ei.value)
+
+    def test_runner_daycap_via_mocked_429_is_resumable(self, tmp_path, monkeypatch, capsys):
+        """End-to-end: the runner drives real online clients whose urlopen returns a
+        day-cap 429 → clean resumable checkpoint, and the secret never appears in
+        any runner output."""
+        from common.config import load_config
+        from common.llm import LLMClient
+
+        monkeypatch.setenv("GITHUB_MODELS_TOKEN", self.SECRET)
+        monkeypatch.delenv("GH_MODELS_TOKEN", raising=False)
+
+        def fake_urlopen(req, timeout=None):
+            raise self._http_429({"x-ratelimit-type": "UserByModelByDay"})
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        cp = tmp_path / "cp.jsonl"
+        base = LLMClient(
+            load_config(), cache_dir=str(tmp_path / "cache"), offline=False
+        )
+
+        def online_run(task, config, client, **kwargs):
+            # Exercises the REAL online complete() path (mocked 429 → DayCapped).
+            client.complete(role="tested_agents", prompt=task.prompt, seed=1)
+            return [make_run(task.id, config)]
+
+        runner_cfg = RunnerConfig(
+            tasks=[make_task("t1"), make_task("t2")],
+            configs=["single"], seeds=[42], checkpoint_path=cp, rpm=0,
+        )
+        runner = Runner(
+            runner_cfg, base,
+            run_task_fn=online_run, label_run_fn=lambda r, t: "I0",
+        )
+        result = runner.run()
+
+        assert result["status"] == "resumable"
+        assert MODEL in result["day_capped_models"]
+        # Resumable checkpoint: no job marked done (all pending for retry).
+        store = CheckpointStore(cp)
+        assert not store.job_done("t1", "single", ROLE, MODEL, 42)
+        assert not store.job_done("t2", "single", ROLE, MODEL, 42)
+        # Secret must never appear in any runner-emitted output.
+        captured = capsys.readouterr()
+        assert self.SECRET not in captured.out
+        assert self.SECRET not in captured.err
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -499,8 +807,8 @@ class TestCrashResistance:
         store2 = CheckpointStore(cp)
         assert store2.run_done(run1), "run1 must survive crash"
         assert store2.run_done(run2), "run2 must survive crash"
-        assert not store2.job_done("t1", "single", 1), "job must NOT be marked done"
-        assert not store2.job_done("t1", "sc", 2), "job must NOT be marked done"
+        assert not store2.job_done("t1", "single", ROLE, MODEL, 1), "job must NOT be marked done"
+        assert not store2.job_done("t1", "sc", ROLE, MODEL, 2), "job must NOT be marked done"
 
     def test_add_run_idempotent_across_crash_and_reload(self, tmp_path):
         """Re-adding the same run after reload is a no-op (no duplicate records)."""
@@ -537,7 +845,7 @@ class TestCrashResistance:
         assert call_count[0] == 1
         assert result["completed"] == 1
         # Now job_done is written
-        assert CheckpointStore(cp).job_done("t1", "single", 42)
+        assert CheckpointStore(cp).job_done("t1", "single", ROLE, MODEL, 42)
 
     def test_checkpoint_survives_corrupt_jsonl_line(self, tmp_path):
         """Corrupt JSON lines in the checkpoint are skipped; valid records intact."""
@@ -575,9 +883,9 @@ class TestBudgetStop:
 
         assert result["status"] == "budget_exceeded"
         store = CheckpointStore(cp)
-        assert store.job_done("t1", "single", 42), "t1 completed before cap"
-        assert not store.job_done("t2", "single", 42), "t2 raised BudgetExceeded"
-        assert not store.job_done("t3", "single", 42), "t3 never reached"
+        assert store.job_done("t1", "single", ROLE, MODEL, 42), "t1 completed before cap"
+        assert not store.job_done("t2", "single", ROLE, MODEL, 42), "t2 raised BudgetExceeded"
+        assert not store.job_done("t3", "single", ROLE, MODEL, 42), "t3 never reached"
 
     def test_budget_exceeded_is_permanent_not_retried(self, tmp_path):
         call_count = [0]
@@ -592,6 +900,124 @@ class TestBudgetStop:
         )
         runner.run()
         assert call_count[0] == 1, "BudgetExceeded must not be retried"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BLOCKER 2 regression — aggregate (cumulative) budget across jobs and resumes
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _FakeCostClient:
+    """Fake client that reports a real incremental cost per complete() call.
+
+    Mimics the LLMClient duck-type used by the runner (config, cache_dir, offline,
+    max_requests_per_min, _total_cost_usd).  Each per-job instance starts its
+    ``_total_cost_usd`` at 0, exactly like a real per-job LLMClient.
+    """
+
+    def __init__(self, config: Dict[str, Any], cost_per_call: float,
+                 cache_dir: str, max_requests_per_min: Optional[int]) -> None:
+        self.config = config
+        self.cache_dir = Path(cache_dir)
+        self.offline = True
+        self.max_requests_per_min = max_requests_per_min
+        self._total_cost_usd = 0.0
+        self._cost_per_call = cost_per_call
+
+    def complete(self, role, prompt, seed=None, **kwargs):
+        self._total_cost_usd += self._cost_per_call
+        return None  # the fake run_task does not read the completion
+
+
+class TestAggregateBudget:
+    """BLOCKER 2: --budget-usd is a HARD AGGREGATE cap across the WHOLE run and
+    across resumes — NOT enforced per job.  The runner maintains a persisted cost
+    ledger; when the cumulative total crosses the cap it stops cleanly.
+
+    On the pre-fix code each job's client reset cost to 0 (per-job enforcement),
+    so the run would never stop cumulatively — this test would FAIL there.
+    """
+
+    COST = 0.10
+
+    def _factory(self, tmp_path):
+        def factory(job_config, remaining_budget):
+            return _FakeCostClient(
+                job_config, cost_per_call=self.COST,
+                cache_dir=str(tmp_path / "cache"), max_requests_per_min=None,
+            )
+        return factory
+
+    def _costing_run(self):
+        def run(task, config, client, **kwargs):
+            client.complete(role="tested_agents", prompt="x", seed=1)
+            return [make_run(task.id, config, seed=client.config["seeds"]["global"])]
+        return run
+
+    def test_stops_on_cumulative_not_per_job(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        # budget 0.15, cost 0.10/job over 3 jobs:
+        #   job(seed=1): ledger 0.00<0.15 → run → ledger 0.10
+        #   job(seed=2): ledger 0.10<0.15 → run → ledger 0.20
+        #   job(seed=3): ledger 0.20>=0.15 → STOP (budget_exceeded)
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1, 2, 3], max_budget_usd=0.15,
+            run_task_fn=self._costing_run(), client_factory=self._factory(tmp_path),
+        )
+        result = runner.run()
+
+        assert result["status"] == "budget_exceeded"
+        assert result["completed"] == 2, "must stop cumulatively (not per-job)"
+        store = CheckpointStore(cp)
+        assert store.aggregate_cost_usd == pytest.approx(0.20)
+
+    def test_ledger_persists_and_no_double_count_on_resume(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        runner1, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1, 2, 3], max_budget_usd=0.15,
+            run_task_fn=self._costing_run(), client_factory=self._factory(tmp_path),
+        )
+        runner1.run()
+        assert CheckpointStore(cp).aggregate_cost_usd == pytest.approx(0.20)
+
+        # Resume: ledger continues from 0.20 (>=0.15) → stops immediately, runs
+        # ZERO new jobs, and does NOT double-count the two completed jobs.
+        runner2, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1, 2, 3], max_budget_usd=0.15,
+            run_task_fn=self._costing_run(), client_factory=self._factory(tmp_path),
+        )
+        result2 = runner2.run()
+
+        assert result2["status"] == "budget_exceeded"
+        assert result2["completed"] == 0, "no new jobs run on resume past the cap"
+        assert result2["skipped"] == 2, "the two completed jobs are skipped"
+        # Ledger unchanged — no double-count of already-completed jobs.
+        assert CheckpointStore(cp).aggregate_cost_usd == pytest.approx(0.20)
+
+    def test_remaining_budget_passed_as_subcap(self, tmp_path):
+        """Each per-job client receives the REMAINING aggregate budget as its
+        sub-cap (decreasing as the ledger grows)."""
+        cp = tmp_path / "cp.jsonl"
+        seen_remaining: List[Optional[float]] = []
+
+        def spy_factory(job_config, remaining_budget):
+            seen_remaining.append(remaining_budget)
+            return _FakeCostClient(
+                job_config, cost_per_call=self.COST,
+                cache_dir=str(tmp_path / "cache"), max_requests_per_min=None,
+            )
+
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1, 2, 3], max_budget_usd=0.15,
+            run_task_fn=self._costing_run(), client_factory=spy_factory,
+        )
+        runner.run()
+        # First job: remaining 0.15; second job: remaining 0.05 (0.15 - 0.10).
+        assert seen_remaining[0] == pytest.approx(0.15)
+        assert seen_remaining[1] == pytest.approx(0.05)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -637,8 +1063,8 @@ class TestInfraErrorRetry:
         assert result["failed"] == 1
         assert result["completed"] == 1
         store = CheckpointStore(cp)
-        assert not store.job_done("t1", "single", 42), "Failed job must NOT be checkpointed"
-        assert store.job_done("t2", "single", 42)
+        assert not store.job_done("t1", "single", ROLE, MODEL, 42), "Failed job must NOT be checkpointed"
+        assert store.job_done("t2", "single", ROLE, MODEL, 42)
 
     def test_infra_error_retry_count_respects_max(self, tmp_path):
         """Retry count is bounded by max_infra_retries (not infinite)."""
@@ -677,7 +1103,7 @@ class TestDryRun:
         report = runner.run(dry_run=True)
 
         assert call_count[0] == 0, "dry_run must not call run_task"
-        assert report["total"] == 2 * 2 * 2  # 8
+        assert report["total"] == 2 * 2 * 1 * 2  # 8 (× 1 model)
         assert report["pending"] == 8
         assert report["done"] == 0
 
@@ -689,7 +1115,7 @@ class TestDryRun:
         store = CheckpointStore(cp)
         r = make_run("t1", "single", seed=1, label="I0")
         store.add_run(r)
-        store.mark_job_done("t1", "single", 1)
+        store.mark_job_done("t1", "single", ROLE, MODEL, 1)
 
         tasks = [make_task("t1"), make_task("t2")]
         runner, _ = _make_runner(
@@ -702,6 +1128,8 @@ class TestDryRun:
         assert report["total"] == 2
         assert len(report["pending_jobs"]) == 1
         assert report["pending_jobs"][0]["task_id"] == "t2"
+        assert report["pending_jobs"][0]["model_id"] == MODEL
+        assert report["pending_jobs"][0]["model_role"] == ROLE
 
     def test_dry_run_report_structure(self, tmp_path):
         runner, _ = _make_runner([make_task("t1")], tmp_path)
@@ -726,7 +1154,7 @@ class TestIPerpRates:
         for i, label in enumerate(["I_perp", "I_perp", "I0"]):
             r = make_run("t1", "single", seed=i, label=label)
             store.add_run(r)
-            store.mark_job_done("t1", "single", i)
+            store.mark_job_done("t1", "single", ROLE, MODEL, i)
 
         runner, _ = _make_runner([make_task("t1")], tmp_path, checkpoint_path=cp)
         runner._emit_i_perp_rates()
@@ -781,10 +1209,10 @@ class TestCheckpointStore:
     def test_mark_job_done_persisted_on_reload(self, tmp_path):
         cp = tmp_path / "cp.jsonl"
         store = CheckpointStore(cp)
-        store.mark_job_done("t1", "single", 99)
+        store.mark_job_done("t1", "single", ROLE, MODEL, 99)
 
         store2 = CheckpointStore(cp)
-        assert store2.job_done("t1", "single", 99)
+        assert store2.job_done("t1", "single", ROLE, MODEL, 99)
 
     def test_add_run_idempotent_in_memory_and_on_disk(self, tmp_path):
         cp = tmp_path / "cp.jsonl"
@@ -800,9 +1228,9 @@ class TestCheckpointStore:
     def test_mark_job_done_idempotent_single_record(self, tmp_path):
         cp = tmp_path / "cp.jsonl"
         store = CheckpointStore(cp)
-        store.mark_job_done("t1", "sc", 1)
-        store.mark_job_done("t1", "sc", 1)
-        store.mark_job_done("t1", "sc", 1)
+        store.mark_job_done("t1", "sc", ROLE, MODEL, 1)
+        store.mark_job_done("t1", "sc", ROLE, MODEL, 1)
+        store.mark_job_done("t1", "sc", ROLE, MODEL, 1)
         lines = cp.read_text(encoding="utf-8").strip().splitlines()
         job_done_lines = [l for l in lines if '"job_done"' in l]
         assert len(job_done_lines) == 1, "Idempotent: exactly one job_done record"
@@ -819,7 +1247,26 @@ class TestCheckpointStore:
         cp = tmp_path / "cp.jsonl"
         store = CheckpointStore(cp)
         store.add_run(make_run("t1", seed=1))
-        assert not store.job_done("t1", "single", 1)
+        assert not store.job_done("t1", "single", ROLE, MODEL, 1)
+
+    def test_cost_ledger_accumulates_and_persists(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        store = CheckpointStore(cp)
+        assert store.aggregate_cost_usd == pytest.approx(0.0)
+        store.add_cost(0.05)
+        store.add_cost(0.03)
+        assert store.aggregate_cost_usd == pytest.approx(0.08)
+        # Persisted across reload (append-only ledger)
+        assert CheckpointStore(cp).aggregate_cost_usd == pytest.approx(0.08)
+
+    def test_cost_ledger_ignores_nonpositive(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        store = CheckpointStore(cp)
+        store.add_cost(0.0)
+        store.add_cost(-1.0)
+        assert store.aggregate_cost_usd == pytest.approx(0.0)
+        # No records written for non-positive deltas.
+        assert not cp.exists() or cp.read_text(encoding="utf-8").strip() == ""
 
 
 class TestIdentityHelpers:
@@ -852,11 +1299,19 @@ class TestIdentityHelpers:
         r2 = make_run("t2")
         assert run_identity(r1) != run_identity(r2)
 
+    def test_job_key_matches_run_identity_dimensions(self):
+        """job_key and run_identity encode the SAME five dimensions consistently."""
+        run = make_run("t1", "single", "tested_agents", "model_A", seed=7)
+        jk = job_key("t1", "single", "tested_agents", "model_A", 7)
+        assert jk == run_identity(run)
+
     def test_job_key_all_unique(self):
         keys = {
-            job_key("t1", "single", 1),
-            job_key("t1", "single", 2),
-            job_key("t1", "sc", 1),
-            job_key("t2", "single", 1),
+            job_key("t1", "single", ROLE, MODEL, 1),
+            job_key("t1", "single", ROLE, MODEL, 2),
+            job_key("t1", "sc", ROLE, MODEL, 1),
+            job_key("t2", "single", ROLE, MODEL, 1),
+            job_key("t1", "single", ROLE, "meta/llama-3.3-70b-instruct", 1),
+            job_key("t1", "single", "judge", MODEL, 1),
         }
-        assert len(keys) == 4
+        assert len(keys) == 6

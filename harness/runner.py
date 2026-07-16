@@ -54,9 +54,32 @@ def run_identity(run: AgentRun) -> str:
     ])
 
 
-def job_key(task_id: str, config: str, seed: int) -> str:
-    """Canonical string key for a runner job (task_id × config × seed)."""
-    return f"{task_id}\x00{config}\x00{seed}"
+def job_key(
+    task_id: str,
+    config: str,
+    model_role: str,
+    model_id: str,
+    seed: int,
+) -> str:
+    """Canonical completion key for a runner job.
+
+    BLOCKER 1 fix: the job key MUST carry the FULL five-dimensional AgentRun
+    identity — ``task_id × config × model_role × model_id × seed`` — so that a
+    job which differs only in role or model is treated as distinct, not-yet-done
+    work.  A key that omits model identity would let a changed/added model reuse
+    a stale ``job_done`` marker and silently SKIP the new work on resume.
+
+    This deliberately mirrors :func:`run_identity` so the job-completion key and
+    the AgentRun identity key are structurally consistent.  Null-byte separators
+    prevent collisions between field values that contain the separator character.
+    """
+    return "\x00".join([
+        task_id,
+        config,
+        model_role,
+        model_id,
+        str(seed),
+    ])
 
 
 # ── Checkpoint store ─────────────────────────────────────────────────────────
@@ -66,7 +89,8 @@ class CheckpointStore:
 
     Two record types written to the same JSONL file:
     - ``{"type": "run", ...AgentRun fields..., "label": ...}``
-    - ``{"type": "job_done", "task_id": ..., "config": ..., "seed": ...}``
+    - ``{"type": "job_done", "task_id", "config", "model_role", "model_id", "seed"}``
+    - ``{"type": "cost_delta", "cost_usd": <float>}`` (aggregate budget ledger)
 
     Write discipline (crash safety):
     - Every ``add_run()`` and ``mark_job_done()`` call does ``flush() + fsync()``
@@ -90,6 +114,8 @@ class CheckpointStore:
         self._done_jobs: Set[str] = set()
         self._run_ids: Set[str] = set()
         self._runs: List[Dict[str, Any]] = []
+        # BLOCKER 2: aggregate cost ledger — accumulated across jobs AND resumes.
+        self._aggregate_cost_usd: float = 0.0
         self._load()
 
     def _load(self) -> None:
@@ -104,11 +130,25 @@ class CheckpointStore:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue  # corrupt line — skip, do not crash
-                if rec.get("type") == "job_done":
+                rtype = rec.get("type")
+                if rtype == "job_done":
                     self._done_jobs.add(
-                        job_key(rec["task_id"], rec["config"], int(rec["seed"]))
+                        job_key(
+                            rec["task_id"],
+                            rec["config"],
+                            rec["model_role"],
+                            rec["model_id"],
+                            int(rec["seed"]),
+                        )
                     )
-                elif rec.get("type") == "run":
+                elif rtype == "cost_delta":
+                    # BLOCKER 2: replay the persisted ledger so the aggregate
+                    # budget continues from the running total across resumes.
+                    try:
+                        self._aggregate_cost_usd += float(rec["cost_usd"])
+                    except (KeyError, TypeError, ValueError):
+                        continue  # malformed cost record — skip
+                elif rtype == "run":
                     run = AgentRun(
                         task_id=rec["task_id"],
                         config=rec["config"],
@@ -125,9 +165,16 @@ class CheckpointStore:
                         self._run_ids.add(rid)
                         self._runs.append(rec)
 
-    def job_done(self, task_id: str, config: str, seed: int) -> bool:
-        """True iff this job has been fully completed and checkpointed."""
-        return job_key(task_id, config, seed) in self._done_jobs
+    def job_done(
+        self,
+        task_id: str,
+        config: str,
+        model_role: str,
+        model_id: str,
+        seed: int,
+    ) -> bool:
+        """True iff this job (full 5-dim identity) has been checkpointed done."""
+        return job_key(task_id, config, model_role, model_id, seed) in self._done_jobs
 
     def run_done(self, run: AgentRun) -> bool:
         """True iff this specific AgentRun identity has been checkpointed."""
@@ -161,18 +208,46 @@ class CheckpointStore:
         self._run_ids.add(rid)
         self._runs.append(record)
 
-    def mark_job_done(self, task_id: str, config: str, seed: int) -> None:
-        """Mark a job as fully complete.  Idempotent."""
-        k = job_key(task_id, config, seed)
+    def mark_job_done(
+        self,
+        task_id: str,
+        config: str,
+        model_role: str,
+        model_id: str,
+        seed: int,
+    ) -> None:
+        """Mark a job (full 5-dim identity) as fully complete.  Idempotent."""
+        k = job_key(task_id, config, model_role, model_id, seed)
         if k in self._done_jobs:
             return  # already marked — idempotent
         self._write({
             "type": "job_done",
             "task_id": task_id,
             "config": config,
+            "model_role": model_role,
+            "model_id": model_id,
             "seed": seed,
         })
         self._done_jobs.add(k)
+
+    def add_cost(self, delta_usd: float) -> None:
+        """Append an incremental cost to the persisted aggregate ledger.
+
+        BLOCKER 2 fix: budget is a HARD AGGREGATE cap across the whole run and
+        across resumes.  Each job's incurred cost is appended here (fsync'd) so
+        the running total survives restarts.  Completed jobs are skipped on
+        resume, so their already-persisted cost is never double-counted.
+        A zero/negative delta is ignored to avoid cluttering the ledger.
+        """
+        if delta_usd <= 0.0:
+            return
+        self._write({"type": "cost_delta", "cost_usd": float(delta_usd)})
+        self._aggregate_cost_usd += float(delta_usd)
+
+    @property
+    def aggregate_cost_usd(self) -> float:
+        """Total incurred cost across all jobs and resumes (persisted ledger)."""
+        return self._aggregate_cost_usd
 
     def all_runs(self) -> List[Dict[str, Any]]:
         """Return all checkpointed AgentRun records (read-only copy)."""
@@ -340,6 +415,13 @@ class RunnerConfig:
     tasks: List[Task]
     configs: List[str] = field(default_factory=lambda: list(ALL_CONFIGS))
     seeds: List[int] = field(default_factory=lambda: [20260713])
+    #: Optional explicit ``(model_role, model_id)`` dimension of the grid.
+    #: BLOCKER 1: the grid is the cross-product of task × config × MODEL × seed,
+    #: matching the AgentRun identity.  When ``None``, the Runner derives a
+    #: single-model default from the base client's config (the homogeneous
+    #: tested-agents baseline), preserving the historical one-model behaviour
+    #: while still carrying model identity in every completion key.
+    models: Optional[List[Tuple[str, str]]] = None
     checkpoint_path: Path = field(
         default_factory=lambda: Path("runner_checkpoint.jsonl")
     )
@@ -382,6 +464,7 @@ class Runner:
         *,
         run_task_fn: Optional[Callable] = None,
         label_run_fn: Optional[Callable] = None,
+        client_factory: Optional[Callable[[Dict[str, Any], Optional[float]], Any]] = None,
     ) -> None:
         self._cfg = cfg
         self._base_client = base_client
@@ -390,27 +473,105 @@ class Runner:
         self._day_capped_models: Set[str] = set()
         self._run_task = run_task_fn if run_task_fn is not None else _default_run_task
         self._label_run = label_run_fn if label_run_fn is not None else _default_label_run
+        # BLOCKER 2 / MAJOR 3: per-job clients are built through a factory so the
+        # aggregate-cost ledger and the propagated RPM limiter are always applied
+        # (and so tests can inject a cost-reporting fake client).
+        self._client_factory = (
+            client_factory if client_factory is not None
+            else self._default_client_factory
+        )
+        # BLOCKER 1: resolve the model dimension of the grid.  Default = the
+        # single homogeneous tested-agents baseline from the base config.
+        self._models: List[Tuple[str, str]] = (
+            list(cfg.models) if cfg.models else self._default_models()
+        )
+
+    def _default_models(self) -> List[Tuple[str, str]]:
+        """Derive the default ``(model_role, model_id)`` grid dimension.
+
+        Uses the homogeneous tested-agents baseline from the base client's
+        config, so changing that model in ``config.yaml`` changes the model_id
+        carried in every job key — which is exactly what makes a model swap a
+        NEW, not-yet-done job on resume (BLOCKER 1) rather than a silent skip.
+        """
+        try:
+            homogeneous = self._base_client.config["roles"]["tested_agents"]["homogeneous"]
+            model_id = homogeneous[0]["model"]
+        except (KeyError, IndexError, TypeError):
+            model_id = "unknown"
+        return [("tested_agents", model_id)]
+
+    def _default_client_factory(
+        self, job_config: Dict[str, Any], remaining_budget_usd: Optional[float]
+    ) -> LLMClient:
+        """Build a per-job LLMClient with the aggregate budget sub-cap applied.
+
+        MAJOR 3 fix: propagate the base client's ``max_requests_per_min`` so the
+        per-attempt internal rate limiter stays active on every HTTP retry.  The
+        runner's per-model sliding-window throttle (``_ThrottledClient``) is
+        layered ON TOP of this, giving additive — never weaker — pacing.
+        BLOCKER 2 fix: ``remaining_budget_usd`` is the true sub-cap that keeps
+        each per-job pre-auth guard consistent with the aggregate ledger.
+        """
+        return LLMClient(
+            config=job_config,
+            cache_dir=str(self._base_client.cache_dir),
+            offline=self._base_client.offline,
+            max_budget_usd=remaining_budget_usd,
+            max_requests_per_min=self._base_client.max_requests_per_min,
+        )
+
+    @staticmethod
+    def _job_cost(client: Any) -> float:
+        """Incremental USD cost incurred by a per-job client (starts at 0)."""
+        return float(getattr(client, "_total_cost_usd", 0.0) or 0.0)
+
+    @staticmethod
+    def _bind_model(
+        job_config: Dict[str, Any], model_role: str, model_id: str
+    ) -> None:
+        """Bind this grid cell's model into the per-job config copy.
+
+        BLOCKER 1: so a distinct ``model_id`` in the grid runs genuinely
+        distinct work (and therefore is a distinct, not-yet-done job), the
+        tested-agents homogeneous baseline is overridden to the grid's model.
+        The family is derived from the ``family/model`` slug prefix (matching
+        ``config.yaml`` conventions).  Only mutates the deep-copied per-job
+        config — never shared state.  A no-op for non tested-agents roles.
+        """
+        if model_role != "tested_agents":
+            return
+        family = model_id.split("/", 1)[0] if "/" in model_id else model_id
+        try:
+            roles = job_config.setdefault("roles", {})
+            tested = roles.setdefault("tested_agents", {})
+            tested["homogeneous"] = [{"family": family, "model": model_id}]
+        except (AttributeError, TypeError):
+            pass  # malformed config — leave untouched; run_task will surface it
 
     # ── Grid enumeration ──────────────────────────────────────────────────────
 
-    def enumerate_grid(self) -> List[Tuple[str, str, int]]:
-        """Return the full job grid as ``(task_id, config, seed)`` tuples.
+    def enumerate_grid(self) -> List[Tuple[str, str, str, str, int]]:
+        """Return the full job grid as ``(task_id, config, model_role, model_id, seed)``.
 
-        The cross-product order is task → config → seed, which is deterministic
-        across restarts so resume skips the right jobs.
+        BLOCKER 1: the grid is the cross-product of task × config × MODEL × seed,
+        matching the five-dimensional AgentRun identity.  The order
+        task → config → model → seed is deterministic across restarts so resume
+        skips exactly the right jobs.
         """
-        grid: List[Tuple[str, str, int]] = []
+        grid: List[Tuple[str, str, str, str, int]] = []
         for task in self._cfg.tasks:
             for cfg_name in self._cfg.configs:
-                for seed in self._cfg.seeds:
-                    grid.append((task.id, cfg_name, seed))
+                for model_role, model_id in self._models:
+                    for seed in self._cfg.seeds:
+                        grid.append((task.id, cfg_name, model_role, model_id, seed))
         return grid
 
-    def pending_jobs(self) -> List[Tuple[str, str, int]]:
+    def pending_jobs(self) -> List[Tuple[str, str, str, str, int]]:
         """Return grid jobs not yet checkpointed as done."""
         return [
             j for j in self.enumerate_grid()
-            if not self._store.job_done(j[0], j[1], j[2])
+            if not self._store.job_done(*j)
         ]
 
     # ── Dry run ───────────────────────────────────────────────────────────────
@@ -419,18 +580,25 @@ class Runner:
         """Report pending vs done jobs without any network calls.
 
         Returns a dict with ``total``, ``done``, ``pending``, and
-        ``pending_jobs`` (list of ``{task_id, config, seed}`` dicts).
+        ``pending_jobs`` (list of ``{task_id, config, model_role, model_id,
+        seed}`` dicts).
         """
         grid = self.enumerate_grid()
-        done = [j for j in grid if self._store.job_done(j[0], j[1], j[2])]
-        pending = [j for j in grid if not self._store.job_done(j[0], j[1], j[2])]
+        done = [j for j in grid if self._store.job_done(*j)]
+        pending = [j for j in grid if not self._store.job_done(*j)]
         return {
             "total": len(grid),
             "done": len(done),
             "pending": len(pending),
             "pending_jobs": [
-                {"task_id": tid, "config": cfg, "seed": s}
-                for tid, cfg, s in pending
+                {
+                    "task_id": tid,
+                    "config": cfg,
+                    "model_role": role,
+                    "model_id": mid,
+                    "seed": s,
+                }
+                for tid, cfg, role, mid, s in pending
             ],
         }
 
@@ -462,26 +630,55 @@ class Runner:
         failed = 0
         day_capped: List[str] = []
 
-        for task_id, cfg_name, seed in grid:
+        for task_id, cfg_name, model_role, model_id, seed in grid:
 
-            # ── Resume: skip completed jobs (idempotent) ───────────────────────
-            if self._store.job_done(task_id, cfg_name, seed):
+            # ── Resume: skip completed jobs (idempotent, 5-dim key) ────────────
+            if self._store.job_done(task_id, cfg_name, model_role, model_id, seed):
                 skipped += 1
                 continue
 
+            # ── Aggregate budget gate (BLOCKER 2) ──────────────────────────────
+            # The hard cap is enforced across the WHOLE run/resume via the
+            # persisted ledger, NOT per job.  Stop cleanly BEFORE spending more
+            # once the running total has reached the cap.
+            if (
+                self._cfg.max_budget_usd is not None
+                and self._store.aggregate_cost_usd >= self._cfg.max_budget_usd
+            ):
+                print(
+                    f"[RUNNER] Aggregate budget reached "
+                    f"(${self._store.aggregate_cost_usd:.6f} >= "
+                    f"${self._cfg.max_budget_usd:.6f}). Checkpointing and stopping."
+                )
+                self._emit_progress(completed, skipped, failed, grid)
+                return {
+                    "status": "budget_exceeded",
+                    "completed": completed,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "day_capped_models": day_capped,
+                }
+
             task = task_map[task_id]
 
-            # ── Build per-job LLMClient (injects seed into config copy) ────────
-            # A fresh copy of config ensures different seeds produce genuinely
-            # different AgentRun identities without mutating shared state.
+            # ── Build per-job client (injects seed + binds this grid model) ────
+            # A fresh copy of config ensures different seeds/models produce
+            # genuinely different AgentRun identities without mutating shared
+            # state.  Binding the tested-agents model to this grid cell's model_id
+            # makes a different model_id real, distinct work (BLOCKER 1).
             job_config = copy.deepcopy(self._base_client.config)
             job_config["seeds"]["global"] = seed
-            job_client = LLMClient(
-                config=job_config,
-                cache_dir=str(self._base_client.cache_dir),
-                offline=self._base_client.offline,
-                max_budget_usd=self._cfg.max_budget_usd,
-            )
+            self._bind_model(job_config, model_role, model_id)
+
+            # Pass the REMAINING aggregate budget so the per-job pre-auth guard is
+            # a true sub-cap of the whole-run cap (BLOCKER 2).
+            remaining_budget: Optional[float] = None
+            if self._cfg.max_budget_usd is not None:
+                remaining_budget = max(
+                    0.0, self._cfg.max_budget_usd - self._store.aggregate_cost_usd
+                )
+            job_client = self._client_factory(job_config, remaining_budget)
+
             # Wrap with throttler + day-cap guard (shared set across jobs)
             wrapped = _ThrottledClient(
                 job_client, self._throttler, self._day_capped_models
@@ -491,6 +688,9 @@ class Runner:
             try:
                 labeled_runs = self._run_job_with_retry(task, cfg_name, wrapped)
             except BudgetExceeded as exc:
+                # Persist whatever this job actually spent before it tripped the
+                # sub-cap, so the aggregate ledger stays accurate on resume.
+                self._store.add_cost(self._job_cost(job_client))
                 print(
                     f"[RUNNER] Budget exceeded: {exc}. Checkpointing and stopping."
                 )
@@ -503,6 +703,7 @@ class Runner:
                     "day_capped_models": day_capped,
                 }
             except DayCapped as exc:
+                self._store.add_cost(self._job_cost(job_client))
                 model_slug: str = getattr(exc, "model_slug", str(exc))
                 if model_slug not in day_capped:
                     day_capped.append(model_slug)
@@ -515,21 +716,24 @@ class Runner:
                 failed += 1
                 continue
             except Exception as exc:
+                self._store.add_cost(self._job_cost(job_client))
                 print(
                     f"[RUNNER] INFRA error on job "
-                    f"({task_id!r}, {cfg_name!r}, seed={seed}): {exc}"
+                    f"({task_id!r}, {cfg_name!r}, {model_id!r}, seed={seed}): {exc}"
                 )
                 failed += 1
                 continue
 
-            # ── Checkpoint: write runs, then mark job done ─────────────────────
-            # write each AgentRun first (fsync), then the job_done marker.
-            # If crash between add_run() calls, the job is not marked done and
-            # will re-run on next invocation (the LLM cache prevents dup calls).
+            # ── Checkpoint: cost ledger, runs, then job_done marker ────────────
+            # Persist this job's incurred cost FIRST (aggregate ledger), then each
+            # AgentRun (fsync), then the job_done marker.  If a crash occurs before
+            # job_done, the job re-runs on resume and cache-hits make ZERO new HTTP
+            # calls (so _total_cost_usd == 0 on the rerun → no double-count).
+            self._store.add_cost(self._job_cost(job_client))
             for run, label in labeled_runs:
                 run.label = label
                 self._store.add_run(run)
-            self._store.mark_job_done(task_id, cfg_name, seed)
+            self._store.mark_job_done(task_id, cfg_name, model_role, model_id, seed)
             completed += 1
 
         self._emit_progress(completed, skipped, failed, grid)
