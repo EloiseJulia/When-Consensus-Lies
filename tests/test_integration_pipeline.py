@@ -163,31 +163,29 @@ def test_golden_code_spec():
 def test_golden_data_analysis():
     """Part 1 golden — data_analysis, 5 controlled agents, frozen hand-computed values.
 
-    Note: data_analysis has no k=2 tasks (max ambiguity_level=1 in the dataset).
-    The 'second wrong' label is deliberately I_perp (garbage output that passes no
-    checker), which is a valid non-target label in the full label space.
-
-    Task: data_mean_001_k1_missing_values  (ambiguity_level=1)
-      I0 = skip None values, return mean of filtered list (target)
-      I1 = return None if any element is None
+    Task: data_report_001_k2_all  (ambiguity_level=2, combinatorial, reversed-property)
+      I0 = KPI threshold >=3 + half-up rounding (target, all-target, NON-default)
+      I1 = threshold >=3 + half-even rounding (avg_rounding defaulted, partial)
+      I2 = threshold >=1 + half-up rounding (active_user_threshold defaulted, partial)
+      I3 = threshold >=1 + half-even rounding ([combined-default])
 
     Controlled distribution (5 agents):
-      agents 0–2 : I1 candidate in ```python fence     → label I1
-      agent  3   : I0 candidate in ```python fence     → label I0  (target)
-      agent  4   : garbage code (wrong return type)    → label I_perp
+      agents 0–2 : I1 candidate in ```python fence  → label I1
+      agent  3   : I0 candidate in ```python fence  → label I0  (target)
+      agent  4   : I2 candidate in ```python fence  → label I2
 
     HAND CALCULATIONS
     ─────────────────
-    Expected labels: [I1, I1, I1, I0, I_perp]
+    Expected labels: [I1, I1, I1, I0, I2]
 
     convergent_delusion  (primary metric):
-      wrong_counts = {I1: 3, I_perp: 1}
+      wrong_counts = {I1: 3, I2: 1}   (I0 is the target -> excluded)
       max_wrong_count = 3  (three agents on I1)
       total = 5
       => 3 / 5 = 0.6
 
     a_maj:
-      counts = {I1: 3, I0: 1, I_perp: 1}
+      counts = {I1: 3, I0: 1, I2: 1}
       unique_winner = I1  (strict plurality)
       I1 ≠ target I0
       => 0.0
@@ -195,28 +193,27 @@ def test_golden_data_analysis():
     from bench.data_analysis import get_checkers_and_candidates
 
     tasks = load_tasks("bench/data/data_analysis.jsonl")
-    task = next(t for t in tasks if t.id == "data_mean_001_k1_missing_values")
+    task = next(t for t in tasks if t.id == "data_report_001_k2_all")
 
     _, candidates, _ = get_checkers_and_candidates(task.domain, task)
     i0_code = candidates["I0"]
     i1_code = candidates["I1"]
-    # Garbage: wrong return type → fails all checkers → I_perp
-    garbage_code = "def compute_mean(numbers):\n    return 'not_a_number'"
+    i2_code = candidates["I2"]
 
     controlled_runs = [
-        _make_run(task.id, f"```python\n{i1_code}\n```",      seed=200, conf=0.80),  # → I1
-        _make_run(task.id, f"```python\n{i1_code}\n```",      seed=201, conf=0.80),  # → I1
-        _make_run(task.id, f"```python\n{i1_code}\n```",      seed=202, conf=0.80),  # → I1
-        _make_run(task.id, f"```python\n{i0_code}\n```",      seed=203, conf=0.90),  # → I0
-        _make_run(task.id, f"```python\n{garbage_code}\n```", seed=204, conf=0.30),  # → I_perp
+        _make_run(task.id, f"```python\n{i1_code}\n```", seed=200, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i1_code}\n```", seed=201, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i1_code}\n```", seed=202, conf=0.80),  # → I1
+        _make_run(task.id, f"```python\n{i0_code}\n```", seed=203, conf=0.90),  # → I0
+        _make_run(task.id, f"```python\n{i2_code}\n```", seed=204, conf=0.70),  # → I2
     ]
 
     labels = [label_run(run, task) for run in controlled_runs]
-    assert labels[0] == "I1",    f"agent 0: expected I1, got {labels[0]}"
-    assert labels[1] == "I1",    f"agent 1: expected I1, got {labels[1]}"
-    assert labels[2] == "I1",    f"agent 2: expected I1, got {labels[2]}"
-    assert labels[3] == "I0",    f"agent 3: expected I0 (target), got {labels[3]}"
-    assert labels[4] == "I_perp", f"agent 4: expected I_perp (garbage), got {labels[4]}"
+    assert labels[0] == "I1", f"agent 0: expected I1, got {labels[0]}"
+    assert labels[1] == "I1", f"agent 1: expected I1, got {labels[1]}"
+    assert labels[2] == "I1", f"agent 2: expected I1, got {labels[2]}"
+    assert labels[3] == "I0", f"agent 3: expected I0 (target), got {labels[3]}"
+    assert labels[4] == "I2", f"agent 4: expected I2, got {labels[4]}"
 
     # convergent_delusion = max_wrong_count / total = 3 / 5 = 0.6
     cd = convergent_delusion(labels, target="I0")
@@ -405,8 +402,8 @@ def test_wiring_data_analysis():
     _wiring_check(
         domain="data_analysis",
         task_ids=[
-            "data_mean_001_k1_missing_values",
-            "data_variance_001_k1_formula",
+            "data_activeusers_001_k1_active_user_threshold",
+            "data_typical_001_k1_central_tendency",
         ],
         configs=[
             ("single",   1, {}),
