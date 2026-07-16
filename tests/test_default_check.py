@@ -246,3 +246,54 @@ def test_main_skips_with_flag_but_no_token(monkeypatch):
     monkeypatch.delenv("GITHUB_MODELS_TOKEN", raising=False)
     monkeypatch.delenv("GH_MODELS_TOKEN", raising=False)
     assert default_check._should_run() is False
+
+
+# ── E. Reasoner arm prep: token budget + task-subset invariants ───────────────
+
+def test_max_tokens_per_call_is_raised():
+    """MAX_TOKENS_PER_CALL must be >= 8192 so reasoners complete reasoning + answer."""
+    assert hasattr(default_check, "MAX_TOKENS_PER_CALL"), \
+        "MAX_TOKENS_PER_CALL constant missing from default_check"
+    assert default_check.MAX_TOKENS_PER_CALL >= 8192, (
+        f"MAX_TOKENS_PER_CALL={default_check.MAX_TOKENS_PER_CALL} is too low; "
+        "reasoning tokens count toward max_completion_tokens → truncation risk"
+    )
+    assert default_check.MAX_TOKENS_PER_CALL == 12288, \
+        "Expected exactly 12288 per the reasoner-budget-plan §C"
+
+
+def test_reasoner_sc_excludes_code_invoice():
+    """REASONER_SC_EXCLUDED_IDS must contain all code_invoice K_GRADIENT_IDS."""
+    assert hasattr(default_check, "REASONER_SC_EXCLUDED_IDS"), \
+        "REASONER_SC_EXCLUDED_IDS constant missing from default_check"
+    excluded = default_check.REASONER_SC_EXCLUDED_IDS
+    for task_id in default_check.K_GRADIENT_IDS:
+        assert task_id in excluded, (
+            f"code_invoice task '{task_id}' is NOT in REASONER_SC_EXCLUDED_IDS; "
+            "it must be excluded from the reasoner homogeneous-sc pass"
+        )
+
+
+def test_reasoner_sc_pass_skips_code_invoice(artifacts_dir):
+    """The sc (pass A) checkpoint must NOT contain any code_invoice task runs;
+    the single (pass B) checkpoint MAY contain them (heterogeneous pool keeps kgrad)."""
+    from common.config import load_config
+    from common.llm import LLMClient
+    from harness.runner import CheckpointStore
+
+    cfg = load_config()
+    all_tasks, task_role = default_check.select_tasks()
+    client = LLMClient(cfg, cache_dir=str(artifacts_dir / "cache"), offline=True)
+    ckpt = artifacts_dir / "ckpt.jsonl"
+    default_check.run_diagnostic(
+        client, all_tasks, task_role,
+        checkpoint_path=str(ckpt), sc_k=2, budget_usd=None, rpm=100000,
+    )
+
+    store = CheckpointStore(ckpt)
+    sc_task_ids = {r["task_id"] for r in store.all_runs() if r["config"] == "sc"}
+    for invoice_id in default_check.K_GRADIENT_IDS:
+        assert invoice_id not in sc_task_ids, (
+            f"code_invoice task '{invoice_id}' appeared in sc (pass A) checkpoint; "
+            "it must be excluded from the reasoner homogeneous-sc pass"
+        )

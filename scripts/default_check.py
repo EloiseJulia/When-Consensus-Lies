@@ -108,6 +108,20 @@ RPM = 10                        # conservative per-model requests/min
 CACHE_DIR = ".llm_cache_default_check"
 CHECKPOINT = "default_check_checkpoint.jsonl"
 
+# Raised token budget for reasoning models: 4096 is exhausted mid-<think> on complex
+# tasks (reasoning tokens count toward max_completion_tokens → truncation → I_perp).
+# Daily cap is on request COUNT not tokens, so a higher per-call budget does not worsen
+# the cap. 12288 is safe for both reasoning and weak models (8-12k output cap is harmless
+# for non-reasoners). See paper/plans/2026-07-16-reasoner-budget-plan.md §C.
+MAX_TOKENS_PER_CALL = 12288
+
+# Task subset for the REASONER homogeneous-sc pass (pass A).
+# code_invoice is EXCLUDED: it is a complex 3-part combinatorial task that produces
+# off-axis (I_perp) output even for weak models; it also caused the deepseek-r1
+# truncation. The k-gradient diagnostic (kgrad role) is preserved in the heterogeneous
+# single pass (pass B) only. Essential reasoner cells: strong H1 traps + H2 + subtlers.
+REASONER_SC_EXCLUDED_IDS: frozenset = frozenset(K_GRADIENT_IDS)
+
 
 def model_class(slug: str) -> str:
     if slug in REASONER_SLUGS:
@@ -281,7 +295,15 @@ def run_diagnostic(
         runner = Runner(cfg, client, run_task_fn=_run_task_fn, label_run_fn=label_fn)
         return runner.run()
 
-    status_a = _pass(["sc"], HOMOGENEOUS_MODELS)
+    # Pass A: reasoner homogeneous sc — code_invoice EXCLUDED (see REASONER_SC_EXCLUDED_IDS).
+    sc_tasks_orig = tasks
+    try:
+        tasks = [t for t in tasks if t.id not in REASONER_SC_EXCLUDED_IDS]
+        status_a = _pass(["sc"], HOMOGENEOUS_MODELS)
+    finally:
+        tasks = sc_tasks_orig  # restore full list for pass B
+
+    # Pass B: heterogeneous single pass over all tasks (including code_invoice kgrad).
     status_b = _pass(["single"], POOL_MODELS)
 
     # Read back every checkpointed run and build the report.
@@ -524,6 +546,8 @@ def main() -> None:
     print("=" * 70)
     print("DEFAULT-CHECK DIAGNOSTIC — LIVE (EXPLORATORY)")
     print(f"  tasks={len(tasks)}  sc_k={SC_K}  budget=${BUDGET_USD:.2f}  rpm={RPM}")
+    print(f"  max_tokens_per_call={MAX_TOKENS_PER_CALL}  (raised for reasoner completion)")
+    print(f"  reasoner-sc excludes: {sorted(REASONER_SC_EXCLUDED_IDS)}")
     print(f"  homogeneous models={[m for _r, m in HOMOGENEOUS_MODELS]}")
     print(f"  pool models={[m for _r, m in POOL_MODELS]}  (gpt-4o-mini EXCLUDED)")
     print("=" * 70)
@@ -534,6 +558,7 @@ def main() -> None:
         offline=False,
         max_budget_usd=BUDGET_USD,
         max_requests_per_min=RPM,
+        max_tokens_per_call=MAX_TOKENS_PER_CALL,
     )
 
     report = run_diagnostic(client, tasks, task_role,
