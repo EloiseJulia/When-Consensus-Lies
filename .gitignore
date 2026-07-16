@@ -3,4 +3,9 @@
 __pycache__/
 .pytest_cache/
 .llm_cache/
+# default-check diagnostic live-run artifacts (EXPLORATORY, never committed)
+.llm_cache_default_check/
+default_check_checkpoint.jsonl
+default_check_summary.jsonl
+default_check_table.txt
 *.pyc
