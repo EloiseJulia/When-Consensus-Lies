@@ -1728,7 +1728,8 @@ class TestLedgerWriteFailClosed:
 
         result = runner.run()
 
-        # FAIL CLOSED: reported as a failure, NOT completed.
+        # FAIL CLOSED: the whole run stops resumably, this job NOT completed.
+        assert result["status"] == "ledger_unavailable"
         assert result["completed"] == 0
         assert result["failed"] == 1
         # Job NOT marked done → it will not be silently treated as finished.
@@ -1738,6 +1739,57 @@ class TestLedgerWriteFailClosed:
         # NOT retried: run_task invoked exactly ONCE (a retry would cache-hit at
         # $0 and lose the original spend). max_infra_retries=3 proves permanence.
         assert len(calls) == 1
+
+    def test_persistent_ledger_failure_stops_whole_run_no_further_paid_calls(
+        self, tmp_path
+    ):
+        """BLOCKER (final): a PERSISTENT ledger-write failure must stop the WHOLE
+        runner immediately — not just skip one job and continue to later PAID
+        jobs.  With ≥2 pending jobs and an always-failing cost_sink, run_task must
+        be invoked for AT MOST the first job (no further paid calls), the run must
+        stop resumably, and NO job may be marked done.
+
+        On the pre-fix code (``continue`` after LedgerWriteError) the second paid
+        job would still run — spending twice while recording zero cost.  This test
+        FAILS there (calls would be 2) and PASSES after the whole-run stop.
+        """
+        cp = tmp_path / "cp.jsonl"
+        calls: List[Dict[str, Any]] = []
+
+        def factory(job_config, remaining_budget):
+            return _RecordingClient(
+                job_config, calls, cache_dir=str(tmp_path / "cache"),
+                cost_per_call=0.10,
+            )
+
+        # TWO pending jobs (two seeds → two single-model cells).
+        runner, _ = _make_runner(
+            [make_task("t1", domain="policy_qa")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[1, 2], max_infra_retries=3,
+            run_task_fn=real_run_task, client_factory=factory,
+        )
+        assert len(runner.enumerate_grid()) == 2
+
+        # PERSISTENT accounting-storage failure: every ledger write raises.
+        def boom(delta):
+            raise OSError("persistent accounting-disk failure")
+        runner._store.add_cost = boom
+
+        result = runner.run()
+
+        # Whole run stopped resumably after the FIRST job's ledger failure.
+        assert result["status"] == "ledger_unavailable"
+        assert result["completed"] == 0
+        # No further paid calls: run_task invoked for AT MOST the first job.
+        assert len(calls) == 1, "must not incur paid calls after ledger failure"
+        # No job marked done — both remain pending for a healthy-disk resume.
+        assert CheckpointStore(cp).n_done_jobs == 0
+        assert not CheckpointStore(cp).job_done(
+            "t1", "single", "tested_agents", "openai/gpt-4o-mini", 1
+        )
+        assert not CheckpointStore(cp).job_done(
+            "t1", "single", "tested_agents", "openai/gpt-4o-mini", 2
+        )
 
     def test_ledger_write_error_is_permanent_not_retried_unit(self, tmp_path):
         """Unit-level: LedgerWriteError from the wrapper is raised straight out of

@@ -763,6 +763,9 @@ class Runner:
             - ``"resumable"``: at least one model was day-capped; remaining jobs
               can be retried after the day-cap resets (~24h)
             - ``"budget_exceeded"``: stopped at budget cap; checkpoint preserved
+            - ``"ledger_unavailable"``: the aggregate cost-ledger write failed
+              (accounting storage down); the WHOLE run stops cleanly with no
+              further paid calls and is resumable once storage is healthy
         """
         if dry_run:
             return self.dry_run_report()
@@ -864,17 +867,29 @@ class Runner:
                 failed += 1
                 continue
             except LedgerWriteError as exc:
-                # FAIL CLOSED: the cost journal write failed after a paid call.
-                # Do NOT mark done and do NOT retry (retry would cache-hit at $0
-                # and lose the spend).  Report as a job failure so the operator
-                # sees honest accounting rather than a silent under-count.
+                # FAIL CLOSED — WHOLE RUN.  A ledger-write failure means the cost
+                # accounting store itself is down.  If it is PERSISTENT, continuing
+                # to later jobs would incur unjournaled paid spend across the entire
+                # remaining grid.  So we STOP the whole runner immediately and
+                # cleanly (mirroring BudgetExceeded): no further paid calls may
+                # occur while the cost ledger cannot be written.  The current job is
+                # NOT marked done; on resume (once disk is healthy) it re-runs and
+                # cache-hits cost $0, so nothing is double-counted.
                 print(
                     f"[RUNNER] LEDGER WRITE FAILURE on job "
                     f"({task_id!r}, {cfg_name!r}, {model_id!r}, seed={seed}): {exc}. "
-                    "Failing job closed (not marked done, not retried)."
+                    "Cost ledger unavailable — stopping the whole run cleanly "
+                    "(resume once accounting storage is healthy)."
                 )
                 failed += 1
-                continue
+                self._emit_progress(completed, skipped, failed, grid)
+                return {
+                    "status": "ledger_unavailable",
+                    "completed": completed,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "day_capped_models": day_capped,
+                }
             except Exception as exc:
                 print(
                     f"[RUNNER] INFRA error on job "
