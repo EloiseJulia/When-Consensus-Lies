@@ -243,21 +243,21 @@ def test_golden_data_analysis():
 def test_golden_policy_qa():
     """Part 1 golden — policy_qa, 5 controlled agents, frozen hand-computed values.
 
-    Task: policy_overtime_001_k2_all  (ambiguity_level=2)
-      I0 = 40 h threshold + 1.5× rate → $950.00  (target)
-           Arithmetic: 40*$20 + 5*$20*1.5 = $800 + $150 = $950
-      I1 = 44 h threshold              → $910.00
-           Arithmetic: 44*$20 + 1*$20*1.5 = $880 + $30  = $910
-      I2 = 2.0× rate                   → $1000.00
-           Arithmetic: 40*$20 + 5*$20*2.0 = $800 + $200 = $1000
+    Task: policy_paymileage_001_k2_all  (ambiguity_level=2, reversed k=2 family)
+      I0 = OT after 35 h + mileage rounded UP to whole $ → $1063.00  (target, all-target)
+           Arithmetic: (35*$20 + 10*$30) + ceil($0.60*104=$62.40)=$63.00 = $1000 + $63.00 = $1063.00
+      I1 = OT after 35 h + exact-cent mileage → $1062.40  (mileage_rounding defaulted)
+           Arithmetic: (35*$20 + 10*$30) + 104*$0.60 = $1000 + $62.40 = $1062.40
+      I2 = OT after 40 h + mileage rounded up → $1013.00  (overtime defaulted)
+           Arithmetic: (40*$20 + 5*$30) + $63.00 = $950 + $63.00 = $1013.00
 
     Format: "FINAL ANSWER: $<amount>" (the STRUCTURED format accepted by
     harness/label.py's _extract_numeric_from_output path).
 
     Controlled distribution (5 agents):
-      agents 0–2 : FINAL ANSWER: $910.00  → label I1
-      agent  3   : FINAL ANSWER: $950.00  → label I0  (target)
-      agent  4   : FINAL ANSWER: $1000.00 → label I2
+      agents 0–2 : FINAL ANSWER: $1062.40 → label I1
+      agent  3   : FINAL ANSWER: $1063.00 → label I0  (target)
+      agent  4   : FINAL ANSWER: $1013.00 → label I2
 
     HAND CALCULATIONS
     ─────────────────
@@ -278,12 +278,12 @@ def test_golden_policy_qa():
     from bench.policy_qa import get_checkers_and_candidates
 
     tasks = load_tasks("bench/data/policy_qa.jsonl")
-    task = next(t for t in tasks if t.id == "policy_overtime_001_k2_all")
+    task = next(t for t in tasks if t.id == "policy_paymileage_001_k2_all")
 
     _, candidates, _ = get_checkers_and_candidates(task.domain, task)
-    i0_amount = candidates["I0"]["amount"]   # 950.0
-    i1_amount = candidates["I1"]["amount"]   # 910.0
-    i2_amount = candidates["I2"]["amount"]   # 1000.0
+    i0_amount = candidates["I0"]["amount"]   # 1063.00
+    i1_amount = candidates["I1"]["amount"]   # 1062.40
+    i2_amount = candidates["I2"]["amount"]   # 1013.00
 
     controlled_runs = [
         _make_run(task.id, f"FINAL ANSWER: ${i1_amount:.2f}", seed=300, conf=0.80),  # → I1
@@ -422,7 +422,7 @@ def test_wiring_policy_qa():
         domain="policy_qa",
         task_ids=[
             "policy_overtime_001_k1_overtime_threshold",
-            "policy_interest_001_k1_day_count",
+            "policy_interest_001_k1_compounding",
         ],
         configs=[
             ("single",   1, {}),
