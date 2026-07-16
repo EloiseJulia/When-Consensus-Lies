@@ -25,6 +25,21 @@ class BudgetExceeded(Exception):
     """
 
 
+class DayCapped(Exception):
+    """Raised when a model's daily request cap is hit (x-ratelimit-type=UserByModelByDay).
+
+    This is a permanent stop condition within the day — do NOT retry.
+    Callers should stop all jobs for this model and resume after the ~24h cap reset.
+    """
+
+    def __init__(self, model_slug: str) -> None:
+        self.model_slug = model_slug
+        super().__init__(
+            f"Daily request cap hit for model {model_slug!r}; "
+            "resume after ~24h reset (x-ratelimit-type=UserByModelByDay)"
+        )
+
+
 class _OnlineModeError(RuntimeError):
     """Internal marker: a fatal error from _generate_online.
 
@@ -157,7 +172,7 @@ class LLMClient:
             try:
                 completion = self._generate(role, prompt, seed, family, model, temperature)
                 break  # generation succeeded; exit retry loop
-            except (NotImplementedError, BudgetExceeded, _OnlineModeError):
+            except (NotImplementedError, BudgetExceeded, _OnlineModeError, DayCapped):
                 raise  # permanent — never retry
             except Exception:
                 if attempt == max_retries - 1:
@@ -446,6 +461,7 @@ class LLMClient:
         _terminal_status: Optional[int] = None  # terminal 4xx status
         _terminal_body: str = ""                # scrubbed terminal error body
         _had_transport_error: bool = False       # URLError / timeout
+        _day_cap_hit: bool = False               # x-ratelimit-type=UserByModelByDay detected
 
         for attempt in range(_MAX_HTTP_RETRIES):
             self._enforce_rate_limit()            # throttle EVERY attempt (MAJOR 3)
@@ -455,6 +471,7 @@ class LLMClient:
             )
             _attempt_status: Optional[int] = None
             _is_transport: bool = False
+            _is_day_cap: bool = False  # set if this attempt hit the day cap
             _scrubbed_body: str = ""
 
             try:
@@ -465,6 +482,16 @@ class LLMClient:
                 # ── Drain+discard exc; copy ONLY the int status ────────────────
                 # Nothing that references `exc` beyond this block.
                 _attempt_status = exc.code
+                # Check for day-cap header BEFORE reading/closing the response.
+                # Day-cap (UserByModelByDay) is permanent — do not retry.
+                # Read the header flag here so we can decide outside the except scope.
+                if _attempt_status == 429:
+                    try:
+                        _is_day_cap = (
+                            exc.headers.get("x-ratelimit-type", "") == "UserByModelByDay"
+                        )
+                    except Exception:
+                        pass  # headers inaccessible — treat as regular 429
                 _is_retriable = (_attempt_status == 429 or 500 <= _attempt_status < 600)
                 if not _is_retriable:
                     # Terminal: read body once, scrub token, store
@@ -497,6 +524,12 @@ class LLMClient:
             if _http_success:
                 break
 
+            # Day-cap is permanent (daily quota; ~24h reset) — do not retry.
+            # Raise DayCapped AFTER the loop so __context__ is guaranteed None.
+            if _is_day_cap:
+                _day_cap_hit = True
+                break
+
             if _is_transport:
                 _had_transport_error = True
                 if attempt < _MAX_HTTP_RETRIES - 1:
@@ -518,6 +551,10 @@ class LLMClient:
                 break  # raise below
 
         # ── Raise AFTER loop — no active exception → __context__ is None ───────
+        # Day-cap: permanent within the day; raise before generic error handling.
+        if _day_cap_hit:
+            raise DayCapped(slug)  # __context__ = None (outside all except scopes)
+
         if not _http_success:
             if _terminal_status is not None:
                 raise _OnlineModeError(
