@@ -110,5 +110,5 @@ candidate answer is located in the raw text):
 - [x] Committed as the amendment of record BEFORE any full-scale run.
 
 Amendment status: **APPROVED & IN EFFECT** (owner-signed 2026-07-16). Metric definitions remain frozen.
-Amendment commit SHA: recorded by the commit that flips this status (see the immediately-following commit
-on `main`).
+Amendment commit SHA: `999ce21` — the signed Amendment-04 commit on `main` (this value recorded by the
+immediately-following commit).
