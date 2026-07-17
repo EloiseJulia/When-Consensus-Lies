@@ -1,0 +1,1 @@
+{"text": "```python\ndef average_price(items):\n    total_qty = sum(q for q, p in items)\n    total_cost = sum(q * p for q, p in items)\n    return f\"{total_cost / total_qty:.2f}\"\n```\n\nConfidence: 90%", "model": "claude-opus-4.8", "tokens_in": 247, "tokens_out": 82, "cost_usd": 0.0, "logit_conf": null}

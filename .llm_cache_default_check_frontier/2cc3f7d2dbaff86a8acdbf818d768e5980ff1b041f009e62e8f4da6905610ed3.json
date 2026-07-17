@@ -1,0 +1,1 @@
+{"text": "```python\nfrom math import sqrt\n\ndef spread(data):\n    mean = sum(data) / len(data)\n    standard_deviation = sqrt(sum((x - mean) ** 2 for x in data) / len(data))\n    return f\"{standard_deviation:.2f}\"\n\nconfidence_level = \"100%\"\n```", "model": "gpt-5.6-sol", "tokens_in": 138, "tokens_out": 195, "cost_usd": 0.0, "logit_conf": null}

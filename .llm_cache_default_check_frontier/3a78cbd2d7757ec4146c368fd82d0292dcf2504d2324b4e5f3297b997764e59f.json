@@ -1,0 +1,1 @@
+{"text": "```python\ndef count_active(sessions):\n    return sum(1 for s in sessions if s > 0)\n```\n\nConfidence: 70% (assuming \"active\" means at least one session)", "model": "claude-opus-4.8", "tokens_in": 208, "tokens_out": 86, "cost_usd": 0.0, "logit_conf": null}

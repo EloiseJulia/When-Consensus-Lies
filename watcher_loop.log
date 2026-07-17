@@ -1,0 +1,69 @@
+[2026-07-17 10:46:47] === WATCHER RETRY LOOP START (max 20 attempts) ===
+[2026-07-17 10:46:47] --- Attempt 1 / 20 ---
+[2026-07-17 10:47:20] Driver output (last 500 chars): Total calls: 127  per-model: {'deepseek/deepseek-r1': 22, 'openai/o4-mini': 28, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.1925  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.
+
+[2026-07-17 10:47:20] Still capped. Sleeping 3600s before attempt 2...
+[2026-07-17 11:47:20] --- Attempt 2 / 20 ---
+[2026-07-17 11:47:26] Driver output (last 500 chars): Total calls: 127  per-model: {'deepseek/deepseek-r1': 22, 'openai/o4-mini': 28, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.1925  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.
+
+[2026-07-17 11:47:26] Still capped. Sleeping 3600s before attempt 3...
+[2026-07-17 12:47:26] --- Attempt 3 / 20 ---
+[2026-07-17 12:47:42] Driver output (last 500 chars): Total calls: 128  per-model: {'deepseek/deepseek-r1': 22, 'openai/o4-mini': 29, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.1958  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.
+
+[2026-07-17 12:47:42] Still capped. Sleeping 3600s before attempt 4...
+[2026-07-17 13:47:42] --- Attempt 4 / 20 ---
+[2026-07-17 13:49:29] Driver output (last 500 chars): Total calls: 132  per-model: {'deepseek/deepseek-r1': 22, 'openai/o4-mini': 33, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.2153  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.
+
+[2026-07-17 13:49:29] Still capped. Sleeping 3600s before attempt 5...
+[2026-07-17 14:49:29] --- Attempt 5 / 20 ---
+[2026-07-17 14:54:01] Driver output (last 500 chars): Total calls: 144  per-model: {'deepseek/deepseek-r1': 31, 'openai/o4-mini': 36, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.2567  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.
+
+[2026-07-17 14:54:01] Still capped. Sleeping 3600s before attempt 6...
+[2026-07-17 15:54:01] --- Attempt 6 / 20 ---
+[2026-07-17 16:05:21] Driver output (last 500 chars): Total calls: 174  per-model: {'deepseek/deepseek-r1': 36, 'openai/o4-mini': 61, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.3481  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.
+
+[2026-07-17 16:05:21] SUCCESS: Found data_typical_001 reasoner row(s)!
+[2026-07-17 16:05:21] === ESSENTIAL REASONER ARM COMPLETE — BREAKING LOOP ===
+[2026-07-17 16:05:21] === WATCHER LOOP END ===

@@ -1,0 +1,1 @@
+{"text": "```python\ndef avg_rate(series):\n    total_change = series[-1][1] - series[0][1]\n    total_time = series[-1][0] - series[0][0]\n    return f\"{total_change / total_time:.2f}\"\n```\n\nConfidence: 75%", "model": "claude-opus-4.8", "tokens_in": 233, "tokens_out": 84, "cost_usd": 0.0, "logit_conf": null}

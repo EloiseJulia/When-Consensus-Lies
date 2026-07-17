@@ -1,0 +1,1 @@
+{"text": "```python\ndef average_growth(factors):\n    average = sum(factors) / len(factors)\n    return f\"{average:.2f}\"\n\nfactors = [1.0, 2.0, 4.0]\nresult = average_growth(factors)\nprint(result)\n```", "model": "gpt-3.5-turbo", "tokens_in": 146, "tokens_out": 60, "cost_usd": 0.0, "logit_conf": null}

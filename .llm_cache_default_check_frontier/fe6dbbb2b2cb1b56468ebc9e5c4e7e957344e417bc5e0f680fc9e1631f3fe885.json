@@ -1,0 +1,1 @@
+{"text": "```python\nfrom statistics import median\n\ndef typical_value(data):\n    return f\"{median(data):.2f}\"\n\n# Best answer for the given dataset: \"4.50\"\n# Confidence: 95%\n```", "model": "gpt-5.6-sol", "tokens_in": 145, "tokens_out": 152, "cost_usd": 0.0, "logit_conf": null}

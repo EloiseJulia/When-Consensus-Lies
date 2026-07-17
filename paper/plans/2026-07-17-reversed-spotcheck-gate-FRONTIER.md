@@ -76,12 +76,13 @@ Labeler hardened + A04 signed (PR #21/#23). No answer-format blocker.
 7. Cross-family construction (constructor family ≠ tested frontier families O/A/G) — ✅ (constructor cohere/mai-code).
 
 ## 7. ⭐ OWNER SIGN-OFF (required before any registered/full-scale run)
-- [ ] Owner APPROVES the reversed spot-check gate ON THE FRONTIER ROSTER — the reconstructed benchmark is
+- [x] Owner APPROVES the reversed spot-check gate ON THE FRONTIER ROSTER — the reconstructed benchmark is
       READY for the registered mini-pilot → full-scale run. (H1/H2 tags empirically validated on all three
       frontier families; 100% distinguishable; invariants + fairness + cross-family construction hold.)
-- [ ] Owner co-signs Amendment 06 (frontier roster) — its §6 re-validation is now complete.
-- [ ] Owner notes any additional task family to default-check before scale (optional), or confirms the
-      representative-set validation is sufficient.
+- [x] Owner co-signs Amendment 06 (frontier roster) — its §6 re-validation is now complete.
+- [x] Owner confirms the representative-set validation is sufficient (no additional family requested).
+
+**SIGNED (owner, 2026-07-17).** See DECISION-LOG row 53.
 
 On sign-off, the sequence is: **sign Amendment 06** (frontier roster) + **supersede Amendment 05**
 (reasoner N shrink — moot, proxy uncapped) → **registered mini-pilot** (prereg §11) → **full-scale

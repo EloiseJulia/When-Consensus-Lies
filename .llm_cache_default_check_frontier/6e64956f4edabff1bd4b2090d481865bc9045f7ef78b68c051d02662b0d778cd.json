@@ -1,0 +1,1 @@
+{"text": "```python\ndef day_number(day_name):\n    days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']\n    return days.index(day_name)\n```\n\nConfidence: 50% (unsure if 0=Monday or 0=Sunday, or 1-indexed)", "model": "claude-sonnet-4.6", "tokens_in": 142, "tokens_out": 74, "cost_usd": 0.0, "logit_conf": null}

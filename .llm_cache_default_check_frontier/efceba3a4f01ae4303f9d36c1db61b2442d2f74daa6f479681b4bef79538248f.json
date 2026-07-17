@@ -1,0 +1,1 @@
+{"text": "```python\ndef sort_names(names):\n    return sorted(names)\n```\n\nConfidence: 95%", "model": "claude-opus-4.8", "tokens_in": 182, "tokens_out": 33, "cost_usd": 0.0, "logit_conf": null}

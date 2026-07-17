@@ -84,9 +84,9 @@ Document: the endpoint is a local GitHub Copilot API proxy; pin the exact model 
 frontier roster is the run substrate (cite versions; note any ToS/reproducibility caveats).
 
 ## 8. Sign-off
-- [ ] Owner approves adopting the proxy roster for the registered run + the §3 family-count option (a/b/c).
-- [ ] Owner confirms the roster in §2 (or adjusts).
-- [ ] Re-validation (§6) completed + reversed spot-check gate re-issued on the new roster and signed.
-- [ ] A05 superseded (or retained as contingency).
+- [x] Owner approves adopting the proxy roster for the registered run + the §3 family-count option (a).
+- [x] Owner confirms the roster in §2.
+- [x] Re-validation (§6) completed + reversed spot-check gate re-issued on the new roster and signed.
+- [x] A05 superseded (retained as contingency).
 
-Amendment status: **DRAFT — awaiting owner sign-off + re-validation.** Metric/hypotheses/rules frozen.
+Amendment status: **SIGNED (owner, 2026-07-17).** Metric/hypotheses/rules frozen. See DECISION-LOG row 53.

@@ -1,0 +1,1 @@
+{"text": "```python\nfrom statistics import pstdev\n\ndef spread(data):\n    return f\"{pstdev(data):.2f}\"\n\nconfidence = 100\n```", "model": "gpt-5.6-sol", "tokens_in": 138, "tokens_out": 175, "cost_usd": 0.0, "logit_conf": null}

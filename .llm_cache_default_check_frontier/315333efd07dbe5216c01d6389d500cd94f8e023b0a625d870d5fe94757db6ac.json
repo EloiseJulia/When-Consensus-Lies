@@ -1,0 +1,1 @@
+{"text": "```python\ndef average_price(items):\n    total_quantity = sum(quantity for quantity, unit_price in items)\n    total_cost = sum(quantity * unit_price for quantity, unit_price in items)\n    return f\"{(total_cost / total_quantity):.2f}\"\n\n\n# Confidence: 99%\n```", "model": "gpt-5.4", "tokens_in": 171, "tokens_out": 65, "cost_usd": 0.0, "logit_conf": null}

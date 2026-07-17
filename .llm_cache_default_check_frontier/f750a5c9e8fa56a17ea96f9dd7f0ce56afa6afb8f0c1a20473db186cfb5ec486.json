@@ -1,0 +1,1 @@
+{"text": "Population standard deviation: mean=5, variance=4, std=2.00.\n\n```python\ndef spread(data):\n    n = len(data)\n    mean = sum(data) / n\n    variance = sum((x - mean) ** 2 for x in data) / n\n    return f\"{variance ** 0.5:.2f}\"\n```\n\nConfidence: 90%", "model": "claude-opus-4.8", "tokens_in": 204, "tokens_out": 166, "cost_usd": 0.0, "logit_conf": null}

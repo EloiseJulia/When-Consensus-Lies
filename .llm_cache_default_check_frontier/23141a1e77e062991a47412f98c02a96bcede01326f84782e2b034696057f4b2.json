@@ -1,0 +1,1 @@
+{"text": "```python\ndef avg_rate(series):\n    rate = (series[-1][1] - series[0][1]) / (series[-1][0] - series[0][0])\n    return f\"{rate:.2f}\"\n\n# Best answer: average rate of change over the full time span.\n# Confidence: 100%\n```", "model": "gpt-5.4", "tokens_in": 157, "tokens_out": 73, "cost_usd": 0.0, "logit_conf": null}

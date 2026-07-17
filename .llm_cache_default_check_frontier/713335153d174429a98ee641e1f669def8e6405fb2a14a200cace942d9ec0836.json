@@ -1,0 +1,1 @@
+{"text": "An active user is typically defined as a user who has had at least one session (session count > 0) during the given period. \n\nConfidence: 100%\n\n```python\ndef count_active(sessions):\n    return sum(1 for count in sessions if count > 0)\n```", "model": "gemini-3.1-pro-preview", "tokens_in": 148, "tokens_out": 66, "cost_usd": 0.0, "logit_conf": null}

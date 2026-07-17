@@ -1,0 +1,1 @@
+{"text": "Regular pay: \\(40 \\times \\$20 = \\$800\\)  \nOvertime pay: \\(5 \\times (\\$20 \\times 1.5) = \\$150\\)  \nGross pay: \\(\\$800 + \\$150 = \\$950\\)\n\nConfidence: 100%\n\nFINAL ANSWER: $950.00", "model": "gpt-5.6-sol", "tokens_in": 164, "tokens_out": 71, "cost_usd": 0.0, "logit_conf": null}

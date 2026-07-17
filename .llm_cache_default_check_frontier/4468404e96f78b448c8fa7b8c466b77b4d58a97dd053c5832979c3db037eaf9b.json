@@ -1,0 +1,1 @@
+{"text": "```python\nfrom statistics import median\n\ndef typical_value(data):\n    \"\"\"Return the median as a string rounded to two decimal places.\"\"\"\n    return f\"{median(data):.2f}\"\n\n# For [2, 4, 4, 4, 5, 5, 7, 900], the result is \"4.50\".\n# Confidence: 95%\n```", "model": "gpt-5.6-sol", "tokens_in": 145, "tokens_out": 207, "cost_usd": 0.0, "logit_conf": null}

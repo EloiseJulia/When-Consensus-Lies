@@ -1,0 +1,113 @@
+======================================================================
+DEFAULT-CHECK DIAGNOSTIC — LIVE (EXPLORATORY)
+  tasks=11  sc_k=5  budget=$0.50  rpm=10
+  max_tokens_per_call=12288  (raised for reasoner completion)
+  reasoner-sc excludes: ['code_invoice_001_k1_fiscal_year_start', 'code_invoice_001_k2_fiscal_date', 'code_invoice_001_k3_all']
+  homogeneous models=['deepseek/deepseek-r1', 'openai/o4-mini', 'mistral-ai/mistral-small-2503']
+  pool models=['deepseek/deepseek-r1', 'openai/o4-mini', 'mistral-ai/mistral-small-2503', 'meta/llama-3.3-70b-instruct']  (gpt-4o-mini EXCLUDED)
+======================================================================
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Progress: 0 completed | 14 skipped | 10 failed | 24 total jobs
+[RUNNER] I_perp rates per (config, model_id):
+  sc|deepseek/deepseek-r1: 4/20 = 0.200
+  sc|mistral-ai/mistral-small-2503: 10/55 = 0.182
+  sc|openai/o4-mini: 1/25 = 0.040
+  single|deepseek/deepseek-r1: 0/2 = 0.000
+  single|meta/llama-3.3-70b-instruct: 3/11 = 0.273
+  single|mistral-ai/mistral-small-2503: 3/11 = 0.273
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'deepseek/deepseek-r1'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Day-cap hit for 'openai/o4-mini'. Skipping remaining jobs for this model. Resume after ~24h cap reset.
+[RUNNER] Progress: 0 completed | 24 skipped | 20 failed | 44 total jobs
+[RUNNER] I_perp rates per (config, model_id):
+  sc|deepseek/deepseek-r1: 4/20 = 0.200
+  sc|mistral-ai/mistral-small-2503: 10/55 = 0.182
+  sc|openai/o4-mini: 1/25 = 0.040
+  single|deepseek/deepseek-r1: 0/2 = 0.000
+  single|meta/llama-3.3-70b-instruct: 3/11 = 0.273
+  single|mistral-ai/mistral-small-2503: 3/11 = 0.273
+====================================================================================================
+DEFAULT-CHECK DIAGNOSTIC (EXPLORATORY — does NOT count toward H1/H2)
+====================================================================================================
+task_id                                 k regime      ensemble           class           n  CDenum  CDfroz  Iperp   ->I0
+------------------------------------------------------------------------------------------------------------------------
+code_invoice_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   0.200   0.800  0.800  0.000
+code_invoice_001_k1_fiscal_year_start   1 H1_external homogeneous        weak            5   0.000   1.000  1.000  0.000
+code_invoice_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   0.800   0.800  0.200  0.000
+code_invoice_001_k2_fiscal_date         2 H1_external homogeneous        weak            5   0.200   0.800  0.800  0.000
+code_invoice_001_k2_fiscal_date         2 H1_external homogeneous        reasoner        5   0.800   0.800  0.000  0.000
+code_invoice_001_k3_all                 3 H1_external homogeneous        weak            5   0.800   0.800  0.200  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        weak            5   0.600   0.600  0.000  0.400
+diag_casesort_001                       1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+diag_geomean_001                        1 H1_external homogeneous        weak            5   0.000   0.000  0.000  1.000
+diag_stddev_001                         1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+code_invoice_001_k1_fiscal_year_start   1 H1_external heterogeneous_pool heterogeneous   2   0.500   0.500  0.500  0.000
+code_invoice_001_k2_fiscal_date         2 H1_external heterogeneous_pool heterogeneous   2   0.500   0.500  0.500  0.000
+code_invoice_001_k3_all                 3 H1_external heterogeneous_pool heterogeneous   2   0.500   0.500  0.500  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external heterogeneous_pool heterogeneous   2   1.000   1.000  0.000  0.000
+data_typical_001_k1_central_tendency    1 H2_derivable heterogeneous_pool heterogeneous   2   0.000   0.500  0.500  0.500
+diag_casesort_001                       1 H1_external heterogeneous_pool heterogeneous   2   1.000   1.000  0.000  0.000
+diag_geomean_001                        1 H1_external heterogeneous_pool heterogeneous   2   0.500   0.500  0.000  0.500
+diag_stddev_001                         1 H1_external heterogeneous_pool heterogeneous   2   0.500   0.500  0.500  0.000
+diag_weekday_001                        1 H1_external heterogeneous_pool heterogeneous   2   0.500   0.500  0.500  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+
+H2 REASONER RESOLUTION (data_typical median-skew — expect resolve->I0):
+  (no reasoner single-pass runs present)
+
+CD-vs-k CURVE (code_invoice family, homogeneous sc, per model):
+  deepseek/deepseek-r1             k1=0.20
+  mistral-ai/mistral-small-2503    k1=0.00 k2=0.20 k3=0.80
+  openai/o4-mini                   k1=0.80 k2=0.80
+
+O2 SATURATION DISAMBIGUATION (strong vs subtler, homogeneous mean CD):
+  strong  mean CDenum=1.0  CDfrozen=1.0
+  subtler mean CDenum=0.75  CDfrozen=0.75
+  If subtler_mean_cd < strong_mean_cd (and < 1.0) the CD measure DISCRIMINATES → strong-trap saturation is a trap-strength artifact. If subtler CD also ~1.0 → saturation is robust/real.
+
+Overall I_perp rate: 0.169  (guardrail B: investigate if > 0.20)
+Total calls: 124  per-model: {'deepseek/deepseek-r1': 22, 'openai/o4-mini': 25, 'mistral-ai/mistral-small-2503': 66, 'meta/llama-3.3-70b-instruct': 11}
+Total cost (nominal): $0.1852  gpt-4o-mini excluded: True
+====================================================================================================
+
+Wrote machine summary -> default_check_summary.jsonl
+Wrote human table     -> default_check_table.txt
+
+NOTE: EXPLORATORY only — report to the Manager; does NOT count toward H1/H2.

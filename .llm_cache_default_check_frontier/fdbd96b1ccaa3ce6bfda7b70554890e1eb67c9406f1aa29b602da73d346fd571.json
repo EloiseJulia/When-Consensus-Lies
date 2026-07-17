@@ -1,0 +1,1 @@
+{"text": "```python\ndef sort_names(names):\n    return sorted(names)\n\n# Confidence: 100%\n```", "model": "gpt-5.4", "tokens_in": 117, "tokens_out": 23, "cost_usd": 0.0, "logit_conf": null}

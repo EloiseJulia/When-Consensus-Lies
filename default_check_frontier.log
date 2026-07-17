@@ -1,0 +1,124 @@
+==========================================================================
+DEFAULT-CHECK FRONTIER RE-VALIDATION — LIVE (EXPLORATORY, Amendment 06)
+  provider=copilot_proxy  base_url=http://127.0.0.1:8313/v1
+  sc_k=5  budget=$5.00  rpm=30
+  max_tokens_per_call=12288  (raised for reasoners)
+  checkpoint=default_check_frontier_checkpoint.jsonl  cache=.llm_cache_default_check_frontier
+  reasoner-sc excludes: ['code_invoice_001_k1_fiscal_year_start', 'code_invoice_001_k2_fiscal_date', 'code_invoice_001_k3_all']
+  homogeneous sc models=['gpt-5.4', 'gpt-5.6-sol', 'claude-opus-4.8', 'gemini-3.1-pro-preview', 'gpt-4o-mini', 'gemini-3.5-flash', 'claude-haiku-4.5']
+    (ρ-baseline=gpt-5.4, reasoners=['claude-opus-4.8', 'gemini-3.1-pro-preview', 'gpt-5.6-sol'], weak=['claude-haiku-4.5', 'gemini-3.5-flash', 'gpt-4o-mini'])
+  heterogeneous pool=['gpt-5.4', 'claude-sonnet-4.6', 'gemini-3.1-pro-preview']
+==========================================================================
+[RUNNER] Progress: 56 completed | 0 skipped | 0 failed | 56 total jobs
+[RUNNER] I_perp rates per (config, model_id):
+  sc|claude-haiku-4.5: 6/40 = 0.150
+  sc|claude-opus-4.8: 0/40 = 0.000
+  sc|gemini-3.1-pro-preview: 5/40 = 0.125
+  sc|gemini-3.5-flash: 5/40 = 0.125
+  sc|gpt-4o-mini: 0/40 = 0.000
+  sc|gpt-5.4: 10/40 = 0.250
+  sc|gpt-5.6-sol: 1/40 = 0.025
+[RUNNER] Progress: 33 completed | 0 skipped | 0 failed | 33 total jobs
+[RUNNER] I_perp rates per (config, model_id):
+  sc|claude-haiku-4.5: 6/40 = 0.150
+  sc|claude-opus-4.8: 0/40 = 0.000
+  sc|gemini-3.1-pro-preview: 5/40 = 0.125
+  sc|gemini-3.5-flash: 5/40 = 0.125
+  sc|gpt-4o-mini: 0/40 = 0.000
+  sc|gpt-5.4: 10/40 = 0.250
+  sc|gpt-5.6-sol: 1/40 = 0.025
+  single|claude-sonnet-4.6: 4/11 = 0.364
+  single|gemini-3.1-pro-preview: 2/11 = 0.182
+  single|gpt-5.4: 3/11 = 0.273
+====================================================================================================
+DEFAULT-CHECK DIAGNOSTIC (EXPLORATORY — does NOT count toward H1/H2)
+====================================================================================================
+task_id                                 k regime      ensemble           class           n  CDenum  CDfroz  Iperp   ->I0
+------------------------------------------------------------------------------------------------------------------------
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        rho_baseline    5   1.000   1.000  0.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        rho_baseline    5   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        weak            5   0.000   0.000  0.000  1.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        reasoner        5   0.000   0.000  0.000  1.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        reasoner        5   0.000   0.000  0.000  1.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        weak            5   0.000   0.000  0.000  1.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        weak            5   0.000   0.000  0.000  1.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        rho_baseline    5   0.000   1.000  1.000  0.000
+data_typical_001_k1_central_tendency    1 H2_derivable homogeneous        reasoner        5   0.000   0.000  0.000  1.000
+diag_casesort_001                       1 H1_external homogeneous        weak            5   0.800   0.800  0.000  0.200
+diag_casesort_001                       1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+diag_casesort_001                       1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+diag_casesort_001                       1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+diag_casesort_001                       1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+diag_casesort_001                       1 H1_external homogeneous        rho_baseline    5   1.000   1.000  0.000  0.000
+diag_casesort_001                       1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+diag_geomean_001                        1 H1_external homogeneous        weak            5   0.000   0.000  0.000  1.000
+diag_geomean_001                        1 H1_external homogeneous        reasoner        5   0.000   0.000  0.000  1.000
+diag_geomean_001                        1 H1_external homogeneous        reasoner        5   0.000   0.000  0.000  1.000
+diag_geomean_001                        1 H1_external homogeneous        weak            5   0.000   0.000  0.000  1.000
+diag_geomean_001                        1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+diag_geomean_001                        1 H1_external homogeneous        rho_baseline    5   0.600   0.600  0.000  0.400
+diag_geomean_001                        1 H1_external homogeneous        reasoner        5   0.000   0.000  0.000  1.000
+diag_stddev_001                         1 H1_external homogeneous        weak            5   0.000   1.000  1.000  0.000
+diag_stddev_001                         1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+diag_stddev_001                         1 H1_external homogeneous        reasoner        5   0.400   0.400  0.000  0.600
+diag_stddev_001                         1 H1_external homogeneous        weak            5   0.600   0.600  0.000  0.400
+diag_stddev_001                         1 H1_external homogeneous        weak            5   0.400   0.400  0.000  0.600
+diag_stddev_001                         1 H1_external homogeneous        rho_baseline    5   0.000   1.000  1.000  0.000
+diag_stddev_001                         1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        weak            5   0.800   0.800  0.200  0.000
+diag_weekday_001                        1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        reasoner        5   0.000   1.000  1.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        weak            5   0.000   1.000  1.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        rho_baseline    5   1.000   1.000  0.000  0.000
+diag_weekday_001                        1 H1_external homogeneous        reasoner        5   0.800   0.800  0.200  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        weak            5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        rho_baseline    5   1.000   1.000  0.000  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external homogeneous        reasoner        5   1.000   1.000  0.000  0.000
+code_invoice_001_k1_fiscal_year_start   1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+code_invoice_001_k2_fiscal_date         2 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+code_invoice_001_k3_all                 3 H1_external heterogeneous_pool heterogeneous   3   0.000   1.000  1.000  0.000
+code_quarter_001_k1_fiscal_year_start   1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+data_activeusers_001_k1_active_user_th  1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+data_typical_001_k1_central_tendency    1 H2_derivable heterogeneous_pool heterogeneous   3   0.000   0.333  0.333  0.667
+diag_casesort_001                       1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+diag_geomean_001                        1 H1_external heterogeneous_pool heterogeneous   3   0.000   0.333  0.333  0.667
+diag_stddev_001                         1 H1_external heterogeneous_pool heterogeneous   3   0.333   0.667  0.667  0.000
+diag_weekday_001                        1 H1_external heterogeneous_pool heterogeneous   3   0.333   0.667  0.667  0.000
+policy_overtime_001_k1_overtime_thresh  1 H1_external heterogeneous_pool heterogeneous   3   1.000   1.000  0.000  0.000
+
+H2 REASONER RESOLUTION (data_typical median-skew — expect resolve->I0):
+  gemini-3.1-pro-preview           resolve->I0=1.000 resolved=True labels=['I0']
+
+CD-vs-k CURVE (code_invoice family, homogeneous sc, per model):
+
+O2 SATURATION DISAMBIGUATION (strong vs subtler, homogeneous mean CD):
+  strong  mean CDenum=1.0  CDfrozen=1.0
+  subtler mean CDenum=0.5857142857142856  CDfrozen=0.7285714285714285
+  If subtler_mean_cd < strong_mean_cd (and < 1.0) the CD measure DISCRIMINATES → strong-trap saturation is a trap-strength artifact. If subtler CD also ~1.0 → saturation is robust/real.
+
+Overall I_perp rate: 0.115  (guardrail B: investigate if > 0.20)
+Total calls: 313  per-model: {'gpt-5.4': 51, 'gpt-5.6-sol': 40, 'claude-opus-4.8': 40, 'gemini-3.1-pro-preview': 51, 'gpt-4o-mini': 40, 'gemini-3.5-flash': 40, 'claude-haiku-4.5': 40, 'claude-sonnet-4.6': 11}
+Total cost (nominal): $0.0000  gpt-4o-mini excluded: False
+====================================================================================================
+
+Wrote machine summary -> default_check_frontier_summary.jsonl
+Wrote human table     -> default_check_frontier_table.txt
+
+NOTE: EXPLORATORY re-validation (Amendment 06) — report to the Manager; does NOT count toward H1/H2.

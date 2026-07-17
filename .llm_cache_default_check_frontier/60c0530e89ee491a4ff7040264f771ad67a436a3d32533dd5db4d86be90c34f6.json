@@ -1,0 +1,1 @@
+{"text": "```python\ndef day_number(day_name):\n    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']\n    return days.index(day_name) + 1 if day_name in days else None\n```", "model": "gpt-3.5-turbo", "tokens_in": 122, "tokens_out": 53, "cost_usd": 0.0, "logit_conf": null}

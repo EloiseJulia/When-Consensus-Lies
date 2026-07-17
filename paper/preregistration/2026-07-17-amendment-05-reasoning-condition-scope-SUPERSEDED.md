@@ -1,4 +1,14 @@
-# Pre-Registration Amendment 05 — Asymmetric reasoning-condition sample size (DRAFT, NOT yet frozen)
+# Pre-Registration Amendment 05 — Asymmetric reasoning-condition sample size (SUPERSEDED by Amendment 06, 2026-07-17)
+
+> **STATUS: SUPERSEDED / WITHDRAWN (owner-signed 2026-07-17).** The reasoner daily-cap that motivated this
+> amendment was a property of the GitHub-Models roster. Amendment 06 adopts the local Copilot proxy
+> (`ghc-api`), which is effectively UNCAPPED — so the reasoning `model_class` can run at the FULL §10 N and
+> the asymmetric-N shrink proposed here is UNNECESSARY. This amendment is retained ONLY as a documented
+> CONTINGENCY: if the proxy proves rate-limited or unstable at full scale, fall back to the asymmetric-N
+> design specified below. It never governed a registered run and imposes no deviation. See DECISION-LOG
+> row 53.
+
+---
 
 > Amends FROZEN pre-registration `2026-07-15-prereg.md` (freeze `c0a0393`) §10 (sample sizes) ONLY — for
 > the reasoning `model_class`. **Metric definitions, hypotheses, regime criterion, and decision rules are
