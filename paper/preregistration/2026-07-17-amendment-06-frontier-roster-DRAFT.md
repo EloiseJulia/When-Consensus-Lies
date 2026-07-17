@@ -51,22 +51,32 @@ so the constructor/judge family overlap is moot in practice); code_reviewer = Op
 SEPARATE code-audit plane (orthogonal to the experiment, per the handoff). Documented; provenance separation
 holds on the experiment plane (constructor M ≠ tested O/A/G ≠ judge-when-used).
 
-## 4. Reasoning vs weak in the frontier roster (H2 operationalization)
+## 4. Reasoning vs weak in the frontier roster (H2 operationalization) — RE-VALIDATION COMPLETE (2026-07-17)
 On the proxy, all frontier models "reason"; the H2 contrast is REASONER (frontier top: gpt-5.6-sol /
-claude-opus-4.8 / gemini-3.1-pro) vs WEAKER (gpt-4o-mini / gemini-3.5-flash / claude-haiku-4.5). The
-EMPIRICAL default-check (re-run, §6) is the FINAL arbiter of which models resolve H2 vs default wrong.
+claude-opus-4.8 / gemini-3.1-pro) vs WEAKER (gpt-4o-mini / gemini-3.5-flash / claude-haiku-4.5), plus a
+genuinely-weak legacy tier (gpt-3.5-turbo). The EMPIRICAL default-check has now been RE-RUN twice on the
+proxy (rows 50-51): **H1 strong traps → CD=1.000 for EVERY class incl. frontier reasoners AND cross-family;
+H2 derivable ambiguity → resolved →I0≈1.0 by EVERY class, incl. gpt-4o-mini/flash/haiku AND gpt-3.5-turbo.**
+⇒ the pre-registered reasoner-vs-weak H2 INTERACTION is empirically ABSENT on the frontier roster; the
+two-regime demarcation is a REGIME MAIN EFFECT (disambiguator LOCATION, not model capability). Per owner
+ruling (row 52), the registered run STILL includes the model_class factor and formally tests+reports the
+pre-registered interaction (expected null, §9), while the paper LEADS with the regime main-effect. This is
+a reporting-framing consequence — it does NOT change any frozen hypothesis, metric, or decision rule.
 
 ## 5. Amendment 05 status under this change
 If the proxy is truly unlimited, the reasoner daily-cap that motivated A05's reasoning-N shrink is GONE →
 **A05 likely becomes UNNECESSARY** (run the reasoning condition at full §10 N). Recommendation: SUPERSEDE
 A05 (keep it as a documented contingency if the proxy proves rate-limited/unstable at scale).
 
-## 6. Required re-validation BEFORE the registered run (cheap now — unlimited)
-- RE-RUN the empirical per-regime default-check on the new roster (H1 persists incl. frontier reasoners;
-  H2 reasoners resolve, weak default wrong) → RE-ISSUE the reversed spot-check gate on the frontier roster
-  for owner sign-off. (The current gate was validated on the old GitHub-Models roster.)
-- Confirm the proxy handles the harness request shape (reasoning models: max_completion_tokens; logprobs
-  availability for the silent-failure logit_conf signal — verify per family).
+## 6. Required re-validation BEFORE the registered run — ✅ COMPLETE (2026-07-17)
+- ✅ RE-RAN the empirical per-regime default-check on the frontier roster, TWICE (rows 50-51;
+  default_check_frontier_summary.jsonl). Result: H1 persists incl. frontier reasoners + cross-family
+  (CD=1.0); H2 resolved by ALL classes incl. gpt-3.5-turbo (regime main-effect, not an interaction — §4).
+- ✅ Confirmed the proxy handles the harness request shape (max_completion_tokens; logprobs only from
+  OpenAI families → homogeneous ρ-baseline = gpt-5.4; temperature omitted for gpt-5.6/mai-code). PR #27/#28
+  landed the provider + a runner token-budget fix; 439-call re-run at $0.00, no cap hit.
+- ☐ RE-ISSUE the reversed spot-check gate on the frontier roster for owner sign-off (bundled with this
+  amendment; regime tags now empirically validated on frontier).
 
 ## 7. Reproducibility / documentation (reviewer pre-empt)
 Document: the endpoint is a local GitHub Copilot API proxy; pin the exact model version strings from
