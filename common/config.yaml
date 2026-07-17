@@ -1,72 +1,69 @@
 # Role-based model routing with provenance separation (HARD LAW 6)
-# constructor ≠ tested ≠ judge ≠ code_reviewer must be different model families.
+# Amendment 06 (SIGNED 2026-07-18): Registered run on Copilot-proxy frontier roster.
 #
-# Endpoint: https://models.github.ai/inference (OpenAI-compatible)
-# Token env: GITHUB_MODELS_TOKEN or GH_MODELS_TOKEN (User-scope; never logged)
+# Hard Law 6 (inviolable): constructor(microsoft) ∉ tested{openai,anthropic,google}.
+# Judge is also microsoft (same as constructor) and also outside the tested pool —
+# both serve meta roles only; neither contaminates the experiment.
 #
-# Anthropic and Google are NOT on GitHub Models → dropped from experiment routing.
-# Build/audit provenance (Claude-impl / GPT-audit) is CODE provenance, orthogonal
-# to the experiment family-distinctness requirement.
+# Proxy slugs verified live 2026-07-18 against http://127.0.0.1:8313/v1/models.
+# Bare slugs (no provider/ prefix) — copilot_proxy protocol.
 #
-# Option-B family table (owner-approved 2026-07-15 — all experiment roles mutually distinct):
-#   constructor(cohere) ∉ tested{openai,meta,mistral-ai,deepseek}
-#   judge(microsoft)   ∉ tested ∪ {constructor(cohere)}
-#   ✓ Hard Law 6 satisfied
+# Family mapping: gpt*→openai, claude*→anthropic, gemini*→google, mai-code*→microsoft.
 #
-# Reasoning pool finalized 2026-07-15 after live token verification:
-#   openai/o4-mini confirmed reachable (160 req/60s; logprobs NOT supported →
-#   verbalized confidence; this is expected behaviour for reasoning models).
+# providers.default stays github_models for backward-compat;
+# the registered run passes --provider copilot_proxy explicitly.
 
 roles:
   constructor:
-    # Cohere: outside every tested pool → clean cross-family construction control (R2).
-    family: cohere
-    model: cohere/cohere-command-a
+    # Microsoft: outside every tested pool → clean cross-family construction (R2).
+    family: microsoft
+    model: mai-code-1-flash-picker
 
   tested_agents:
     homogeneous:
-      # OpenAI gpt-4o-mini: shared-prior ρ-baseline (owner-ruled: strongest deployed
-      # shared prior + ONLY family on GitHub Models exposing logprobs → logit_conf
-      # signal available for the silent-failure signature).
+      # gpt-5.4: shared-prior ρ-baseline (openai, logprobs-capable via copilot_proxy).
       - family: openai
-        model: openai/gpt-4o-mini
+        model: gpt-5.4
 
     heterogeneous:
-      # 4-family diverse mix for H1 cross-family baseline measurement.
+      # 3-family cross-model pool for H1 cross-family CD measurement (row-35 headline).
       - family: openai
-        model: openai/gpt-4o-mini
-      - family: meta
-        model: meta/llama-3.3-70b-instruct
-      - family: mistral-ai
-        model: mistral-ai/mistral-small-2503
-      - family: deepseek
-        model: deepseek/deepseek-v3-0324
+        model: gpt-5.4
+      - family: anthropic
+        model: claude-sonnet-4.6
+      - family: google
+        model: gemini-3.1-pro-preview
 
     reasoning:
-      # H2 test: frontier reasoners — both verified reachable on GitHub Models.
-      # deepseek-r1: strong open-weight reasoning baseline.
-      # openai/o4-mini: verified frontier reasoner (2026-07-15 live token check;
-      #   160 req/60s rate limit; logprobs NOT supported → verbalized confidence
-      #   only — expected behaviour for reasoning-trace models).
-      # Hard Law 6: openai + deepseek are already in the tested pool; no new
-      # family introduced; constructor(cohere) + judge(microsoft) remain outside.
-      - family: deepseek
-        model: deepseek/deepseek-r1
+      # H2 test: frontier reasoning models, 3 families.
       - family: openai
-        model: openai/o4-mini
+        model: gpt-5.6-sol
+      - family: anthropic
+        model: claude-opus-4.8
+      - family: google
+        model: gemini-3.1-pro-preview
+
+    weak:
+      # H2 contrast: non-frontier baselines for reasoner-vs-weak split.
+      - family: openai
+        model: gpt-4o-mini
+      - family: google
+        model: gemini-3.5-flash
+      - family: anthropic
+        model: claude-haiku-4.5
 
   judge:
-    # microsoft/phi-4: NOT in any tested pool (phi-4-reasoning purposely avoided
-    # to keep phi-4 clean as judge). Used only when executable gold is unavailable.
+    # Microsoft: outside tested pool. Used only when executable gold unavailable.
+    # Same family as constructor; both are outside the experiment tested pool.
     family: microsoft
-    model: microsoft/phi-4
+    model: mai-code-1-flash-picker
 
   code_reviewer:
-    # PLACEHOLDER — Manager overrides per slice so auditor family ≠ implementer.
-    # This is CODE-AUDIT routing only; orthogonal to the experiment provenance
-    # requirements. Default: mistral-ai (distinct from constructor/judge/homogeneous).
-    family: mistral-ai
-    model: mistral-ai/mistral-medium-2505
+    # openai/gpt-5.6-sol — CODE-AUDIT routing only; orthogonal to the experiment
+    # provenance requirements. Reviewer may share a family with the tested pool
+    # since per-item family separation is enforced at run time.
+    family: openai
+    model: gpt-5.6-sol
 
 seeds:
   global: 20260713

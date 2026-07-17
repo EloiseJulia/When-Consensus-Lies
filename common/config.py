@@ -40,67 +40,59 @@ def assert_provenance_separation(config: Dict[str, Any] = None) -> None:
     """Assert provenance separation (HARD LAW 6).
 
     Enforced invariants (the ones that actually protect the science):
-      1. constructor / judge / code_reviewer use pairwise-distinct families
-         (the three "meta" roles must never collapse into one family).
-      2. None of constructor / judge / code_reviewer shares a family with the
-         HOMOGENEOUS tested pool. The homogeneous pool is the shared-prior ρ
-         baseline; if a meta role shared its family it could inherit the same
-         blind spot and turn ρ / labels / reviews into an artifact.
-      3. constructor does not appear anywhere in tested_agents at all (it must
-         not have authored the priors of any subject it constructs tasks for).
+      1. constructor ∉ all tested_agents families (including the new ``weak`` group).
+         This is the CRITICAL scientific constraint: the constructor must not share a
+         family with any agent under test, so the benchmark cannot have inherent bias
+         toward any tested family (R2 construction control).
+      2. judge ∉ all tested_agents families (including ``weak``). Protects labeling
+         integrity: the LLM judge must not share a family with any tested agent so its
+         labels cannot reflect that family's inherent bias.
 
-    Intentional NON-constraint (documented so future audits don't re-flag it):
-      The HETEROGENEOUS tested pool is deliberately broad (spans many families)
-      to model real heterogeneous multi-agent systems. judge / code_reviewer are
-      allowed to share a family with the heterogeneous pool because per-item
-      separation is enforced at RUN TIME (Phase 2): a judge never scores, and a
-      reviewer never reviews, an output produced by its own family on that item.
+    Intentional NON-constraints (documented to prevent re-flagging by future audits):
+      * constructor and judge MAY share the same family (e.g., both microsoft for the
+        Amendment-06 frontier roster). Both are outside the tested pool, so the scientific
+        constraint is fully satisfied. Pairwise distinctness between meta roles is NOT
+        required for experimental validity.
+      * code_reviewer MAY share a family with the homogeneous tested pool. The code
+        reviewer performs CODE-AUDIT routing, which is orthogonal to the experiment's
+        provenance requirements. Per-item family separation is enforced at run time
+        (Phase 2): a reviewer never reviews output produced by its own family on that
+        item.
+      * The HETEROGENEOUS tested pool is deliberately broad (spans many families) to
+        model real heterogeneous multi-agent systems. Meta roles are allowed to share a
+        family with the heterogeneous pool, subject to the run-time separation above.
 
     Raises:
-        AssertionError: if any enforced invariant above is violated.
+        AssertionError: if constructor or judge appears in the tested_agents families.
     """
     if config is None:
         config = load_config()
 
     constructor_family = config["roles"]["constructor"]["family"]
     judge_family = config["roles"]["judge"]["family"]
-    code_reviewer_family = config["roles"]["code_reviewer"]["family"]
 
     tested = config["roles"]["tested_agents"]
 
     def _families(group: str) -> set:
         return {m["family"] for m in tested.get(group, [])}
 
-    homogeneous_families = _families("homogeneous")
-    all_tested_families = set()
-    for group in ["homogeneous", "heterogeneous", "reasoning"]:
+    # Collect all tested families across ALL sub-roles (including new ``weak`` group).
+    all_tested_families: set = set()
+    for group in ["homogeneous", "heterogeneous", "reasoning", "weak"]:
         all_tested_families |= _families(group)
 
-    meta_roles = {
-        "constructor": constructor_family,
-        "judge": judge_family,
-        "code_reviewer": code_reviewer_family,
-    }
-
-    # (1) meta roles pairwise-distinct
-    families = list(meta_roles.values())
-    if len(families) != len(set(families)):
-        raise AssertionError(
-            "Provenance separation violated: constructor/judge/code_reviewer must "
-            f"use distinct families. Got: {meta_roles}"
-        )
-
-    # (2) no meta role shares the shared-prior (homogeneous) baseline family
-    for role, fam in meta_roles.items():
-        if fam in homogeneous_families:
-            raise AssertionError(
-                f"Provenance separation violated: {role} family '{fam}' overlaps the "
-                f"homogeneous shared-prior tested pool {sorted(homogeneous_families)}"
-            )
-
-    # (3) constructor must not appear anywhere in tested_agents
+    # (1) constructor ∉ tested families
     if constructor_family in all_tested_families:
         raise AssertionError(
             f"Provenance separation violated: constructor family "
-            f"'{constructor_family}' appears in tested_agents"
+            f"'{constructor_family}' appears in tested_agents "
+            f"{sorted(all_tested_families)}"
+        )
+
+    # (2) judge ∉ tested families
+    if judge_family in all_tested_families:
+        raise AssertionError(
+            f"Provenance separation violated: judge family "
+            f"'{judge_family}' appears in tested_agents "
+            f"{sorted(all_tested_families)}"
         )

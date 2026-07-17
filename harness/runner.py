@@ -105,7 +105,11 @@ def endpoint_identity(provider: Optional[str], base_url: Optional[str]) -> str:
     return "\x00".join([provider or "", _normalize_base_url(base_url)])
 
 
-def run_identity(run: AgentRun, endpoint: str = "") -> str:
+def run_identity(
+    run: AgentRun,
+    endpoint: str = "",
+    replicate_seed: Optional[int] = None,
+) -> str:
     """Canonical string key for AgentRun identity.
 
     Encodes task_id × config × model_role × model_id × seed, which is the
@@ -118,6 +122,15 @@ def run_identity(run: AgentRun, endpoint: str = "") -> str:
     as distinct checkpoint records. When it is "" (the canonical default) the key
     is BYTE-IDENTICAL to the pre-change 5-field value — the endpoint dimension is
     prepended ONLY when non-empty.
+
+    BLOCKER A fix: ``replicate_seed`` is the runner grid (job) seed shared by ALL
+    agents in one multi-agent job (SC/MAD).  When it differs from ``run.seed``
+    (the per-agent seed = base_seed + i), it is appended to the identity so that
+    two agents from DIFFERENT replicates that happen to share a per-agent seed
+    (overlapping ranges when seeds are consecutive) produce DISTINCT identity keys
+    and are both retained.  When ``replicate_seed`` equals ``run.seed`` or is None
+    (single-agent jobs; legacy checkpoints without the field) the identity is
+    byte-identical to the pre-change 5-field value — no checkpoint incompatibility.
     """
     parts = [
         run.task_id,
@@ -126,6 +139,11 @@ def run_identity(run: AgentRun, endpoint: str = "") -> str:
         run.model_id,
         str(run.seed),
     ]
+    # Include replicate_seed ONLY when it differs from per-agent seed.
+    # Single-agent records (replicate_seed == run.seed) and legacy records
+    # (replicate_seed is None) produce identities identical to before.
+    if replicate_seed is not None and replicate_seed != run.seed:
+        parts.append(f"R{replicate_seed}")
     if endpoint:
         parts.insert(0, endpoint)
     return "\x00".join(parts)
@@ -267,7 +285,18 @@ class CheckpointStore:
                         logit_conf=rec.get("logit_conf"),
                         seed=int(rec["seed"]),
                     )
-                    rid = run_identity(run, endpoint=rec.get("endpoint", ""))
+                    # BLOCKER A fix: include replicate_seed (when present and ≠
+                    # per-agent seed) in the identity so agents from DIFFERENT
+                    # replicates that share the same per-agent seed are NOT
+                    # deduplicated.  Legacy records without replicate_seed produce
+                    # the same 5-field identity as before — no incompatibility.
+                    rep_seed_raw = rec.get("replicate_seed")
+                    rep_seed: Optional[int] = int(rep_seed_raw) if rep_seed_raw is not None else None
+                    rid = run_identity(
+                        run,
+                        endpoint=rec.get("endpoint", ""),
+                        replicate_seed=rep_seed,
+                    )
                     if rid not in self._run_ids:
                         self._run_ids.add(rid)
                         self._runs.append(rec)
@@ -297,9 +326,27 @@ class CheckpointStore:
             fh.flush()
             os.fsync(fh.fileno())
 
-    def add_run(self, run: AgentRun) -> None:
-        """Checkpoint a single AgentRun.  Idempotent by identity."""
-        rid = run_identity(run, endpoint=self._endpoint)
+    def add_run(self, run: AgentRun, replicate_seed: Optional[int] = None) -> None:
+        """Checkpoint a single AgentRun.  Idempotent by identity.
+
+        B1 fix: ``replicate_seed`` is the runner grid seed shared by ALL agents
+        in the same job (task × config × model × seed in the grid tuple).  It
+        differs from ``run.seed`` for multi-agent configs (SC, MAD) where each
+        agent gets a distinct per-agent seed ``base_seed + i``.  Persisting the
+        grid seed alongside the per-agent seed allows the analysis adapter to
+        group all agents from ONE job into ONE ensemble cell rather than treating
+        each agent as a separate singleton cell (which would make CD degenerate).
+
+        The field is written as ``"replicate_seed"`` in the JSONL record only
+        when ``replicate_seed`` is provided AND it differs from ``run.seed``, so
+        single-agent configs (which always have replicate_seed == AgentRun.seed)
+        produce byte-identical records to before — no checkpoint incompatibility
+        for existing single-agent checkpoints.
+        """
+        rid = run_identity(run, endpoint=self._endpoint, replicate_seed=(
+            replicate_seed if (replicate_seed is not None and replicate_seed != run.seed)
+            else None
+        ))
         if rid in self._run_ids:
             return  # already stored — idempotent, no duplicate write
         record: Dict[str, Any] = {
@@ -314,6 +361,11 @@ class CheckpointStore:
             "logit_conf": run.logit_conf,
             "seed": run.seed,
         }
+        # Persist replicate_seed only when it differs from the per-agent seed so
+        # that single-agent jobs (where they are always equal) produce identical
+        # records to legacy checkpoints — no format churn for the common case.
+        if replicate_seed is not None and replicate_seed != run.seed:
+            record["replicate_seed"] = replicate_seed
         # Persist the endpoint namespace ONLY when non-empty so default-provider
         # records are byte-for-byte identical to the pre-change format.
         if self._endpoint:
@@ -613,6 +665,13 @@ class RunnerConfig:
     rpm: int = DEFAULT_RPM
     max_budget_usd: Optional[float] = None
     max_infra_retries: int = DEFAULT_INFRA_RETRIES
+    #: Per-config keyword arguments forwarded to ``run_task``.  For example
+    #: ``{"sc": {"k": 5}, "homogeneous-MAD": {"n_agents": 5}}``.  Missing
+    #: configs use the ``run_task`` defaults.  BLOCKER C fix: without this the
+    #: runner always calls ``run_task(task, cfg, client)`` with NO kwargs, so
+    #: homogeneous-MAD uses the run_task default of ``n_agents=3`` (§10 requires
+    #: N≥5).
+    config_kwargs: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
@@ -1022,7 +1081,11 @@ class Runner:
             # cost already in the ledger) nor double-count.
             for run, label in labeled_runs:
                 run.label = label
-                self._store.add_run(run)
+                # B1 fix: pass the GRID seed (the replicate/job seed shared by
+                # all agents in this job) so the analysis adapter can group them
+                # into ONE ensemble cell.  AgentRun.seed carries the PER-AGENT
+                # seed (base_seed + i) which varies within an SC/MAD job.
+                self._store.add_run(run, replicate_seed=seed)
             self._store.mark_job_done(task_id, cfg_name, model_role, model_id, seed)
             completed += 1
 
@@ -1065,7 +1128,10 @@ class Runner:
         last_exc: Optional[Exception] = None
         for attempt in range(self._cfg.max_infra_retries):
             try:
-                runs = self._run_task(task, cfg_name, client)
+                # BLOCKER C fix: pass per-config kwargs to run_task so
+                # homogeneous-MAD uses n_agents=5 (§10) and SC uses k=5, etc.
+                cfg_kw = (self._cfg.config_kwargs or {}).get(cfg_name, {})
+                runs = self._run_task(task, cfg_name, client, **cfg_kw)
                 labeled: List[Tuple[AgentRun, str]] = []
                 for run in runs:
                     lbl = self._label_run(run, task)
