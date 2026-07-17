@@ -166,6 +166,60 @@ def test_bootstrap_two_way_cluster_runs():
     assert lo <= point <= hi
 
 
+def test_two_way_cluster_ci_materially_wider_than_one_way():
+    """BLOCKER 1 (audit): the correct two-way cluster bootstrap resamples the
+    task AND model dimensions INDEPENDENTLY, so when the metric variance is
+    driven mostly by the MODEL dimension, a one-way (task-only) bootstrap
+    badly UNDERSTATES the CI. The buggy joint-cell resample (treating every
+    (task, model) cell as an independent unit) gives a CI far too narrow and
+    NOT materially wider than the one-way one — this test fails on it.
+    """
+    rng = np.random.default_rng(0)
+    n_tasks, n_models = 15, 15
+    task_eff = rng.normal(0, 0.3, n_tasks)     # small task variance
+    model_eff = rng.normal(0, 1.5, n_models)   # large model variance (crossed)
+    rows = []
+    for i in range(n_tasks):
+        for j in range(n_models):
+            rows.append(dict(task=f"t{i}", model=f"m{j}",
+                             y=task_eff[i] + model_eff[j] + rng.normal(0, 0.05)))
+    data = pd.DataFrame(rows)
+    mean_y = lambda f: float(f["y"].mean())  # noqa: E731
+
+    _, lo1, hi1 = bootstrap_confidence_intervals(
+        mean_y, data, n_bootstrap=400, cluster="task", seed=1)
+    _, lo2, hi2 = bootstrap_confidence_intervals(
+        mean_y, data, n_bootstrap=400, cluster=["task", "model"], seed=1)
+    w_one, w_two = hi1 - lo1, hi2 - lo2
+    assert w_two > 2.0 * w_one, (
+        f"two-way CI ({w_two:.3f}) must be materially wider than one-way "
+        f"({w_one:.3f}); the joint-cell resample bug makes it too narrow")
+
+
+def test_crossed_gaussian_status_labeled_honestly():
+    """BLOCKER 2 (audit): a TRUE crossed random-intercepts Gaussian fit must be
+    labeled ``ok:crossed`` (constant top-level group + variance components for
+    BOTH task and model), NOT the ambiguous ``ok`` the old nested
+    ``groups=task, vc_formula={model}`` (model nested within task) returned.
+    """
+    rng = np.random.default_rng(0)
+    models = [f"m{j}" for j in range(6)]
+    task_re = {f"t{i}": rng.normal(0, 1.0) for i in range(24)}
+    model_re = {m: rng.normal(0, 1.0) for m in models}
+    rows = []
+    for i in range(24):
+        k = (i % 3) + 1
+        for m in models:
+            for _ in range(2):
+                y = 0.2 * k + task_re[f"t{i}"] + model_re[m] + rng.normal(0, 0.5)
+                rows.append(dict(task=f"t{i}", model=m, ambiguity_k=k, cd=y))
+    data = pd.DataFrame(rows)
+    res = fit_mixed_effects_model(data, "cd ~ ambiguity_k + (1|task) + (1|model)")
+    assert res["status"] == "ok:crossed", res["status"]
+    # The plain "ok" label (old nested model reported as crossed) is forbidden.
+    assert res["status"] != "ok"
+
+
 def test_bootstrap_single_cluster_degrades_gracefully():
     data = pd.DataFrame({"cluster": ["only"] * 10, "y": range(10)})
     point, lo, hi = bootstrap_confidence_intervals(

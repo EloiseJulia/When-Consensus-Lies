@@ -131,20 +131,28 @@ def fit_mixed_effects_model(
 
 
 def _fit_gaussian(data: pd.DataFrame, fixed_formula: str, groups: List[str]) -> Optional[dict]:
-    """Gaussian mixed model with crossed random intercepts, with fallbacks.
+    """Gaussian mixed model with CROSSED random intercepts, with fallbacks.
 
-    Mixed-effects covariance estimation can hit a singular covariance on highly
-    DISCRETE outcomes (e.g. item-level CD taking a few distinct values), which
-    is common in this project's synthetic / small cells. To stay robust while
-    keeping the fixed-effect estimates valid, we degrade gracefully:
+    The prereg §8 item-level model has crossed (NOT nested) random intercepts
+    by ``task`` and by ``model``. A ``MixedLM(groups=task, vc_formula={model})``
+    is WRONG: it makes the model-variance component nested WITHIN each task. The
+    statsmodels crossed-RE idiom is a single constant top-level group with a
+    variance component for EACH grouping var:
+    ``groups=<constant>``, ``vc_formula={"task": "0+C(task)", "model": ...}``.
 
-    1. crossed random intercepts (``groups=<first>`` + variance components for
-       the remaining grouping vars);
-    2. a single random intercept by the first grouping var;
-    3. OLS with cluster-robust standard errors on the first grouping var
-       (fixed-effect point estimates unchanged, SEs still respect clustering).
+    Mixed-effects covariance estimation can still hit a singular covariance /
+    non-convergence on highly DISCRETE outcomes (common in this project's small
+    synthetic cells). To stay robust while keeping the fixed-effect estimates
+    valid, we degrade gracefully and record the path honestly in ``status``:
 
-    The ``status`` in the returned dict records which path was used.
+    1. ``ok:crossed`` — true crossed random intercepts for ALL grouping vars,
+       reported ONLY if the fit converged with a valid covariance;
+    2. ``ok:single_re:<var>`` — a single random intercept by the first var
+       (used when the crossed fit fails / does not converge);
+    3. ``ok:ols_cluster_fallback`` — OLS with cluster-robust SEs on the first
+       grouping var (fixed-effect point estimates unchanged).
+
+    ``status`` NEVER claims the full crossed model when a fallback actually ran.
     """
     import statsmodels.formula.api as smf
 
@@ -161,29 +169,65 @@ def _fit_gaussian(data: pd.DataFrame, fixed_formula: str, groups: List[str]) -> 
         }
         return coefficients, p_values, confidence_intervals
 
-    # --- Path 1 & 2: mixed-effects (crossed, then single RE) ---
+    def _converged(res) -> bool:
+        conv = getattr(res, "converged", None)
+        if conv is False:
+            return False
+        # A valid covariance is required for trustworthy CIs.
+        try:
+            ci = res.conf_int()
+            if not np.all(np.isfinite(np.asarray(ci, dtype=float))):
+                return False
+        except Exception:
+            return False
+        return True
+
+    # --- Path 1: TRUE crossed random intercepts (constant top-level group) ---
     if groups:
-        primary = groups[0]
-        rest = groups[1:]
-        vc = {g: f"0 + C({g})" for g in rest}
-        for attempt_vc in (vc, None):
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    model = smf.mixedlm(fixed_formula, df, groups=df[primary],
-                                        vc_formula=attempt_vc)
-                    res = model.fit(reml=True, method="lbfgs")
+        grp_col = "__crossed_grp__"
+        i = 0
+        while grp_col in df.columns:
+            i += 1
+            grp_col = f"__crossed_grp__{i}"
+        df[grp_col] = "all"
+        vc = {g: f"0 + C({g})" for g in groups}
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")  # treat convergence warnings as failure
+                model = smf.mixedlm(fixed_formula, df, groups=df[grp_col], vc_formula=vc)
+                res = model.fit(reml=True, method="lbfgs")
+            if _converged(res):
                 fe_names = list(res.fe_params.index)
                 coefficients, p_values, confidence_intervals = _extract(res, fe_names)
                 return {
                     "coefficients": coefficients,
                     "p_values": p_values,
                     "confidence_intervals": confidence_intervals,
-                    "status": "ok" if attempt_vc else "ok:single_re",
+                    "status": "ok:crossed",
                     "family": "gaussian",
                 }
-            except Exception:
-                continue
+        except Exception:
+            pass
+
+    # --- Path 2: single random intercept by the first grouping var ---
+    if groups:
+        primary = groups[0]
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = smf.mixedlm(fixed_formula, df, groups=df[primary])
+                res = model.fit(reml=True, method="lbfgs")
+            fe_names = list(res.fe_params.index)
+            coefficients, p_values, confidence_intervals = _extract(res, fe_names)
+            return {
+                "coefficients": coefficients,
+                "p_values": p_values,
+                "confidence_intervals": confidence_intervals,
+                "status": f"ok:single_re:{primary}",
+                "family": "gaussian",
+            }
+        except Exception:
+            pass
 
     # --- Path 3: OLS with cluster-robust SEs (fixed effects only) ---
     try:
@@ -268,9 +312,12 @@ def bootstrap_confidence_intervals(
     - ``cluster=None`` -> i.i.d. row resample.
     - ``cluster="task"`` -> resample distinct task (item) clusters.
     - ``cluster="model"`` -> resample distinct model clusters.
-    - ``cluster=["task", "model"]`` -> joint-cluster resample of the distinct
-      (task, model) cluster identifiers (respects BOTH item and model
-      clustering at their finest joint level).
+    - ``cluster=["task", "model"]`` -> INDEPENDENT two-way cluster bootstrap:
+      the task levels and the model levels are each resampled with replacement
+      independently, and every (task, model) cell enters with multiplicity =
+      product of its levels' resample counts. This respects BOTH item and model
+      clustering and (correctly) yields WIDER CIs than a naive joint-cell
+      resample that wrongly treats each (task, model) cell as independent.
 
     Args:
         metric_fn: Callable taking a DataFrame and returning a float.
@@ -306,18 +353,74 @@ def bootstrap_confidence_intervals(
     if not cluster_cols:
         return (point, float("nan"), float("nan"))
 
-    grouped = data.groupby(_gb(cluster_cols), dropna=False, sort=False)
+    if len(cluster_cols) == 1:
+        return _one_way_cluster_bootstrap(
+            metric_fn, data, cluster_cols[0], n_bootstrap, rng, point, lo_pct, hi_pct)
+
+    return _multiway_cluster_bootstrap(
+        metric_fn, data, cluster_cols, n_bootstrap, rng, point, lo_pct, hi_pct)
+
+
+def _one_way_cluster_bootstrap(metric_fn, data, col, n_bootstrap, rng, point, lo_pct, hi_pct):
+    """Resample the distinct levels of a single clustering column."""
+    grouped = data.groupby(col, dropna=False, sort=False)
     keys = list(grouped.groups.keys())
     index_map = {k: np.asarray(grouped.groups[k]) for k in keys}
     if len(keys) < 2:
         return (point, point, point)
-
     key_idx = np.arange(len(keys))
-    stats = []
+    stats: List[float] = []
     for _ in range(n_bootstrap):
         chosen = rng.choice(key_idx, size=len(keys), replace=True)
         boot_index = np.concatenate([index_map[keys[i]] for i in chosen])
         stats.append(_safe_metric(metric_fn, data.loc[boot_index]))
+    return _summarize(point, stats, lo_pct, hi_pct)
+
+
+def _multiway_cluster_bootstrap(metric_fn, data, cluster_cols, n_bootstrap, rng,
+                                point, lo_pct, hi_pct):
+    """Independent multi-way (e.g. item AND model) cluster bootstrap.
+
+    The STANDARD two-way cluster bootstrap: each clustering dimension's set of
+    levels is resampled with replacement INDEPENDENTLY, then a joint (item,
+    model) cell enters the resampled dataset with multiplicity equal to the
+    PRODUCT of its levels' resample counts. This treats items and models as
+    independently exchangeable and correctly widens the CI relative to naive
+    joint-cell resampling (which wrongly treats every (item, model) cell as an
+    independent unit and yields CIs that are far too narrow).
+    """
+    from collections import Counter
+
+    dim_levels = [np.asarray(pd.unique(data[c])) for c in cluster_cols]
+    if all(len(lv) < 2 for lv in dim_levels):
+        return (point, point, point)
+
+    cell_groups = data.groupby(cluster_cols, dropna=False, sort=False)
+    cell_index = {}
+    for key, idx in cell_groups.groups.items():
+        key_t = key if isinstance(key, tuple) else (key,)
+        cell_index[key_t] = np.asarray(idx)
+
+    stats: List[float] = []
+    for _ in range(n_bootstrap):
+        counts = []
+        for levels in dim_levels:
+            samp = rng.choice(len(levels), size=len(levels), replace=True)
+            counts.append(Counter(levels[i] for i in samp))
+        parts = []
+        for key_t, idx in cell_index.items():
+            mult = 1
+            for d, val in enumerate(key_t):
+                mult *= counts[d].get(val, 0)
+                if mult == 0:
+                    break
+            if mult > 0:
+                parts.append(np.tile(idx, mult))
+        if parts:
+            boot_index = np.concatenate(parts)
+            stats.append(_safe_metric(metric_fn, data.loc[boot_index]))
+        else:
+            stats.append(float("nan"))
     return _summarize(point, stats, lo_pct, hi_pct)
 
 
