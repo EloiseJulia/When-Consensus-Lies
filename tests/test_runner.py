@@ -553,6 +553,52 @@ class TestAdditiveThrottle:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOKEN-BUDGET regression — per-job client inherits base max_tokens_per_call
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestTokenBudgetPropagation:
+    """A raised per-call output budget (e.g. 12288 for reasoners) must survive the
+    per-job client reconstruction. On the pre-fix factory the child reverted to the
+    4096 default → reasoners truncate mid-reasoning even though the base was raised.
+    """
+
+    def test_per_job_client_inherits_max_tokens_per_call(self, tmp_path):
+        from common.config import load_config
+        from common.llm import LLMClient
+
+        base = LLMClient(
+            load_config(), cache_dir=str(tmp_path / "cache"),
+            offline=True, max_tokens_per_call=12288,
+        )
+        runner_cfg = RunnerConfig(
+            tasks=[make_task("t1")], configs=["single"], seeds=[42],
+            checkpoint_path=tmp_path / "ckpt.jsonl",
+        )
+        runner = Runner(runner_cfg, base)
+        job_client = runner._client_factory(load_config(), None)
+        assert job_client.max_tokens_per_call == 12288, (
+            "per-job client must inherit the base max_tokens_per_call (raised budget)"
+        )
+
+    def test_reconstructed_proxy_payload_uses_raised_budget(self, tmp_path):
+        """The propagated budget actually reaches the request payload's output cap."""
+        from common.config import load_config
+        from common.llm import LLMClient
+
+        base = LLMClient(
+            load_config(), cache_dir=str(tmp_path / "cache"),
+            offline=True, provider="copilot_proxy", max_tokens_per_call=12288,
+        )
+        runner_cfg = RunnerConfig(
+            tasks=[make_task("t1")], configs=["single"], seeds=[42],
+            checkpoint_path=tmp_path / "ckpt.jsonl",
+        )
+        job_client = Runner(runner_cfg, base)._client_factory(load_config(), None)
+        payload = job_client._build_proxy_payload("gpt-5.6-sol", "hi", seed=1, temperature=0.7)
+        assert payload["max_completion_tokens"] == 12288
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # (d) Day-cap stops model cleanly and leaves resumable checkpoint
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -377,7 +377,6 @@ def run_diagnostic(
     report = build_report(store.all_runs(), tasks, task_role,
                           total_cost_usd=store.aggregate_cost_usd, roster=roster)
     report["runner_status"] = {"pass_a_sc": status_a, "pass_b_single": status_b}
-    report["roster_name"] = roster.name
     return report
 
 

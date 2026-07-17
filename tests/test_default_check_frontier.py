@@ -145,6 +145,38 @@ def test_resolve_base_url_host_port_override():
     ) == "http://127.0.0.1:9999/v1"
 
 
+def test_resolve_base_url_reads_config_provider():
+    """With no env override, the configured providers.copilot_proxy.base_url wins —
+    the SAME source LLMClient resolves from (guard must not diverge from the client)."""
+    cfg = {"providers": {"copilot_proxy": {"base_url": "http://cfg-host:7000/v1"}}}
+    assert frontier.resolve_base_url(env={}, config=cfg) == "http://cfg-host:7000/v1"
+    # Env override still beats config.
+    assert frontier.resolve_base_url(
+        env={"FRONTIER_PROXY_BASE_URL": "http://env-host:1/v1"}, config=cfg
+    ) == "http://env-host:1/v1"
+    # No env, no config → None (LLMClient owns default resolution).
+    assert frontier.resolve_base_url(env={}, config={}) is None
+
+
+def test_guard_probes_the_resolved_url(monkeypatch):
+    """The reachability guard must probe EXACTLY the resolved base_url (config or env),
+    never a hard-coded default, so a configured alternate endpoint is not mis-probed."""
+    probed = []
+    monkeypatch.setattr(frontier, "proxy_reachable",
+                        lambda url, *a, **k: (probed.append(url), True)[1])
+
+    cfg = {"providers": {"copilot_proxy": {"base_url": "http://cfg-host:7000/v1"}}}
+    ok, _ = frontier._should_run(env={"RUN_FRONTIER_CHECK": "1"}, config=cfg)
+    assert ok is True
+    assert probed == ["http://cfg-host:7000/v1"], "guard must probe the config base_url"
+
+    probed.clear()
+    frontier._should_run(
+        env={"RUN_FRONTIER_CHECK": "1", "FRONTIER_PROXY_HOST": "envhost"}, config=cfg
+    )
+    assert probed == ["http://envhost:8313/v1"], "env override must win in the probe"
+
+
 # ── C. Full offline run: pass A excludes code_invoice; pool = 3 families ───────
 
 def test_offline_frontier_run_wiring(artifacts_dir):

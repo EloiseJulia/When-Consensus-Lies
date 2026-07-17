@@ -133,8 +133,14 @@ def resolve_base_url(
       1. ``FRONTIER_PROXY_BASE_URL`` env var (full URL).
       2. ``FRONTIER_PROXY_HOST`` / ``FRONTIER_PROXY_PORT`` env vars → ``http://host:port/v1``
          (either may be omitted; defaults derive from the built-in proxy base URL).
-      3. ``None`` → let ``LLMClient`` resolve it from config ``providers.copilot_proxy``
-         (base_url) or the built-in default (http://127.0.0.1:8313/v1).
+      3. config ``providers.copilot_proxy.base_url`` (when *config* is supplied) — the
+         SAME source ``LLMClient`` uses, so the guard probes exactly what will run.
+      4. ``None`` → let ``LLMClient`` resolve it from config / the built-in default
+         (http://127.0.0.1:8313/v1).
+
+    NOTE: when *config* is None this returns None for case 3 so ``LLMClient`` still owns
+    resolution at construction; :func:`resolve_probe_url` collapses None to a concrete
+    URL for the reachability probe.
     """
     env = os.environ if env is None else env
     explicit = env.get("FRONTIER_PROXY_BASE_URL")
@@ -146,7 +152,22 @@ def resolve_base_url(
         host = host or "127.0.0.1"
         port = port or "8313"
         return f"http://{host}:{port}/v1"
+    if isinstance(config, dict):
+        providers = config.get("providers")
+        if isinstance(providers, dict):
+            proxy = providers.get(PROVIDER)
+            if isinstance(proxy, dict) and proxy.get("base_url"):
+                return proxy["base_url"]
     return None  # LLMClient resolves from config / built-in default
+
+
+def resolve_probe_url(
+    env: Optional[Dict[str, str]] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Concrete URL for the reachability probe: the resolved base_url, or the built-in
+    default when unresolved. Always the SAME endpoint the live LLMClient will target."""
+    return resolve_base_url(env, config) or DEFAULT_PROXY_BASE_URL
 
 
 def _flag_set(env: Optional[Dict[str, str]] = None) -> bool:
@@ -170,21 +191,29 @@ def proxy_reachable(base_url: str, timeout: float = 2.0) -> bool:
         return False
 
 
-def _should_run(env: Optional[Dict[str, str]] = None) -> Tuple[bool, str]:
+def _should_run(
+    env: Optional[Dict[str, str]] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, str]:
     """Double-guard. Returns (ok, reason). ok=False → print reason, exit 0.
 
     Guard 1: RUN_FRONTIER_CHECK=1 (explicit opt-in).
     Guard 2: proxy reachable (skippable via FRONTIER_SKIP_PROXY_PROBE=1 for the Manager
-             when reachability is already established / probed out-of-band)."""
+             when reachability is already established / probed out-of-band).
+
+    The reachability probe targets the SAME base_url the live ``LLMClient`` will use —
+    resolved from env override → config ``providers.copilot_proxy.base_url`` → default —
+    so a configured alternate endpoint is never wrongly skipped nor the wrong host probed.
+    """
     env = os.environ if env is None else env
     if not _flag_set(env):
         return False, "RUN_FRONTIER_CHECK != 1"
     if env.get("FRONTIER_SKIP_PROXY_PROBE", "0") == "1":
         return True, "flag set; proxy probe skipped"
-    base_url = resolve_base_url(env) or DEFAULT_PROXY_BASE_URL
+    base_url = resolve_probe_url(env, config)
     if not proxy_reachable(base_url):
         return False, f"proxy not reachable at {base_url}"
-    return True, "flag set; proxy reachable"
+    return True, f"flag set; proxy reachable at {base_url}"
 
 
 # ── Client construction + run (offline-testable) ──────────────────────────────
@@ -229,7 +258,7 @@ def run_frontier(
     SEPARATE checkpoint. ``client`` fully controls online/offline, so the offline unit
     test and the Manager's live run share this code path."""
     tasks, task_role = default_check.select_tasks()
-    return default_check.run_diagnostic(
+    report = default_check.run_diagnostic(
         client, tasks, task_role,
         checkpoint_path=checkpoint_path,
         sc_k=sc_k,
@@ -237,6 +266,10 @@ def run_frontier(
         rpm=rpm,
         roster=FRONTIER_ROSTER,
     )
+    # Frontier-ONLY provenance. Added here (never in the shared default_check
+    # run_diagnostic) so the GitHub-Models default report schema stays byte-identical.
+    report["roster_name"] = FRONTIER_ROSTER.name
+    return report
 
 
 def write_report(report: Dict[str, Any], out_dir: str = ".") -> Tuple[str, str]:
@@ -259,19 +292,29 @@ def write_report(report: Dict[str, Any], out_dir: str = ".") -> Tuple[str, str]:
 # ── CLI entry point (double-guarded) ──────────────────────────────────────────
 
 def main() -> None:
-    ok, reason = _should_run()
-    if not ok:
+    from common.config import load_config
+
+    # Fast path: no explicit opt-in → skip before loading anything.
+    if not _flag_set():
         print(
-            f"default_check_frontier: skipped ({reason}). "
+            "default_check_frontier: skipped (RUN_FRONTIER_CHECK != 1). "
             "Set RUN_FRONTIER_CHECK=1 (and ensure the Copilot proxy is reachable, or set "
             "FRONTIER_SKIP_PROXY_PROBE=1) to run live."
         )
         sys.exit(0)
 
-    from common.config import load_config
-
+    # Load config BEFORE the reachability guard so the probe targets the SAME base_url
+    # the live LLMClient will use (env override → config providers.copilot_proxy → default).
     cfg = load_config()
-    base_url = resolve_base_url()
+    ok, reason = _should_run(config=cfg)
+    if not ok:
+        print(
+            f"default_check_frontier: skipped ({reason}). "
+            "Ensure the Copilot proxy is reachable, or set FRONTIER_SKIP_PROXY_PROBE=1."
+        )
+        sys.exit(0)
+
+    base_url = resolve_base_url(config=cfg)
 
     print("=" * 74)
     print("DEFAULT-CHECK FRONTIER RE-VALIDATION — LIVE (EXPLORATORY, Amendment 06)")

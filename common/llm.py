@@ -255,7 +255,15 @@ class LLMClient:
         self._request_times: Deque[float] = collections.deque()
         self._http_timeout: float = http_timeout           # MAJOR 5
         self._max_tokens_per_call: int = max_tokens_per_call  # BLOCKER 2 pre-auth
-        
+
+    @property
+    def max_tokens_per_call(self) -> int:
+        """Per-call output-token budget (drives max_completion_tokens/max_tokens in the
+        request payload AND the budget pre-authorization). Exposed read-only so the
+        Runner can propagate it to per-job client reconstructions (a raised reasoner
+        budget must not silently revert to the 4096 default)."""
+        return self._max_tokens_per_call
+
     def complete(
         self,
         role: str,

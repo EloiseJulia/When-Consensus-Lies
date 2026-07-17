@@ -180,6 +180,16 @@ def test_offline_end_to_end_pipeline(artifacts_dir):
     assert "diag_weekday_001" in row_task_ids
     assert "code_quarter_001_k1_fiscal_year_start" in row_task_ids
 
+    # SCHEMA STABILITY: the DEFAULT (GitHub-Models) report must expose EXACTLY the
+    # historical key set — the roster refactor must NOT leak any new top-level key
+    # (e.g. roster_name is FRONTIER-only) into the already-logged github diagnostic.
+    assert set(report.keys()) == {
+        "rows", "reasoner_resolution_h2", "cd_vs_k_curve",
+        "saturation_disambiguation", "overall_i_perp_rate", "per_model_calls",
+        "total_calls", "total_cost_usd", "gpt4o_mini_excluded", "runner_status",
+    }
+    assert "roster_name" not in report
+
     # The human-readable table renders without error.
     table = default_check.render_table(report)
     assert "I_perp" in table

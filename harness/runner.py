@@ -750,6 +750,10 @@ class Runner:
         PROVIDER fix: propagate the base client's provider/base_url/auth settings so
         a copilot_proxy (or custom-endpoint) base client is not silently reset to
         the GitHub Models default on each per-job reconstruction.
+        TOKEN-BUDGET fix: propagate the base client's ``max_tokens_per_call`` so a
+        raised per-call output budget (e.g. 12288 for reasoners) is NOT reverted to
+        the 4096 default on per-job reconstruction — otherwise reasoners truncate
+        mid-reasoning even though the base client was configured with a higher cap.
         """
         return LLMClient(
             config=job_config,
@@ -757,6 +761,7 @@ class Runner:
             offline=self._base_client.offline,
             max_budget_usd=remaining_budget_usd,
             max_requests_per_min=self._base_client.max_requests_per_min,
+            max_tokens_per_call=self._base_client.max_tokens_per_call,
             provider=self._base_client.provider,
             base_url=self._base_client.base_url,
             require_auth=self._base_client.require_auth,
