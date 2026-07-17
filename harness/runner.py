@@ -644,6 +644,9 @@ class Runner:
         layered ON TOP of this, giving additive — never weaker — pacing.
         BLOCKER 2 fix: ``remaining_budget_usd`` is the true sub-cap that keeps
         each per-job pre-auth guard consistent with the aggregate ledger.
+        PROVIDER fix: propagate the base client's provider/base_url/auth settings so
+        a copilot_proxy (or custom-endpoint) base client is not silently reset to
+        the GitHub Models default on each per-job reconstruction.
         """
         return LLMClient(
             config=job_config,
@@ -651,6 +654,10 @@ class Runner:
             offline=self._base_client.offline,
             max_budget_usd=remaining_budget_usd,
             max_requests_per_min=self._base_client.max_requests_per_min,
+            provider=self._base_client.provider,
+            base_url=self._base_client.base_url,
+            require_auth=self._base_client.require_auth,
+            no_temperature_models=self._base_client.no_temperature_models,
         )
 
     @staticmethod

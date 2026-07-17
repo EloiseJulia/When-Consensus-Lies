@@ -68,8 +68,57 @@ def is_reasoning_model(slug: str) -> bool:
     Matches ``openai/o1*``, ``openai/o3*``, ``openai/o4*``, ``openai/gpt-5*``.
     The prefix list ``_REASONING_PREFIXES`` is the single source of truth and is
     easily editable as new model families are released.
+
+    NOTE: this classifier is for the GITHUB_MODELS provider (family-prefixed slugs
+    such as ``openai/gpt-5``). It is intentionally NOT used by the copilot_proxy
+    provider, whose request shape is handled separately (see ``_build_proxy_payload``)
+    because the proxy exposes bare, un-prefixed slugs (``gpt-5.4``) with different
+    per-slug parameter support empirically probed against the live endpoint.
     """
     return any(slug.startswith(p) for p in _REASONING_PREFIXES)
+
+
+# ── Provider abstraction ───────────────────────────────────────────────────────
+# The client can target either the GitHub Models inference endpoint (default,
+# token-authenticated) or a LOCAL, OpenAI-compatible GitHub Copilot API proxy
+# (``ghc-api``) that requires NO auth token and serves frontier models across
+# families. Selection is via the ``provider`` constructor arg and/or a config
+# ``providers:`` block. The offline mock default and the GitHub Models online path
+# are behavior-preserving; only ``provider="copilot_proxy"`` changes the request
+# shape / auth.
+PROVIDER_GITHUB_MODELS = "github_models"
+PROVIDER_COPILOT_PROXY = "copilot_proxy"
+
+GITHUB_MODELS_BASE_URL = "https://models.github.ai/inference"
+COPILOT_PROXY_BASE_URL = "http://127.0.0.1:8313/v1"
+
+# Per-provider default base URL and whether an Authorization token is required.
+_PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    PROVIDER_GITHUB_MODELS: {"base_url": GITHUB_MODELS_BASE_URL, "require_auth": True},
+    PROVIDER_COPILOT_PROXY: {"base_url": COPILOT_PROXY_BASE_URL, "require_auth": False},
+}
+
+# Copilot-proxy request-shape findings (empirically probed against the live local
+# proxy on 2026-07-17; see paper/research if promoted). Substring match on the bare
+# proxy slug. These slugs reject a ``temperature`` field with HTTP 400
+# ("Unsupported parameter: 'temperature' is not supported with this model"), so it
+# must be OMITTED for them. All other observed slugs (gpt-4o-mini, gpt-5.4,
+# claude-*, gemini-*) accept temperature.
+_PROXY_NO_TEMPERATURE_DEFAULT = (
+    "gpt-5.6",   # gpt-5.6-sol / -terra / -luna reject temperature
+    "mai-code",  # mai-code-1-flash-picker rejects temperature
+)
+
+
+def proxy_omits_temperature(slug: str, patterns=_PROXY_NO_TEMPERATURE_DEFAULT) -> bool:
+    """Return True when the copilot-proxy *slug* rejects a ``temperature`` field.
+
+    Empirically, most proxy models accept ``temperature`` but a few frontier /
+    picker slugs return HTTP 400 for it. ``patterns`` is a substring allow-list of
+    slugs that must have ``temperature`` omitted; it is configurable so the roster
+    can evolve without code changes.
+    """
+    return any(p in slug for p in patterns)
 
 
 @dataclass
@@ -97,11 +146,14 @@ class LLMClient:
         config: Dict[str, Any],
         cache_dir: str = ".llm_cache",
         offline: bool = True,
-        base_url: str = "https://models.github.ai/inference",
+        base_url: Optional[str] = None,
         max_budget_usd: Optional[float] = None,
         max_requests_per_min: Optional[int] = None,
         http_timeout: float = 60.0,
         max_tokens_per_call: int = 4096,
+        provider: Optional[str] = None,
+        require_auth: Optional[bool] = None,
+        no_temperature_models: Optional[tuple] = None,
     ):
         """Initialize LLM client.
 
@@ -109,17 +161,61 @@ class LLMClient:
             config: Loaded config dict (from config.py)
             cache_dir: Directory for disk cache
             offline: If True, use deterministic mock mode (default)
-            base_url: Base URL for the OpenAI-compatible API endpoint
+            base_url: Base URL for the OpenAI-compatible API endpoint. When None
+                (default) it is resolved from the selected provider (GitHub Models
+                for ``github_models``; ``http://127.0.0.1:8313/v1`` for
+                ``copilot_proxy``). An explicit value always wins so the proxy
+                host/port is fully configurable.
             max_budget_usd: Hard spend cap in USD; raises BudgetExceeded when exceeded
             max_requests_per_min: Max API calls per 60-second sliding window
             http_timeout: Socket timeout (seconds) for each urlopen call (MAJOR 5)
             max_tokens_per_call: Assumed worst-case output tokens for budget pre-auth
+            provider: ``"github_models"`` (default) or ``"copilot_proxy"``. Selects
+                the base URL default, whether an auth token is required, and the
+                per-request payload shape. When None, resolved from a config
+                ``providers.default`` key if present, else ``github_models``.
+            require_auth: Whether an Authorization token is required/sent. When None,
+                resolved from the provider (True for GitHub Models, False for the
+                local proxy, which needs no token).
+            no_temperature_models: Optional substring allow-list of proxy slugs that
+                reject a ``temperature`` field (proxy provider only). When None,
+                resolved from config or the built-in default.
         """
         self.config = config
+
+        # ── Resolve provider (param > config > default) ───────────────────────
+        providers_cfg = (config or {}).get("providers", {}) if isinstance(config, dict) else {}
+        if provider is None:
+            provider = providers_cfg.get("default", PROVIDER_GITHUB_MODELS)
+        if provider not in _PROVIDER_DEFAULTS:
+            raise ValueError(
+                f"Unknown provider {provider!r}; expected one of "
+                f"{sorted(_PROVIDER_DEFAULTS)}"
+            )
+        self.provider = provider
+        provider_defaults = _PROVIDER_DEFAULTS[provider]
+        provider_conf = providers_cfg.get(provider, {}) if isinstance(providers_cfg, dict) else {}
+
+        # ── Resolve base_url (explicit param > config > provider default) ─────
+        if base_url is None:
+            base_url = provider_conf.get("base_url", provider_defaults["base_url"])
+        self.base_url = base_url.rstrip("/")
+
+        # ── Resolve auth requirement (explicit param > config > provider default)
+        if require_auth is None:
+            require_auth = provider_conf.get("require_auth", provider_defaults["require_auth"])
+        self.require_auth = bool(require_auth)
+
+        # ── Resolve the proxy no-temperature roster (param > config > default) ─
+        if no_temperature_models is None:
+            no_temperature_models = tuple(
+                provider_conf.get("no_temperature_models", _PROXY_NO_TEMPERATURE_DEFAULT)
+            )
+        self.no_temperature_models = tuple(no_temperature_models)
+
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.offline = offline
-        self.base_url = base_url.rstrip("/")
         self.max_budget_usd = max_budget_usd
         self.max_requests_per_min = max_requests_per_min
         self.cost_log_path = self.cache_dir / "cost_log.jsonl"
@@ -248,11 +344,14 @@ class LLMClient:
     def _cache_key(self, role: str, prompt: str, seed: int, family: Optional[str] = None, model: Optional[str] = None, temperature: Optional[float] = None) -> str:
         """Generate cache key from inputs.
 
-        Includes the execution mode (offline vs online), the resolved family:model
-        identity, and the temperature so the cache can never (a) serve an offline mock
-        to an online client, (b) return a stale model id after the role's configured
-        model/family changes, or (c) collide across different temperatures — any of
-        which would corrupt AgentRun provenance or produce incorrect cached responses.
+        Includes the execution mode (offline vs online), the PROVIDER + base_url
+        (so a copilot_proxy result can never be served to a github_models client or
+        vice-versa even for the same slug/prompt), the resolved family:model
+        identity, and the temperature so the cache can never (a) serve an offline
+        mock to an online client, (b) return a stale model id after the role's
+        configured model/family changes, (c) collide across providers/endpoints, or
+        (d) collide across different temperatures — any of which would corrupt
+        AgentRun provenance or produce incorrect cached responses.
         """
         mode = "offline" if self.offline else "online"
         
@@ -262,7 +361,10 @@ class LLMClient:
         else:
             identity = self._role_identity(role)
         
-        content = f"{mode}|{identity}|{role}|{prompt}|{seed}|{temperature}"
+        content = (
+            f"{mode}|{self.provider}|{self.base_url}|{identity}|"
+            f"{role}|{prompt}|{seed}|{temperature}"
+        )
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
     
     def _read_cache(self, cache_key: str) -> Optional[Completion]:
@@ -374,14 +476,17 @@ class LLMClient:
 
         is_openai = slug.startswith("openai/")
         is_reasoning = is_reasoning_model(slug)
+        is_proxy = self.provider == PROVIDER_COPILOT_PROXY
 
         # ── Token — read from env; never log / print / write ──────────────────
+        # Required for GitHub Models; the local copilot_proxy needs NO token
+        # (require_auth=False) so a missing token is NOT an error there.
         token = (
             os.environ.get("GITHUB_MODELS_TOKEN")
             or os.environ.get("GH_MODELS_TOKEN")
             or ""
         )
-        if not token:
+        if self.require_auth and not token:
             raise RuntimeError(
                 "Online mode requires an API token. "
                 "Set GITHUB_MODELS_TOKEN or GH_MODELS_TOKEN environment variable."
@@ -389,7 +494,8 @@ class LLMClient:
 
         # ── Pre-authorization budget check (BLOCKER 2 fix) ────────────────────
         # Estimate worst-case cost for THIS call and refuse BEFORE making any
-        # HTTP request. Never returns an over-budget completion.
+        # HTTP request. Never returns an over-budget completion. The local proxy
+        # is free/unlimited → worst-case cost is 0.0 and never blocks.
         if self.max_budget_usd is not None:
             # Use UTF-8 byte length as a GUARANTEED upper bound on input tokens.
             # For byte-level BPE tokenizers (GPT-4o, GPT-4.1, etc.) each token
@@ -398,7 +504,7 @@ class LLMClient:
             # ZWJ sequences where char count << byte count. Add 64 for
             # message-framing / system-prompt overhead.
             tokens_in_upper = len(prompt.encode("utf-8")) + 64
-            worst_case_cost = self._estimate_cost(
+            worst_case_cost = self._estimate_cost_for(
                 slug, tokens_in_upper, self._max_tokens_per_call
             )
             if self._total_cost_usd + worst_case_cost > self.max_budget_usd:
@@ -409,32 +515,19 @@ class LLMClient:
                 )
 
         # ── Build request ──────────────────────────────────────────────────────
-        payload: Dict[str, Any] = {
-            "model": slug,
-            "messages": [{"role": "user", "content": prompt}],
-            "seed": seed,
-        }
-        if is_reasoning:
-            # o-series / gpt-5*: use max_completion_tokens (not max_tokens);
-            # do NOT send logprobs (HTTP 400) or temperature (not accepted).
-            # Budget pre-auth still uses self._max_tokens_per_call as the output bound.
-            payload["max_completion_tokens"] = self._max_tokens_per_call
+        if is_proxy:
+            payload = self._build_proxy_payload(slug, prompt, seed, temperature)
         else:
-            # All non-reasoning models: max_tokens enforces the output cap.
-            payload["max_tokens"] = self._max_tokens_per_call
-            # Include temperature when caller provided one (never for reasoning models).
-            if temperature is not None:
-                payload["temperature"] = temperature
-            if is_openai:
-                # Non-reasoning OpenAI: logprobs supported → logit_conf populated.
-                payload["logprobs"] = True
-                payload["top_logprobs"] = 1
+            payload = self._build_github_models_payload(
+                slug, prompt, seed, temperature, is_openai, is_reasoning
+            )
 
-        # Authorization header carries the token; never echoed back in logs or errors
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        }
+        # Authorization header carries the token when auth is required; never
+        # echoed back in logs or errors. For the no-auth proxy, no Authorization
+        # header is sent at all (the proxy accepts requests without one).
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if self.require_auth:
+            headers["Authorization"] = f"Bearer {token}"
 
         url = f"{self.base_url}/chat/completions"
         body_bytes = json.dumps(payload).encode("utf-8")
@@ -497,7 +590,11 @@ class LLMClient:
                     # Terminal: read body once, scrub token, store
                     try:
                         _scrubbed_body = exc.read().decode("utf-8", errors="replace")
-                        _scrubbed_body = _scrubbed_body.replace(token, "[REDACTED]")
+                        # Guard: never call str.replace("", ...) — an empty token
+                        # (proxy provider has none) would otherwise splice
+                        # "[REDACTED]" between every character of the body.
+                        if token:
+                            _scrubbed_body = _scrubbed_body.replace(token, "[REDACTED]")
                     except Exception:
                         _scrubbed_body = "(unreadable)"
                 else:
@@ -576,16 +673,26 @@ class LLMClient:
         tokens_out = int(usage.get("completion_tokens", 0))
 
         # ── Cost estimate + budget accumulation ───────────────────────────────
-        cost_usd = self._estimate_cost(slug, tokens_in, tokens_out)
+        # Proxy is free/unlimited → 0.0; GitHub Models uses the pricing table.
+        cost_usd = self._estimate_cost_for(slug, tokens_in, tokens_out)
         self._total_cost_usd += cost_usd
 
-        # ── logit_conf (non-reasoning OpenAI only) ────────────────────────────
-        # Reasoning models don't send logprobs (would cause HTTP 400), so
-        # logit_conf is always None for them.  Non-reasoning non-OpenAI models
-        # don't expose logprobs on GitHub Models either.
-        logit_conf: Optional[float] = (
-            self._extract_logit_conf(choice) if (is_openai and not is_reasoning) else None
-        )
+        # ── logit_conf ─────────────────────────────────────────────────────────
+        # GitHub Models: only non-reasoning openai/* slugs expose logprobs.
+        # Copilot proxy: logprobs are requested for every slug (harmless — no slug
+        #   rejects the field) and _extract_logit_conf returns the signal ONLY when
+        #   the response actually carries logprobs. Empirically that is the OpenAI
+        #   families (gpt-4o-mini, gpt-5.4 → logprobs returned); Anthropic / Google /
+        #   mai return none → logit_conf is None and callers fall back to verbalized
+        #   confidence, exactly as reasoning models already do.
+        if is_proxy:
+            logit_conf: Optional[float] = self._extract_logit_conf(choice)
+        else:
+            logit_conf = (
+                self._extract_logit_conf(choice)
+                if (is_openai and not is_reasoning)
+                else None
+            )
 
         return Completion(
             text=text,
@@ -618,6 +725,97 @@ class LLMClient:
         """Estimate USD cost from token counts using the pricing table."""
         price_in, price_out = self._MODEL_PRICING.get(slug, self._DEFAULT_PRICING)
         return (tokens_in * price_in + tokens_out * price_out) / 1000.0
+
+    def _estimate_cost_for(self, slug: str, tokens_in: int, tokens_out: int) -> float:
+        """Provider-aware cost estimate.
+
+        The local copilot_proxy is free / unlimited, so its per-call cost is 0.0 —
+        this keeps budget pre-authorization and accumulation consistent with reality
+        (a budget cap never spuriously blocks proxy calls). GitHub Models uses the
+        pricing table via :meth:`_estimate_cost`.
+        """
+        if self.provider == PROVIDER_COPILOT_PROXY:
+            return 0.0
+        return self._estimate_cost(slug, tokens_in, tokens_out)
+
+    # ── Per-provider request-shape builders ───────────────────────────────────
+
+    def _build_github_models_payload(
+        self,
+        slug: str,
+        prompt: str,
+        seed: int,
+        temperature: Optional[float],
+        is_openai: bool,
+        is_reasoning: bool,
+    ) -> Dict[str, Any]:
+        """Build the GitHub Models chat/completions payload (UNCHANGED behavior).
+
+        Reasoning models (o-series / gpt-5*) use ``max_completion_tokens`` and send
+        neither ``logprobs`` nor ``temperature``. Non-reasoning models use
+        ``max_tokens``; ``temperature`` is included when provided; ``logprobs`` is
+        requested only for openai/* slugs.
+        """
+        payload: Dict[str, Any] = {
+            "model": slug,
+            "messages": [{"role": "user", "content": prompt}],
+            "seed": seed,
+        }
+        if is_reasoning:
+            # o-series / gpt-5*: use max_completion_tokens (not max_tokens);
+            # do NOT send logprobs (HTTP 400) or temperature (not accepted).
+            payload["max_completion_tokens"] = self._max_tokens_per_call
+        else:
+            # All non-reasoning models: max_tokens enforces the output cap.
+            payload["max_tokens"] = self._max_tokens_per_call
+            # Include temperature when caller provided one (never for reasoning models).
+            if temperature is not None:
+                payload["temperature"] = temperature
+            if is_openai:
+                # Non-reasoning OpenAI: logprobs supported → logit_conf populated.
+                payload["logprobs"] = True
+                payload["top_logprobs"] = 1
+        return payload
+
+    def _build_proxy_payload(
+        self,
+        slug: str,
+        prompt: str,
+        seed: int,
+        temperature: Optional[float],
+    ) -> Dict[str, Any]:
+        """Build the copilot_proxy chat/completions payload.
+
+        Request shape determined empirically by live-probing the local proxy
+        (OpenAI-compatible ``/v1/chat/completions``) on 2026-07-17:
+
+          * ``max_completion_tokens`` is accepted by EVERY probed family
+            (gpt-4o-mini, gpt-5.x, claude-*, gemini-*, mai-code) whereas
+            ``max_tokens`` returns HTTP 400 for gpt-5.x. We therefore ALWAYS use
+            ``max_completion_tokens`` — the single universally-accepted output cap.
+          * ``logprobs``/``top_logprobs`` are accepted (never 400) by every family;
+            only the OpenAI families actually RETURN logprobs (gpt-4o-mini, gpt-5.4),
+            so we request them unconditionally and extract logit_conf when present
+            (None otherwise → verbalized-confidence fallback).
+          * ``temperature`` is accepted by most slugs but rejected with HTTP 400 by a
+            few frontier / picker slugs (gpt-5.6-*, mai-code-*). It is omitted for
+            any slug matching the configurable ``no_temperature_models`` allow-list.
+          * ``seed`` is accepted by every family.
+        """
+        payload: Dict[str, Any] = {
+            "model": slug,
+            "messages": [{"role": "user", "content": prompt}],
+            "seed": seed,
+            "max_completion_tokens": self._max_tokens_per_call,
+            "logprobs": True,
+            "top_logprobs": 1,
+        }
+        if temperature is not None and not proxy_omits_temperature(
+            slug, self.no_temperature_models
+        ):
+            payload["temperature"] = temperature
+        return payload
+
 
     def _enforce_rate_limit(self) -> None:
         """Block until the rolling 60-second request count is below the cap."""
