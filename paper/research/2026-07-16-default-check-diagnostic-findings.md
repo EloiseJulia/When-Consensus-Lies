@@ -7,7 +7,28 @@
 > trusted. Raw artifacts: session files/ (default_check_summary.jsonl, default_check_table.txt,
 > default_check_live.log). Total: 122 live calls, $0.176 (cap $0.50), gpt-4o-mini EXCLUDED.
 
-## 0. ⭐ PIVOTAL: both reasoners hit the daily cap mid-run
+## 🎉 UPDATE 2026-07-17 — REASONER ARM COMPLETE (two-regime demarcation empirically confirmed)
+The reasoner arm finished (watcher, attempt 6 after the ~15:00 cap reset; 174 total calls, $0.35). **The core
+two-regime result now holds with reasoner data:**
+- **H2_derivable (median-under-visible-skew) — REASONERS RESOLVE:** deepseek-r1 →I0=**1.000** and o4-mini
+  →I0=**1.000** (CDenum=0.00, ZERO convergent delusion) vs the WEAK model →I0=**0.400** (CD=0.60, majority
+  on the mean=I1). The visible outlier lets reasoners derive the median; weak models default wrong. **H2
+  tag empirically VALIDATED.**
+- **H1_external (code_quarter, policy_overtime, data_activeusers) — PERSISTS for reasoners:** CD=**1.000**
+  for BOTH reasoners AND weak on all 3 strong traps. External knowledge is unrecoverable; reasoning does
+  NOT help. **H1 tags empirically VALIDATED.**
+- **⭐ This is the clean H1∧H2 two-regime demarcation** (H1 persists incl. reasoners; H2 attenuates/resolves
+  for reasoners) — the paper's headline contribution, now with direct empirical support at diagnostic scale.
+- **O2 saturation:** strong-trap mean CD=1.0 vs subtler mean CD=0.725 → the CD measure DISCRIMINATES
+  (subtler traps split; geomean even resolves →I0=1.0 for both reasoner and weak). Consistent with the
+  cross-model / fake-redundancy framing (row 35).
+- **I_perp:** overall **0.126** (< 0.20 guardrail B — OK). Only code_invoice/deepseek-r1 = 0.80 (the complex
+  off-axis task, EXCLUDED from the registered reasoning arm anyway). No answer-format blocker for the
+  essential items.
+- **Regime tags:** NO reclassification needed — all essential H1/H2 tags behaved as tagged (empirical =
+  final arbiter). Reasoner calls used: deepseek-r1 36, o4-mini 61 (per-day-capped; informs A05).
+
+## 0. ⭐ PIVOTAL: both reasoners hit the daily cap mid-run (RESOLVED 2026-07-17 via the auto-watcher)
 `deepseek/deepseek-r1` (only 20 calls done) AND `openai/o4-mini` (25 calls) both hit
 `x-ratelimit-type=UserByModelByDay` — the SAME per-day cap class as gpt-4o-mini. The resumable runner
 stopped them cleanly (resumable checkpoint) — infra worked exactly as designed. BUT:
