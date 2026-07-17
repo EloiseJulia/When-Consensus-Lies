@@ -58,9 +58,9 @@ from harness.runner import (
 
 
 # Default model identity carried by the single-model grid (matches config.yaml
-# homogeneous tested-agents baseline and make_run's defaults).
+# homogeneous tested-agents baseline — Amendment-06 frontier roster).
 ROLE = "tested_agents"
-MODEL = "openai/gpt-4o-mini"
+MODEL = "gpt-5.4"
 
 
 # ── Test fixtures / helpers ──────────────────────────────────────────────────

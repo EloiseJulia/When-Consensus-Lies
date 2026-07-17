@@ -119,11 +119,11 @@ def test_request_carries_correct_slug_and_bearer_header(
     monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
 
     client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=False)
-    # The config routes tested_agents → openai/gpt-4o-mini in the new config
+    # The config routes tested_agents → gpt-5.4 (Amendment-06 frontier homogeneous baseline)
     client.complete(role="tested_agents", prompt="hello", seed=42)
 
     # Slug from config must appear in the request body
-    assert captured["body"]["model"] == "openai/gpt-4o-mini"
+    assert captured["body"]["model"] == "gpt-5.4"
 
     # Authorization header must be Bearer (token value not checked here to
     # avoid hardcoding; see test_token_never_logged_or_in_exceptions)
