@@ -94,22 +94,65 @@ def _normalized_entropy(labels: Sequence[str]) -> float:
     return ent / math.log(distinct)
 
 
-def _branch_divergence(labels: Sequence[str]) -> float:
-    """Signal 1 — interpretation-branch divergence over ENUMERATED labels.
+# Default minority-share gate (audit MAJOR 1): a genuine interpretation fork
+# requires the SECOND-most-common enumerated label to hold a MEANINGFUL share of
+# the enumerated mass. Below this, a dominant modal label + one/two stray
+# disagreements is treated as NOISE (a competent-agent control that occasionally
+# misfires), NOT a fork. 0.34 excludes up to ~2 strays in a small (n≈5-6) panel
+# while retaining genuine ≳35% minority forks (e.g. 60/40, 50/50).
+DEFAULT_MIN_MINORITY_SHARE = 0.34
 
-    Entropy of the enumerated-label distribution (I_perp excluded per A04). A
-    single enumerated branch (or an all-I_perp / empty distribution) → 0.0.
+
+def _minority_share(labels: Sequence[str]) -> float:
+    """Share of ENUMERATED agents NOT on the modal enumerated label (in [0, 1)).
+
+    0.0 when there is a single enumerated branch (or none). This is the
+    plurality-gap complement — noise-robust because a lone stray label yields a
+    tiny minority share regardless of panel size.
     """
+    enum = _enumerated(labels)
+    counts = _counts(enum)
+    if len(counts) <= 1:
+        return 0.0
+    n = sum(counts.values())
+    modal = max(counts.values())
+    return 1.0 - modal / n
+
+
+def _robust_divergence(labels: Sequence[str], min_minority_share: float) -> float:
+    """Noise-robust interpretation-branch divergence over ENUMERATED labels.
+
+    Two-stage (audit MAJOR 1):
+      1. NOISE GATE — if the minority (non-modal enumerated) mass is below
+         `min_minority_share`, return 0.0. A dominant modal label with only
+         sparse stray disagreements is NOT a genuine fork (and I_perp is already
+         excluded per A04), so it must not contribute divergence.
+      2. MAGNITUDE — once a substantial second branch is present, use the
+         normalized entropy of the enumerated distribution as the divergence
+         magnitude (a perfectly even split → 1.0).
+
+    A single enumerated branch (or an all-I_perp / empty distribution) → 0.0.
+    """
+    if _minority_share(labels) < min_minority_share:
+        return 0.0
     return _normalized_entropy(_enumerated(labels))
 
 
-def _instability(per_model_samples: Optional[Mapping[str, Sequence[str]]]) -> Optional[float]:
+def _branch_divergence(labels: Sequence[str],
+                       min_minority_share: float = DEFAULT_MIN_MINORITY_SHARE) -> float:
+    """Signal 1 — noise-robust interpretation-branch divergence (I_perp excluded)."""
+    return _robust_divergence(labels, min_minority_share)
+
+
+def _instability(per_model_samples: Optional[Mapping[str, Sequence[str]]],
+                 min_minority_share: float = DEFAULT_MIN_MINORITY_SHARE) -> Optional[float]:
     """Signal 2 — sampling-induced label instability (same model, temp>0).
 
     For each model that produced >= 2 ENUMERATED samples, measure whether the
-    interpretation label FLIPS across resamples (normalized entropy of that
-    model's enumerated samples). Average across such models. Returns None when
-    no model has enough enumerated resamples (signal unavailable).
+    interpretation label FLIPS across resamples via the SAME noise-robust
+    divergence (a lone flip among many stable resamples is gated out). Average
+    across such models. Returns None when no model has enough enumerated
+    resamples (signal unavailable).
     """
     if not per_model_samples:
         return None
@@ -117,21 +160,23 @@ def _instability(per_model_samples: Optional[Mapping[str, Sequence[str]]]) -> Op
     for _model, samples in per_model_samples.items():
         enum = _enumerated(samples)
         if len(enum) >= 2:
-            per_model_scores.append(_normalized_entropy(enum))
+            per_model_scores.append(_robust_divergence(samples, min_minority_share))
     if not per_model_scores:
         return None
     return sum(per_model_scores) / len(per_model_scores)
 
 
 def _cross_model(labels: Sequence[str],
-                 model_families: Optional[Sequence[str]]) -> Optional[float]:
+                 model_families: Optional[Sequence[str]],
+                 min_minority_share: float = DEFAULT_MIN_MINORITY_SHARE) -> Optional[float]:
     """Signal 3 — cross-model (cross-family) label disagreement.
 
     Different model FAMILIES landing on DIFFERENT enumerated interpretations is
     the fake-redundancy tell: homogeneous agreement is uninformative, cross-model
     divergence reveals the fork. For each family, take its modal ENUMERATED label;
-    return the normalized entropy across those family-modal labels. Returns None
-    when fewer than 2 families carry an enumerated label (signal unavailable).
+    return the noise-robust divergence across those family-modal labels (a lone
+    dissenting family among many is gated as noise). Returns None when fewer than
+    2 families carry an enumerated label (signal unavailable).
     """
     if not model_families:
         return None
@@ -154,7 +199,7 @@ def _cross_model(labels: Sequence[str],
         family_modals.append(modal)
     if len(family_modals) < 2:
         return None
-    return _normalized_entropy(family_modals)
+    return _robust_divergence(family_modals, min_minority_share)
 
 
 class SurfacingDetector:
@@ -168,19 +213,29 @@ class SurfacingDetector:
         (3) cross-model label disagreement       (if model families given)
     into `score` ∈ [0, 1]. `fire` = score >= threshold. Signals lacking data are
     dropped and the remaining weights renormalized, so a divergence-only call
-    reduces to signal (1).
+    reduces to signal (1). Every signal is NOISE-ROBUST: a minority-share gate
+    (`min_minority_share`) suppresses divergence when a dominant modal label has
+    only sparse stray disagreements (a competent-agent control), so a lone
+    outlier can never fire (audit MAJOR 1).
 
     The `threshold` is a free PARAMETER calibrated (see detector/evaluate.py
     `select_threshold`) so the k=0 control false-surfacing rate < 10% (spec §2).
+    A threshold > 1.0 is a valid "never fire" operating point (used by
+    `select_threshold` when no in-range threshold meets the constraint).
     """
 
     def __init__(self,
                  threshold: float = 0.30,
                  w_divergence: float = 0.50,
                  w_instability: float = 0.25,
-                 w_cross_model: float = 0.25) -> None:
-        if not (0.0 <= threshold <= 1.0):
-            raise ValueError(f"threshold must be in [0, 1], got {threshold}")
+                 w_cross_model: float = 0.25,
+                 min_minority_share: float = DEFAULT_MIN_MINORITY_SHARE) -> None:
+        if threshold < 0.0:
+            raise ValueError(f"threshold must be >= 0, got {threshold}")
+        if not (0.0 <= min_minority_share <= 1.0):
+            raise ValueError(
+                f"min_minority_share must be in [0, 1], got {min_minority_share}"
+            )
         for name, w in (("w_divergence", w_divergence),
                         ("w_instability", w_instability),
                         ("w_cross_model", w_cross_model)):
@@ -192,6 +247,7 @@ class SurfacingDetector:
         self.w_divergence = w_divergence
         self.w_instability = w_instability
         self.w_cross_model = w_cross_model
+        self.min_minority_share = min_minority_share
 
     # ── input normalization ────────────────────────────────────────────────
     @staticmethod
@@ -230,9 +286,9 @@ class SurfacingDetector:
         """
         label_list = self._resolve_labels(labels, agent_runs)
 
-        s_div = _branch_divergence(label_list)
-        s_inst = _instability(per_model_samples)
-        s_cross = _cross_model(label_list, model_families)
+        s_div = _branch_divergence(label_list, self.min_minority_share)
+        s_inst = _instability(per_model_samples, self.min_minority_share)
+        s_cross = _cross_model(label_list, model_families, self.min_minority_share)
 
         # Weighted combine over AVAILABLE signals (renormalized).
         num = self.w_divergence * s_div
@@ -250,10 +306,17 @@ class SurfacingDetector:
 
         enum_labels = _enumerated(label_list)
         distinct_enum = sorted(set(enum_labels))
-        # diverging_axes: surface the task's clarifying questions ONLY when there
-        # is genuine enumerated divergence (>=2 distinct enumerated branches).
+        # diverging_axes: surface the task's clarifying questions when firing IS
+        # driven by genuine enumerated divergence — from ANY signal (MINOR 3):
+        # the panel split itself (>=2 enumerated branches), OR instability, OR
+        # cross-model disagreement (both already enumerated-only and noise-gated).
+        enum_divergence = (
+            len(distinct_enum) >= 2
+            or (s_inst or 0.0) > 0.0
+            or (s_cross or 0.0) > 0.0
+        )
         diverging_axes: List[str] = []
-        if len(distinct_enum) >= 2 and fired:
+        if fired and enum_divergence:
             diverging_axes = list(getattr(task, "key_questions", []) or [])
 
         evidence: Dict[str, object] = {
@@ -263,6 +326,8 @@ class SurfacingDetector:
             "n_distinct_enumerated": len(distinct_enum),
             "distinct_enumerated": distinct_enum,
             "n_perp": sum(1 for l in label_list if l == PERP_LABEL),
+            "enumerated_minority_share": _minority_share(label_list),
+            "min_minority_share": self.min_minority_share,
             "signal_divergence": s_div,
             "signal_instability": s_inst,
             "signal_cross_model": s_cross,

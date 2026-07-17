@@ -305,3 +305,150 @@ def test_agent_runs_input_equivalent_to_labels():
         for i, l in enumerate(labels)
     ]
     assert det.score(t, labels=labels) == det.score(t, agent_runs=runs)
+
+
+# ── NOISE ROBUSTNESS (audit MAJOR 1) ───────────────────────────────────────────
+# A competent-agent control lands overwhelmingly on the modal enumerated label
+# with, at most, one or two STRAY disagreements. The detector must NOT mistake
+# such sparse noise for a genuine interpretation fork. These distributions
+# deliberately inject a stray ENUMERATED label ("I1") — which the real k=0
+# labeler could produce as a misfire — so the FSR they measure is NOT 0-by-
+# construction; only the noise gate keeps it low.
+def test_single_stray_enumerated_label_does_not_fire():
+    """1 stray enumerated label among 5-10 agents → gated as noise (no fire)."""
+    det = _detector()
+    t = _k0_tasks()[0]
+    for n in range(5, 11):
+        labels = ["I0"] * (n - 1) + ["I1"]
+        res = det.detect(t, labels=labels)
+        assert not res.fired, (n, res.score)
+        assert res.evidence["signal_divergence"] == 0.0
+        assert res.diverging_axes == []
+
+
+def test_two_stray_labels_in_small_panel_do_not_fire():
+    """Up to 2 strays (<=~1/3 minority) in a small panel → still gated."""
+    det = _detector()
+    t = _k0_tasks()[0]
+    # 4:2 (33% minority) and 5:2, 6:2, 7:2 — all below the 0.34 gate.
+    for majority in (4, 5, 6, 7):
+        labels = ["I0"] * majority + ["I1", "I1"]
+        res = det.detect(t, labels=labels)
+        assert not res.fired, (majority, res.score)
+
+
+def test_genuine_fork_fires_over_noise():
+    """A substantial second branch (~50/50, ~60/40) DOES fire — recall preserved."""
+    det = _detector()
+    t = next(t for t in _k_ge_1_tasks() if len(_enumerated_ids(t)) >= 2)
+    a, b = _enumerated_ids(t)[:2]
+    assert det.detect(t, labels=[a] * 3 + [b] * 3).fired          # 50/50
+    assert det.detect(t, labels=[a] * 6 + [b] * 4).fired          # 60/40
+    # And the noise cases on the SAME task do not fire.
+    assert not det.detect(t, labels=[a] * 9 + [b]).fired          # 9:1 stray
+    assert not det.detect(t, labels=[a] * 6 + [b]).fired          # 6:1 stray (audit case)
+
+
+def _noisy_control_items(tasks_k0):
+    """k=0 controls carrying realistic sparse noise (0-1 stray, n in 5..10)."""
+    items = []
+    for i, t in enumerate(tasks_k0):
+        n = 5 + (i % 6)                 # panel size 5..10
+        if i % 2 == 0:
+            labels = ["I0"] * n         # clean control
+        else:
+            labels = ["I0"] * (n - 1) + ["I1"]  # one stray enumerated misfire
+        items.append(EvalItem(task=t, labels=labels))
+    return items
+
+
+def test_noisy_control_set_false_surfacing_under_10pct():
+    """HONEST headline: FSR on a NOISY k=0 control set stays < 10% (calibrated)."""
+    det = _detector()
+    tasks_k0 = _k0_tasks()
+    t_pos = next(t for t in _k_ge_1_tasks() if len(_enumerated_ids(t)) >= 2)
+    a, b = _enumerated_ids(t_pos)[:2]
+
+    control_items = _noisy_control_items(tasks_k0)
+    # Sanity: the noisy controls genuinely contain a divergent enumerated label
+    # (so a naive entropy detector WOULD have fired — this is non-tautological).
+    assert any("I1" in it.labels for it in control_items)
+
+    positive_items = [EvalItem(task=t_pos, labels=[a, b] * 3) for _ in range(len(tasks_k0))]
+    items = control_items + positive_items
+
+    thr = select_threshold(det, items, target_fpr=0.10)
+    det.threshold = thr
+    report = evaluate(det, items)
+    assert report.false_surfacing_rate < 0.10, report.false_surfacing_rate
+    assert report.meets_headline(0.10)
+    assert report.recall > 0.0  # genuine forks still surface
+
+
+def test_select_threshold_actually_enforces_fsr_when_control_scores_max():
+    """MAJOR 2 regression: a control scoring exactly 1.0 must NOT re-fire.
+
+    Before the fix, select_threshold clamped to 1.0 and (fire = score>=thr) a
+    1.0-scoring control fired → FSR 1.0 while the report claimed feasibility.
+    """
+    det = SurfacingDetector(threshold=0.0)
+    t_ctrl = _k0_tasks()[0]
+    t_pos = next(t for t in _k_ge_1_tasks() if len(_enumerated_ids(t)) >= 2)
+    a, b = _enumerated_ids(t_pos)[:2]
+
+    # A pathological "control" whose distribution is a perfect 50/50 split → 1.0.
+    items = [
+        EvalItem(task=t_ctrl, labels=["I0", "I1", "I0", "I1"]),   # k=0, score 1.0
+        EvalItem(task=t_pos, labels=[a, b] * 3),                  # k>=1 positive
+        EvalItem(task=t_pos, labels=[a, b] * 3),
+    ]
+    thr = select_threshold(det, items, target_fpr=0.10)
+    # Only a threshold ABOVE 1.0 can keep this single 1.0-scoring control silent.
+    assert thr > 1.0
+    det.threshold = thr
+    report = evaluate(det, items)
+    assert report.false_surfacing_rate < 0.10
+    assert report.meets_headline(0.10)
+    # And the detector really fires nothing at this operating point.
+    assert not det.detect(t_ctrl, labels=["I0", "I1", "I0", "I1"]).fired
+
+
+def test_threshold_above_one_is_constructible_and_never_fires():
+    """A threshold > 1.0 is a valid never-fire operating point (MAJOR 2)."""
+    det = SurfacingDetector(threshold=1.0 + 1e-9)
+    t = next(t for t in _k_ge_1_tasks() if len(_enumerated_ids(t)) >= 2)
+    a, b = _enumerated_ids(t)[:2]
+    assert not det.detect(t, labels=[a, b] * 4).fired  # even a max-divergence split
+
+
+# ── MINOR 3: instability/cross-model firing populates diverging_axes ───────────
+def test_instability_only_firing_populates_diverging_axes():
+    """When instability (not the main split) drives firing, axes are surfaced."""
+    det = SurfacingDetector(threshold=0.20)  # low enough for instability-only fire
+    t = next(t for t in _k_ge_1_tasks() if len(_enumerated_ids(t)) >= 2)
+    a, b = _enumerated_ids(t)[:2]
+    # Main panel converged (single enumerated branch → signal_divergence 0), but
+    # per-model resamples FLIP 50/50 → instability drives the fire.
+    per_model = {"m1": [a, b, a, b], "m2": [b, a, b, a]}
+    res = det.detect(t, labels=[a, a], per_model_samples=per_model)
+    assert res.evidence["signal_divergence"] == 0.0
+    assert res.evidence["signal_instability"] > 0.0
+    assert res.fired
+    assert res.diverging_axes == list(t.key_questions)
+
+
+def test_crossmodel_only_firing_populates_diverging_axes():
+    det = SurfacingDetector(threshold=0.20)
+    t = next(t for t in _k_ge_1_tasks() if len(_enumerated_ids(t)) >= 2)
+    a, b = _enumerated_ids(t)[:2]
+    # Each family internally consistent, but families disagree (a vs b). The main
+    # multiset {a,a,b,b} is itself a 50/50 split, so drive cross-model-only by
+    # making one family dominant in the pooled labels yet split across families.
+    labels = [a, a, a, b]
+    families = ["gpt", "gpt", "gpt", "claude"]
+    res = det.detect(t, labels=labels, model_families=families)
+    # Pooled 3:1 is gated (noise), but the two families vote a vs b → cross-model.
+    assert res.evidence["signal_divergence"] == 0.0
+    assert res.evidence["signal_cross_model"] == pytest.approx(1.0)
+    assert res.fired
+    assert res.diverging_axes == list(t.key_questions)

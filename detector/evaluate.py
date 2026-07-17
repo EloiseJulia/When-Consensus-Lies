@@ -186,8 +186,12 @@ def select_threshold(detector: SurfacingDetector,
     Scans candidate thresholds (the observed scores, plus a small epsilon above
     each so a score exactly equal to a control's score does not fire) and returns
     the LOWEST threshold whose k=0 control false-surfacing rate is < target_fpr,
-    which maximizes recall subject to the constraint. Falls back to just-above the
-    max control score if no candidate qualifies (guarantees the constraint).
+    which maximizes recall subject to the constraint. When NO in-range threshold
+    qualifies (e.g. a control scores exactly 1.0), it returns a "never fire"
+    threshold slightly above 1.0 (valid because firing is `score >= threshold`
+    and scores are <= 1.0). The returned threshold is thus GUARANTEED to actually
+    yield the reported false-surfacing rate — it is never clamped back into a
+    range that would re-fire a control (audit MAJOR 2).
 
     The returned threshold is NOT written back to the detector — the caller
     decides whether to adopt it.
@@ -208,13 +212,14 @@ def select_threshold(detector: SurfacingDetector,
         return tp / n_pos if n_pos else 0.0
 
     eps = 1e-9
-    candidates = sorted({0.0, 1.0 + eps}
+    never_fire = 1.0 + eps  # no score (<= 1.0) can reach this → fires nothing
+    candidates = sorted({0.0, never_fire}
                         | {s for s in scores}
                         | {s + eps for s in scores})
-    best_thr = 1.0 + eps  # guaranteed to satisfy the constraint (fires nothing)
+    best_thr = never_fire  # guaranteed to satisfy the constraint (fires nothing)
     best_recall = -1.0
     for thr in candidates:
-        if thr > 1.0 + eps:
+        if thr > never_fire:
             continue
         if fpr_at(thr) < target_fpr:
             r = recall_at(thr)
@@ -222,4 +227,6 @@ def select_threshold(detector: SurfacingDetector,
             if r > best_recall + 1e-12:
                 best_recall = r
                 best_thr = thr
-    return min(best_thr, 1.0)
+    # NO clamp: returning a value > 1.0 is a legitimate never-fire operating
+    # point. Clamping to 1.0 would let a control scoring exactly 1.0 re-fire.
+    return best_thr
