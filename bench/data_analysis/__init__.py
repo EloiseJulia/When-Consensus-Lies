@@ -297,24 +297,25 @@ def problem_typical_value():
 def problem_avg_price():
     """k=1 family, axis price_weighting: average price PAID PER UNIT (quantity-weighted).
 
-    H2_derivable (HARDER trap), FAIR (unique-derivability fix 2026-07-17): the prompt
-    embeds a purchase table whose rows carry a QUANTITY column, AND the retained
-    question asks for "the average price PAID PER UNIT across ALL units purchased".
-    That phrasing UNIQUELY denotes total amount spent / total number of units — the
-    quantity-weighted value — because the average paid per unit MUST divide all money
-    by all units. The naive default (unweighted mean of the per-lot unit_price column)
-    is then genuinely WRONG: it averages lot prices, giving a 1-unit lot the same weight
-    as an 18-unit lot, so it is NOT the price paid per unit.
+    H2_derivable (HARDER trap), FAIR + requires-derivation (2026-07-18): the retained
+    k1 prompt asks for "the average price per unit across ALL units purchased" over a
+    table with a QUANTITY column, but does NOT state the formula. Averaging over the
+    individual UNITS (each of the 18 units in the big lot has price 100) UNIQUELY denotes
+    total amount spent / total number of units = the quantity-weighted value. Averaging
+    over the 3 LOTS (the naive column mean) is NOT "across all units" — it gives a 1-unit
+    lot the same weight as an 18-unit lot, so it is genuinely WRONG.
 
-    WHY it is now FAIR (prereg §2): the disambiguator is TWO-fold and BOTH live in the
-    RETAINED prompt — the quantities in the data AND the "per unit across all units"
-    wording. A careful reader (not just the hidden latent_spec) can UNIQUELY recover I0;
-    the simple column mean is demonstrably wrong, not a defensible alternate reading.
+    WHY it is FAIR (prereg §2): a competent reader lands ONLY on the per-unit (weighted)
+    reading — the intent is uniquely recoverable from the RETAINED prompt + data, not from
+    the hidden latent_spec.
+    WHY it still SPLITS (requires derivation): the retained prompt does NOT spell out
+    "= total/total units". A reasoner must DERIVE that "per unit across all units" means
+    averaging over units (weighting by quantity), not over the listed lots; a weak model
+    naively averages the three visible unit_price values. The explicit formula lives ONLY
+    in the k0 latent_spec / the deleted clause, so k0 is fully specified and deleting it
+    at k1 leaves the unique-intent-but-requires-derivation phrasing.
     WHY H2 (not H1-external): no external convention is needed — the unique answer is
     derivable purely from the prompt + data.
-    WHY a weak model defaults to the foil: "average price" pattern-matches to "mean of
-    the price column"; converting "per unit across all units" into total/units is the
-    derivation step a weak model skips.
     PURE STDLIB: sum/`/`/f-string only — runs under the DataChecker `python -S` sandbox
     with no third-party library.
 
@@ -326,11 +327,10 @@ def problem_avg_price():
         regime="H2_derivable",
         prompt_core=(
             "Write a function `average_price(items)` that returns the average price "
-            "PAID PER UNIT across ALL units purchased, as a string rounded to 2 decimal "
+            "per unit across ALL units purchased, as a string rounded to 2 decimal "
             "places. Each record is a [quantity, unit_price] pair, where quantity is how "
             "many units were bought at that unit_price: [[1, 10.0], [1, 20.0], "
-            "[18, 100.0]]. (The average paid per unit is the total amount spent divided "
-            "by the total number of units bought.)"
+            "[18, 100.0]]."
         ),
         requirement_classes=[
             RequirementClass(
