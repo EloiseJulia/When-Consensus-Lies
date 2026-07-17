@@ -29,8 +29,15 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
-from common.llm import BudgetExceeded, DayCapped, LLMClient
+from common.llm import (
+    GITHUB_MODELS_BASE_URL,
+    PROVIDER_GITHUB_MODELS,
+    BudgetExceeded,
+    DayCapped,
+    LLMClient,
+)
 from common.schema import AgentRun, Task
 from harness.label import label_run as _default_label_run
 from harness.run import run_task as _default_run_task
@@ -48,20 +55,80 @@ class LedgerWriteError(Exception):
 
 # ── AgentRun identity helpers ────────────────────────────────────────────────
 
-def run_identity(run: AgentRun) -> str:
+def _normalize_base_url(base_url: Optional[str]) -> str:
+    """Normalize a base URL for use in a checkpoint namespace.
+
+    Lowercases ONLY the case-insensitive components — the scheme and the host/port
+    (netloc) — and strips a single trailing slash, so
+    ``http://127.0.0.1:8313/v1`` and ``http://127.0.0.1:8313/v1/`` are the SAME
+    namespace. The PATH case is PRESERVED (URL paths are case-sensitive per
+    RFC 3986), so ``/API`` and ``/api`` remain DISTINCT endpoints. Different
+    hosts/ports/paths always stay distinct.
+    """
+    raw = (base_url or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if not parts.scheme and not parts.netloc:
+        # Not a standard scheme://host URL (e.g. a bare path) — preserve as-is
+        # (only surrounding whitespace + trailing slash already stripped).
+        return raw
+    # scheme + netloc (host:port) are case-insensitive → lowercase; path/query/
+    # fragment are case-SENSITIVE → preserve exactly.
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
+    )
+
+
+def endpoint_identity(provider: Optional[str], base_url: Optional[str]) -> str:
+    """Canonical namespace string for an online endpoint (provider + base_url).
+
+    Used to namespace runner CHECKPOINT identities so that jobs executed against
+    genuinely different endpoints — e.g. ``github_models`` vs ``copilot_proxy``, or
+    the same provider on a different host/port — are DISTINCT checkpoint entries.
+    Without this, switching provider or proxy port would let a stale ``job_done``
+    marker silently skip (or dedup) the new endpoint's execution.
+
+    BACKWARD COMPAT: the canonical default endpoint (``github_models`` at its
+    default base URL) maps to the EMPTY namespace ``""`` so existing checkpoints
+    and their 5-dim job keys are byte-for-byte unchanged. Any other provider or
+    base_url yields a distinct non-empty namespace.
+
+    This is a RUNNER-internal identity dimension only; it is intentionally NOT part
+    of the frozen ``common/schema.py`` ``AgentRun`` identity.
+    """
+    if (
+        provider == PROVIDER_GITHUB_MODELS
+        and _normalize_base_url(base_url) == _normalize_base_url(GITHUB_MODELS_BASE_URL)
+    ):
+        return ""
+    return "\x00".join([provider or "", _normalize_base_url(base_url)])
+
+
+def run_identity(run: AgentRun, endpoint: str = "") -> str:
     """Canonical string key for AgentRun identity.
 
     Encodes task_id × config × model_role × model_id × seed, which is the
     identity dimension defined in schema.py.  Null-byte separators prevent
     collisions between field values that contain the separator character.
+
+    ``endpoint`` (default "") is an OPTIONAL runner-level namespace prefix
+    (provider + normalized base_url via :func:`endpoint_identity`) so that the
+    SAME AgentRun identity executed against different online endpoints is stored
+    as distinct checkpoint records. When it is "" (the canonical default) the key
+    is BYTE-IDENTICAL to the pre-change 5-field value — the endpoint dimension is
+    prepended ONLY when non-empty.
     """
-    return "\x00".join([
+    parts = [
         run.task_id,
         run.config,
         run.model_role,
         run.model_id,
         str(run.seed),
-    ])
+    ]
+    if endpoint:
+        parts.insert(0, endpoint)
+    return "\x00".join(parts)
 
 
 def job_key(
@@ -70,6 +137,7 @@ def job_key(
     model_role: str,
     model_id: str,
     seed: int,
+    endpoint: str = "",
 ) -> str:
     """Canonical completion key for a runner job.
 
@@ -79,17 +147,27 @@ def job_key(
     work.  A key that omits model identity would let a changed/added model reuse
     a stale ``job_done`` marker and silently SKIP the new work on resume.
 
-    This deliberately mirrors :func:`run_identity` so the job-completion key and
-    the AgentRun identity key are structurally consistent.  Null-byte separators
-    prevent collisions between field values that contain the separator character.
+    PROVIDER fix: an OPTIONAL leading ``endpoint`` namespace (provider +
+    normalized base_url) makes a job on ``copilot_proxy`` distinct from the same
+    job on ``github_models`` (or on a different proxy port), so resume never skips
+    or dedups a genuinely different endpoint's execution. When ``endpoint`` is ""
+    (the canonical default) the key is BYTE-IDENTICAL to the pre-change 5-field
+    value — the endpoint dimension is prepended ONLY when non-empty — and it
+    mirrors :func:`run_identity` exactly.
+
+    Null-byte separators prevent collisions between field values that contain the
+    separator character.
     """
-    return "\x00".join([
+    parts = [
         task_id,
         config,
         model_role,
         model_id,
         str(seed),
-    ])
+    ]
+    if endpoint:
+        parts.insert(0, endpoint)
+    return "\x00".join(parts)
 
 
 # ── Checkpoint store ─────────────────────────────────────────────────────────
@@ -119,8 +197,13 @@ class CheckpointStore:
     silently so a single corrupt write does not prevent loading the rest.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, endpoint: str = "") -> None:
         self._path = Path(path)
+        # Runner-level endpoint namespace (provider + normalized base_url). All
+        # job/run identities produced by THIS store are namespaced by it so a
+        # single checkpoint file can safely hold progress for multiple endpoints
+        # without cross-serving or falsely skipping a different endpoint's jobs.
+        self._endpoint = endpoint
         self._done_jobs: Set[str] = set()
         self._run_ids: Set[str] = set()
         self._runs: List[Dict[str, Any]] = []
@@ -159,6 +242,8 @@ class CheckpointStore:
                                 rec["model_role"],
                                 rec["model_id"],
                                 int(rec["seed"]),
+                                # Legacy markers predate endpoint namespacing → "".
+                                endpoint=rec.get("endpoint", ""),
                             )
                         )
                     except (TypeError, ValueError):
@@ -182,7 +267,7 @@ class CheckpointStore:
                         logit_conf=rec.get("logit_conf"),
                         seed=int(rec["seed"]),
                     )
-                    rid = run_identity(run)
+                    rid = run_identity(run, endpoint=rec.get("endpoint", ""))
                     if rid not in self._run_ids:
                         self._run_ids.add(rid)
                         self._runs.append(rec)
@@ -196,11 +281,14 @@ class CheckpointStore:
         seed: int,
     ) -> bool:
         """True iff this job (full 5-dim identity) has been checkpointed done."""
-        return job_key(task_id, config, model_role, model_id, seed) in self._done_jobs
+        return (
+            job_key(task_id, config, model_role, model_id, seed, endpoint=self._endpoint)
+            in self._done_jobs
+        )
 
     def run_done(self, run: AgentRun) -> bool:
         """True iff this specific AgentRun identity has been checkpointed."""
-        return run_identity(run) in self._run_ids
+        return run_identity(run, endpoint=self._endpoint) in self._run_ids
 
     def _write(self, record: Dict[str, Any]) -> None:
         """Append one record to the JSONL file and fsync."""
@@ -211,7 +299,7 @@ class CheckpointStore:
 
     def add_run(self, run: AgentRun) -> None:
         """Checkpoint a single AgentRun.  Idempotent by identity."""
-        rid = run_identity(run)
+        rid = run_identity(run, endpoint=self._endpoint)
         if rid in self._run_ids:
             return  # already stored — idempotent, no duplicate write
         record: Dict[str, Any] = {
@@ -226,6 +314,10 @@ class CheckpointStore:
             "logit_conf": run.logit_conf,
             "seed": run.seed,
         }
+        # Persist the endpoint namespace ONLY when non-empty so default-provider
+        # records are byte-for-byte identical to the pre-change format.
+        if self._endpoint:
+            record["endpoint"] = self._endpoint
         self._write(record)
         self._run_ids.add(rid)
         self._runs.append(record)
@@ -239,17 +331,22 @@ class CheckpointStore:
         seed: int,
     ) -> None:
         """Mark a job (full 5-dim identity) as fully complete.  Idempotent."""
-        k = job_key(task_id, config, model_role, model_id, seed)
+        k = job_key(task_id, config, model_role, model_id, seed, endpoint=self._endpoint)
         if k in self._done_jobs:
             return  # already marked — idempotent
-        self._write({
+        record: Dict[str, Any] = {
             "type": "job_done",
             "task_id": task_id,
             "config": config,
             "model_role": model_role,
             "model_id": model_id,
             "seed": seed,
-        })
+        }
+        # Persist the endpoint namespace ONLY when non-empty so default-provider
+        # job_done markers are byte-for-byte identical to the pre-change format.
+        if self._endpoint:
+            record["endpoint"] = self._endpoint
+        self._write(record)
         self._done_jobs.add(k)
 
     def add_cost(self, delta_usd: float) -> None:
@@ -556,7 +653,13 @@ class Runner:
     ) -> None:
         self._cfg = cfg
         self._base_client = base_client
-        self._store = CheckpointStore(cfg.checkpoint_path)
+        # Namespace the checkpoint by the base client's online endpoint (provider +
+        # normalized base_url) so switching provider / proxy port never reuses a
+        # stale job_done marker for a genuinely different endpoint.
+        self._store = CheckpointStore(
+            cfg.checkpoint_path,
+            endpoint=endpoint_identity(base_client.provider, base_client.base_url),
+        )
         self._throttler = RpmThrottler(cfg.rpm)
         self._day_capped_models: Set[str] = set()
         self._run_task = run_task_fn if run_task_fn is not None else _default_run_task
@@ -644,6 +747,9 @@ class Runner:
         layered ON TOP of this, giving additive — never weaker — pacing.
         BLOCKER 2 fix: ``remaining_budget_usd`` is the true sub-cap that keeps
         each per-job pre-auth guard consistent with the aggregate ledger.
+        PROVIDER fix: propagate the base client's provider/base_url/auth settings so
+        a copilot_proxy (or custom-endpoint) base client is not silently reset to
+        the GitHub Models default on each per-job reconstruction.
         """
         return LLMClient(
             config=job_config,
@@ -651,6 +757,10 @@ class Runner:
             offline=self._base_client.offline,
             max_budget_usd=remaining_budget_usd,
             max_requests_per_min=self._base_client.max_requests_per_min,
+            provider=self._base_client.provider,
+            base_url=self._base_client.base_url,
+            require_auth=self._base_client.require_auth,
+            no_temperature_models=self._base_client.no_temperature_models,
         )
 
     @staticmethod
@@ -1018,8 +1128,27 @@ def _token() -> str:
 
 
 def _live_guard() -> bool:
-    """Return True only when BOTH guards pass: RUNNER_LIVE=1 AND a token exists."""
+    """Return True only when BOTH guards pass: RUNNER_LIVE=1 AND a token exists.
+
+    Retained for the token-required (github_models) path and backward compat.
+    Provider-aware callers should use :func:`_live_ok`, which only requires a
+    token when the selected provider needs one.
+    """
     return os.environ.get("RUNNER_LIVE", "0") == "1" and bool(_token())
+
+
+def _live_ok(require_auth: bool) -> bool:
+    """Provider-aware live guard.
+
+    Live execution requires ``RUNNER_LIVE=1``. A token is additionally required
+    ONLY when the selected provider needs auth (``github_models``). The local
+    ``copilot_proxy`` needs NO token, so ``RUNNER_LIVE=1`` alone enables it.
+    """
+    if os.environ.get("RUNNER_LIVE", "0") != "1":
+        return False
+    if require_auth:
+        return bool(_token())
+    return True
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -1055,18 +1184,39 @@ def main(argv: Optional[List[str]] = None) -> None:
         default=None,
         help="Hard aggregate budget cap in USD (stops cleanly when exceeded)",
     )
+    parser.add_argument(
+        "--provider",
+        default=None,
+        help="LLM provider: 'github_models' (token required) or 'copilot_proxy' "
+             "(local, no token). Default: config providers.default.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Override the provider's base URL (e.g. a custom proxy host/port).",
+    )
     args = parser.parse_args(argv)
 
-    if not args.dry_run and not _live_guard():
-        print(
-            "runner: skipped (RUNNER_LIVE != 1 or no token in "
-            "GITHUB_MODELS_TOKEN / GH_MODELS_TOKEN). Set both to run live."
-        )
-        return
-
+    # Load config FIRST so the provider (and whether a token is required) is known
+    # BEFORE the live-guard decision — a copilot_proxy run needs no token.
     from common.config import load_config
+    from common.llm import resolve_provider_config
 
     cfg = load_config()
+    prov = resolve_provider_config(cfg, provider=args.provider, base_url=args.base_url)
+    live_ok = _live_ok(prov["require_auth"])
+
+    if not args.dry_run and not live_ok:
+        need = (
+            "RUNNER_LIVE=1 and a token in GITHUB_MODELS_TOKEN / GH_MODELS_TOKEN"
+            if prov["require_auth"]
+            else "RUNNER_LIVE=1"
+        )
+        print(
+            f"runner: skipped (provider={prov['provider']!r} requires {need}). "
+            "Set to run live."
+        )
+        return
 
     # Import benchmark tasks lazily (do not fail in CI if bench data is absent)
     try:
@@ -1078,9 +1228,11 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     client = LLMClient(
         config=cfg,
-        offline=(not _live_guard()),
+        offline=(not live_ok),
         max_budget_usd=args.budget_usd,
         max_requests_per_min=args.rpm,
+        provider=prov["provider"],
+        base_url=prov["base_url"],
     )
 
     runner_cfg = RunnerConfig(

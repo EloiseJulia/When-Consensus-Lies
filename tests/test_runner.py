@@ -49,6 +49,9 @@ from harness.runner import (
     RunnerConfig,
     RpmThrottler,
     _ThrottledClient,
+    _live_ok,
+    _token,
+    endpoint_identity,
     job_key,
     run_identity,
 )
@@ -118,6 +121,8 @@ def _make_runner(
     max_infra_retries: int = 3,
     base_offline: bool = True,
     base_max_rpm: Optional[int] = None,
+    provider: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> Tuple[Runner, Path]:
     """Build a Runner with offline LLMClient and fake run_task / label_run."""
     from common.config import load_config
@@ -132,6 +137,8 @@ def _make_runner(
         cache_dir=str(tmp_path / "cache"),
         offline=base_offline,
         max_requests_per_min=base_max_rpm,
+        provider=provider,
+        base_url=base_url,
     )
 
     runner_cfg = RunnerConfig(
@@ -1874,3 +1881,160 @@ class TestLegacyCheckpointLoad:
         # The legacy job re-runs (safe) rather than being falsely skipped.
         assert result["completed"] == 1
         assert seen == ["t1"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROVIDER FIX (BLOCKER): checkpoint identity namespaced by provider + base_url
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestProviderCheckpointNamespace:
+    """Switching provider / proxy port must NOT reuse a stale job_done marker."""
+
+    def test_endpoint_identity_default_github_is_empty(self):
+        # Canonical default endpoint maps to "" → byte-for-byte backward compat.
+        assert endpoint_identity("github_models",
+                                 "https://models.github.ai/inference") == ""
+        # Trailing slash is normalized to the same "" namespace.
+        assert endpoint_identity("github_models",
+                                 "https://models.github.ai/inference/") == ""
+
+    def test_endpoint_identity_discriminates_provider_and_port(self):
+        gh = endpoint_identity("github_models", "https://models.github.ai/inference")
+        px1 = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1")
+        px2 = endpoint_identity("copilot_proxy", "http://127.0.0.1:8787/v1")
+        assert px1 != gh
+        assert px1 != px2
+        assert px2 != gh
+
+    def test_job_key_namespaced_by_endpoint(self):
+        base = job_key("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+        px = job_key("t1", "single", "tested_agents", "gpt-4o-mini", 42,
+                     endpoint=endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1"))
+        assert base != px, "same 5-dim job under a different endpoint must differ"
+
+    def test_default_key_is_byte_identical_to_prefix_5field(self):
+        """BLOCKER byte-compat: default (endpoint="") key MUST equal the exact
+        pre-fix 5-field null-separated string — no leading endpoint dimension."""
+        expected = "t\x00single\x00tested_agents\x00m\x001"
+        assert job_key("t", "single", "tested_agents", "m", 1) == expected
+        assert job_key("t", "single", "tested_agents", "m", 1, endpoint="") == expected
+        run = make_run("t", "single", "tested_agents", "m", seed=1)
+        assert run_identity(run) == expected
+        assert run_identity(run, endpoint="") == expected
+
+    def test_default_records_have_no_endpoint_field(self, tmp_path):
+        """Default-provider (endpoint="") checkpoint records must NOT carry an
+        'endpoint' key — byte-for-byte identical to the pre-change format."""
+        cp = tmp_path / "cp.jsonl"
+        store = CheckpointStore(cp)  # endpoint="" (default)
+        store.mark_job_done("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+        run = make_run("t1", "single", "tested_agents", "gpt-4o-mini", seed=42)
+        store.add_run(run)
+        for line in cp.read_text(encoding="utf-8").splitlines():
+            rec = json.loads(line)
+            assert "endpoint" not in rec, f"default record must omit endpoint: {rec}"
+
+    def test_nondefault_records_persist_endpoint_field(self, tmp_path):
+        """A non-default endpoint MUST be persisted so it survives resume."""
+        cp = tmp_path / "cp.jsonl"
+        ep = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1")
+        store = CheckpointStore(cp, endpoint=ep)
+        store.mark_job_done("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+        recs = [json.loads(l) for l in cp.read_text(encoding="utf-8").splitlines()]
+        assert any(r.get("endpoint") == ep for r in recs)
+
+    def test_endpoint_identity_preserves_path_case(self):
+        """MAJOR: path case is significant — /API and /api must NOT collide."""
+        upper = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/API")
+        lower = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/api")
+        assert upper != lower, "case-sensitive URL paths must yield distinct endpoints"
+        # But scheme + host ARE case-insensitive → same namespace.
+        a = endpoint_identity("copilot_proxy", "HTTP://127.0.0.1:8313/v1")
+        b = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1")
+        assert a == b, "scheme/host case must be normalized (case-insensitive)"
+
+    def test_store_namespaces_markers_by_endpoint(self, tmp_path):
+        cp = tmp_path / "cp.jsonl"
+        ep_gh = endpoint_identity("github_models", "https://models.github.ai/inference")
+        ep_px = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1")
+
+        gh_store = CheckpointStore(cp, endpoint=ep_gh)
+        gh_store.mark_job_done("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+
+        # A store for the proxy endpoint on the SAME file must NOT see it done.
+        px_store = CheckpointStore(cp, endpoint=ep_px)
+        assert not px_store.job_done("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+        # The github endpoint store (reloaded) still sees it done.
+        assert CheckpointStore(cp, endpoint=ep_gh).job_done(
+            "t1", "single", "tested_agents", "gpt-4o-mini", 42)
+
+    def test_resume_does_not_skip_second_provider_job(self, tmp_path):
+        """End-to-end: run a job on copilot_proxy, then github_models on the SAME
+        checkpoint must RE-RUN (not skip) the identical (task,config,role,model,seed).
+        """
+        cp = tmp_path / "cp.jsonl"
+
+        # First run: copilot_proxy provider (offline fake execution).
+        runner_px, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], provider="copilot_proxy",
+        )
+        res_px = runner_px.run()
+        assert res_px["completed"] == 1 and res_px["skipped"] == 0
+
+        # Second run: default github_models on the SAME checkpoint file.
+        runner_gh, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42],  # provider=None → github_models default
+        )
+        res_gh = runner_gh.run()
+        assert res_gh["completed"] == 1, "different provider must NOT be false-skipped"
+        assert res_gh["skipped"] == 0
+
+        # Re-running the proxy provider now DOES skip (its marker is present).
+        runner_px2, _ = _make_runner(
+            [make_task("t1")], tmp_path, checkpoint_path=cp,
+            configs=["single"], seeds=[42], provider="copilot_proxy",
+        )
+        res_px2 = runner_px2.run()
+        assert res_px2["completed"] == 0 and res_px2["skipped"] == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROVIDER FIX (MAJOR): provider-aware live guard (token only when required)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestProviderAwareLiveGuard:
+    """A copilot_proxy live run needs NO token; github_models still requires one."""
+
+    def test_live_ok_requires_runner_live_env(self, monkeypatch):
+        monkeypatch.delenv("RUNNER_LIVE", raising=False)
+        assert _live_ok(require_auth=False) is False
+        assert _live_ok(require_auth=True) is False
+
+    def test_live_ok_proxy_no_token_not_skipped(self, monkeypatch):
+        monkeypatch.setenv("RUNNER_LIVE", "1")
+        monkeypatch.delenv("GITHUB_MODELS_TOKEN", raising=False)
+        monkeypatch.delenv("GH_MODELS_TOKEN", raising=False)
+        # require_auth=False (copilot_proxy) → live proceeds without a token.
+        assert _live_ok(require_auth=False) is True
+
+    def test_live_ok_github_no_token_still_skips(self, monkeypatch):
+        monkeypatch.setenv("RUNNER_LIVE", "1")
+        monkeypatch.delenv("GITHUB_MODELS_TOKEN", raising=False)
+        monkeypatch.delenv("GH_MODELS_TOKEN", raising=False)
+        # require_auth=True (github_models) → still skipped without a token.
+        assert _live_ok(require_auth=True) is False
+
+    def test_live_ok_github_with_token_ok(self, monkeypatch):
+        monkeypatch.setenv("RUNNER_LIVE", "1")
+        monkeypatch.setenv("GITHUB_MODELS_TOKEN", "FAKE_TOKEN_FOR_TEST")
+        assert _live_ok(require_auth=True) is True
+
+    def test_provider_require_auth_resolution(self):
+        """The provider's require_auth (used by the guard) matches expectations."""
+        from common.config import load_config
+        from common.llm import resolve_provider_config
+        cfg = load_config()
+        assert resolve_provider_config(cfg, provider="github_models")["require_auth"] is True
+        assert resolve_provider_config(cfg, provider="copilot_proxy")["require_auth"] is False

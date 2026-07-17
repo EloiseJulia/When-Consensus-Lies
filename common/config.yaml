@@ -70,3 +70,27 @@ roles:
 
 seeds:
   global: 20260713
+
+# ── Provider abstraction (shared-infra) ────────────────────────────────────────
+# Selects the online endpoint + request shape WITHOUT changing the experiment
+# roster above. `default` picks the provider when LLMClient(provider=...) is not
+# given explicitly; keep it `github_models` so existing behavior is unchanged.
+# The `copilot_proxy` block targets the local, OpenAI-compatible GitHub Copilot
+# API proxy (ghc-api): NO auth token, effectively unlimited quota, frontier models
+# across families. base_url is configurable (host/port may vary). The frontier
+# roster itself is pending owner sign-off (Amendment 06 DRAFT) and is intentionally
+# NOT hardcoded here.
+providers:
+  default: github_models
+  github_models:
+    base_url: https://models.github.ai/inference
+    require_auth: true
+  copilot_proxy:
+    base_url: http://127.0.0.1:8313/v1
+    require_auth: false
+    # Proxy slugs that reject a `temperature` field (HTTP 400); temperature is
+    # omitted for any slug containing one of these substrings. Empirically probed
+    # 2026-07-17. Editable as the roster evolves.
+    no_temperature_models:
+      - gpt-5.6
+      - mai-code
