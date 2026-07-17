@@ -124,6 +124,7 @@ def load_runs_tidy(
     tasks: List[Task],
     *,
     model_class_map: Optional[Dict[str, str]] = None,
+    expected_endpoint: Optional[str] = None,
 ) -> pd.DataFrame:
     """Load an AgentRun-JSONL checkpoint into a tidy agent-level DataFrame.
 
@@ -142,12 +143,27 @@ def load_runs_tidy(
             :data:`FRONTIER_MODEL_CLASS_MAP`. Pass a custom map when using a
             non-frontier roster. Heterogeneous-MAD runs are ALWAYS assigned
             "heterogeneous" regardless of any map entry.
+        expected_endpoint: Optional canonical endpoint namespace string
+            (``harness.runner.endpoint_identity(provider, base_url)``).  When
+            provided, ONLY records whose ``endpoint`` field matches are loaded;
+            records from other endpoints are silently dropped.  When ``None`` and
+            the checkpoint contains records from MORE THAN ONE endpoint namespace,
+            a ``ValueError`` is raised — caller must pass ``expected_endpoint`` to
+            disambiguate.  Records with no ``endpoint`` field belong to the default
+            namespace (empty string ``""``), which is backward-compatible with
+            checkpoints written before endpoint namespacing was added.
 
     Returns:
         tidy DataFrame with one row per labeled AgentRun, columns:
             task, method, model_class, seed, label, target, regime, ambiguity_k, model
         An empty DataFrame with the correct columns when the file is missing,
         empty, or contains no valid labeled run records.
+
+    Raises:
+        ValueError: If the checkpoint contains ``run`` records from more than one
+            endpoint namespace and ``expected_endpoint`` is not provided.  Pass the
+            expected endpoint (from ``endpoint_identity(client.provider,
+            client.base_url)``) to filter to a single namespace.
 
     Note:
         Only records of type ``"run"`` with a non-empty ``label`` field are included.
@@ -172,6 +188,11 @@ def load_runs_tidy(
     if not checkpoint_path.exists():
         return pd.DataFrame(columns=cols)
 
+    # Two-pass approach: first collect all valid run records with their endpoints,
+    # then apply endpoint filtering before building rows.
+    raw_records: List[tuple] = []  # (rec, ep)
+    seen_endpoints: set = set()
+
     with open(checkpoint_path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -187,27 +208,49 @@ def load_runs_tidy(
             if not label:
                 continue
             task_id = rec.get("task_id", "")
-            meta = task_meta.get(task_id)
-            if meta is None:
+            if task_meta.get(task_id) is None:
                 continue
-            target, regime, ambiguity_level = meta
-            config_name = rec.get("config", "")
-            model_id = rec.get("model_id", "")
-            # B1 fix: use replicate_seed (grid/job seed) if persisted; fall back
-            # to per-agent seed for legacy single-agent records where both are equal.
-            seed = int(rec.get("replicate_seed", rec.get("seed", 0)))
-            mc = _derive_model_class(config_name, model_id, model_class_map)
-            rows.append({
-                _ITEM: task_id,
-                _METHOD: config_name,
-                _MODEL_CLASS: mc,
-                _SEED: seed,
-                _LABEL: label,
-                _TARGET: target,
-                _REGIME: regime,
-                _AMBIGUITY_K: ambiguity_level,
-                _MODEL: model_id,
-            })
+            # Records with no "endpoint" field belong to the default namespace ("").
+            ep = rec.get("endpoint", "")
+            seen_endpoints.add(ep)
+            raw_records.append((rec, ep))
+
+    # Endpoint filtering.
+    if expected_endpoint is not None:
+        # Filter to matching endpoint only.
+        raw_records = [(rec, ep) for rec, ep in raw_records if ep == expected_endpoint]
+    elif len(seen_endpoints) > 1:
+        raise ValueError(
+            f"Checkpoint {checkpoint_path!r} contains run records from "
+            f"{len(seen_endpoints)} distinct endpoint namespaces: "
+            f"{sorted(seen_endpoints)!r}. Pass expected_endpoint= to filter to "
+            "the intended provider endpoint. Mixing records from different "
+            "endpoints in the same analysis cell would corrupt CD computations."
+        )
+
+    for rec, _ep in raw_records:
+        task_id = rec.get("task_id", "")
+        meta = task_meta.get(task_id)
+        if meta is None:
+            continue
+        target, regime, ambiguity_level = meta
+        config_name = rec.get("config", "")
+        model_id = rec.get("model_id", "")
+        # B1 fix: use replicate_seed (grid/job seed) if persisted; fall back
+        # to per-agent seed for legacy single-agent records where both are equal.
+        seed = int(rec.get("replicate_seed", rec.get("seed", 0)))
+        mc = _derive_model_class(config_name, model_id, model_class_map)
+        rows.append({
+            _ITEM: task_id,
+            _METHOD: config_name,
+            _MODEL_CLASS: mc,
+            _SEED: seed,
+            _LABEL: rec.get("label", ""),   # read from rec, not stale loop var
+            _TARGET: target,
+            _REGIME: regime,
+            _AMBIGUITY_K: ambiguity_level,
+            _MODEL: model_id,
+        })
 
     if not rows:
         return pd.DataFrame(columns=cols)

@@ -534,3 +534,73 @@ def test_item_level_cells_assigns_pool_id_for_multi_model_cell(tmp_path):
         assert slug in model_id_val, (
             f"Pool id must include each member slug; {slug!r} missing in {model_id_val!r}"
         )
+
+
+# ── 8. MAJOR: load_runs_tidy endpoint-awareness ───────────────────────────────
+
+def test_load_runs_tidy_raises_on_mixed_endpoints(tmp_path):
+    """MAJOR: checkpoint with records from two endpoints -> raises ValueError.
+
+    Mixing records from different providers (e.g. github_models vs copilot_proxy)
+    in the same analysis cell corrupts CD cells.  Without expected_endpoint,
+    load_runs_tidy must REFUSE to pool them.
+    """
+    task = _make_task("t1", regime="H1_external", k=1)
+    cp = tmp_path / "mixed.jsonl"
+
+    rec_ep1 = _make_run_record("t1", "single", "gpt-5.4", "I1", seed=42)
+    rec_ep2 = dict(_make_run_record("t1", "single", "gpt-5.4", "I0", seed=43))
+    rec_ep2["endpoint"] = "copilot_proxy\x00http://127.0.0.1:8313/v1"
+
+    _write_jsonl(cp, [rec_ep1, rec_ep2])
+
+    with pytest.raises(ValueError, match="endpoint"):
+        load_runs_tidy(cp, [task])
+
+
+def test_load_runs_tidy_filters_by_expected_endpoint(tmp_path):
+    """MAJOR: when expected_endpoint is given, only matching records are loaded."""
+    task = _make_task("t1", regime="H1_external", k=1)
+    cp = tmp_path / "mixed.jsonl"
+
+    # Default endpoint: no endpoint field -> ""
+    rec_default = _make_run_record("t1", "single", "gpt-5.4", "I1", seed=42)
+    # Copilot proxy endpoint
+    proxy_ep = "copilot_proxy\x00http://127.0.0.1:8313/v1"
+    rec_proxy = dict(_make_run_record("t1", "single", "gpt-4o-mini", "I0", seed=43))
+    rec_proxy["endpoint"] = proxy_ep
+
+    _write_jsonl(cp, [rec_default, rec_proxy])
+
+    # Filter to default namespace: only rec_default returned.
+    df_default = load_runs_tidy(cp, [task], expected_endpoint="")
+    assert len(df_default) == 1
+    assert df_default.iloc[0]["model"] == "gpt-5.4"
+
+    # Filter to proxy namespace: only rec_proxy returned.
+    df_proxy = load_runs_tidy(cp, [task], expected_endpoint=proxy_ep)
+    assert len(df_proxy) == 1
+    assert df_proxy.iloc[0]["model"] == "gpt-4o-mini"
+
+
+def test_load_runs_tidy_legacy_no_endpoint_loads_as_default(tmp_path):
+    """MAJOR: records with no endpoint field load under the default namespace "".
+
+    Backward-compatible: old checkpoints without an endpoint field are the same
+    as records written by the default (github_models) provider.
+    """
+    task = _make_task("t1", regime="H1_external", k=1)
+    cp = tmp_path / "legacy.jsonl"
+    _write_jsonl(cp, [_make_run_record("t1", "single", "gpt-5.4", "I0", seed=42)])
+
+    # No expected_endpoint -> single namespace "" -> OK, returns all records.
+    df = load_runs_tidy(cp, [task])
+    assert len(df) == 1
+
+    # Explicit expected_endpoint="" also works.
+    df2 = load_runs_tidy(cp, [task], expected_endpoint="")
+    assert len(df2) == 1
+
+    # Wrong endpoint returns empty.
+    df3 = load_runs_tidy(cp, [task], expected_endpoint="copilot_proxy\x00http://x/v1")
+    assert len(df3) == 0

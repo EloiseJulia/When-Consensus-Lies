@@ -155,11 +155,28 @@ def test_select_pilot_tasks_balances_regimes():
 
 
 def test_select_pilot_tasks_mixed_k():
+    """A pool with k=1,2,3 items (each singleton) cannot guarantee ≥2 at same k≥1 → raises.
+
+    BLOCKER: the selector MUST raise ValueError when no k≥1 group has ≥2 items.
+    Use a pool large enough that the k≥1 k=1 GROUP specifically has ≥2 items.
+    """
     tasks = (
         [_make_task(f"h1_k{k}", regime="H1_external", k=k) for k in [1, 2, 3]]
         + [_make_task(f"h2_k{k}", regime="H2_derivable", k=k) for k in [1, 2, 3]]
     )
-    selected = _registered_run.select_pilot_tasks(tasks, n_pilot=6)
+    # H1 pool: h1_k1 (1 item), h1_k2 (1 item), h1_k3 (1 item) → no k≥1 group with ≥2 items.
+    with pytest.raises(ValueError, match="k≥1"):
+        _registered_run.select_pilot_tasks(tasks, n_pilot=6)
+
+
+def test_select_pilot_tasks_mixed_k_enough_pool():
+    """A pool with 2+ items at k=1 succeeds and returns mixed k values."""
+    tasks = (
+        [_make_task(f"h1_k1_{i}", regime="H1_external", k=1) for i in range(3)]
+        + [_make_task(f"h1_k2_{i}", regime="H1_external", k=2) for i in range(2)]
+        + [_make_task(f"h2_k{k}", regime="H2_derivable", k=k) for k in [1, 2, 3]]
+    )
+    selected = _registered_run.select_pilot_tasks(tasks, n_pilot=8)
     k_values = {t.ambiguity_level for t in selected}
     assert len(k_values) >= 2, "Should have multiple k values"
 
@@ -171,9 +188,10 @@ def test_select_pilot_tasks_respects_cap():
 
 
 def test_select_pilot_tasks_with_few_tasks():
+    """A pool with only 1 H1 item cannot guarantee ≥2 k≥1 items → raises."""
     tasks = [_make_task("t1", regime="H1_external"), _make_task("t2", regime="H2_derivable")]
-    selected = _registered_run.select_pilot_tasks(tasks, n_pilot=10)
-    assert len(selected) == 2  # fewer than cap → return all
+    with pytest.raises(ValueError, match="k≥1"):
+        _registered_run.select_pilot_tasks(tasks, n_pilot=10)
 
 
 def test_select_pilot_tasks_only_h1():
@@ -760,16 +778,21 @@ def test_select_pilot_tasks_has_two_h1_items_at_k1_or_higher():
     )
 
 
-def test_select_pilot_tasks_fallback_when_no_k1_group_in_h1():
-    """When H1 pool has only singletons at every k≥1, fallback to balanced-k."""
+def test_select_pilot_tasks_raises_when_no_k1_group_has_two_items():
+    """BLOCKER: selector raises ValueError when every k≥1 group has only 1 item.
+
+    The old code fell back to balanced-k selection, silently returning a batch
+    where gate B would be INCONCLUSIVE for all conditions (no ≥2-item k≥1 group).
+    §11 requires the pilot gate on underspecified items — a batch that can never
+    satisfy this is invalid.  The selector must FAIL LOUDLY instead.
+    """
     h1_tasks = [
         _make_task("h1_k1", regime="H1_external", k=1),
         _make_task("h1_k2", regime="H1_external", k=2),
         _make_task("h1_k3", regime="H1_external", k=3),
     ]
-    selected = _registered_run.select_pilot_tasks(h1_tasks, n_pilot=6)
-    assert len(selected) <= 6
-    assert all(t.regime == "H1_external" for t in selected)
+    with pytest.raises(ValueError, match="k≥1"):
+        _registered_run.select_pilot_tasks(h1_tasks, n_pilot=6)
 
 
 # ── 12. MINOR: dry-run test monkeypatches LLMClient.complete ─────────────────
@@ -810,3 +833,171 @@ def test_pilot_dry_run_network_call_count_is_zero(monkeypatch, capsys):
     assert "skipped" not in out.lower(), (
         "--pilot --dry-run must not print 'skipped' (that is the live guard, not dry-run)"
     )
+
+
+# ── 13. BLOCKER: gates A/B restricted to k≥1 (underspecified) items ──────────
+
+def test_gate_a_b_fail_when_all_h1_items_are_k0(tmp_path):
+    """BLOCKER: gates A and B must NOT include k=0 H1 items.
+
+    k=0 is the fully-specified CONTROL.  With all H1 items at k=0, both gate_a
+    and gate_b must be False (NEVER PASS), even if labels are converging.
+    Also confirms k0_control_cd diagnostic field is present in the report.
+    """
+    from pathlib import Path as _Path
+    from common.config import load_config
+    from harness.runner import Runner, RunnerConfig
+    from common.llm import LLMClient
+
+    cfg = load_config()
+    tasks = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(4)]
+    cp = str(tmp_path / "cp.jsonl")
+
+    records = []
+    for t in tasks:
+        for seed_off in range(5):
+            label = "I1" if seed_off < 4 else "I0"
+            records.append(_make_run_record(t.id, "sc", "gpt-5.4", label,
+                                            seed=42 + seed_off, replicate_seed=42))
+        records.append({"type": "job_done", "task_id": t.id, "config": "sc",
+                        "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42})
+    _write_jsonl(_Path(cp), records)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
+    runner_cfg = RunnerConfig(
+        tasks=tasks, configs=["sc"], seeds=[42],
+        models=[("tested_agents", "gpt-5.4")],
+        checkpoint_path=_Path(cp), rpm=0,
+    )
+    runner = Runner(runner_cfg, client)
+
+    report = _registered_run.run_pilot_gate(
+        cfg, tasks, checkpoint_path=cp,
+        offline=True, cache_dir=str(tmp_path / "llm_cache"),
+        _runner_override=(runner, client),
+    )
+
+    assert not report["gate_a"], (
+        "gate_a must be False when all H1 items are k=0 (fully specified control). "
+        "BLOCKER: gates A/B must be restricted to k>=1 items only."
+    )
+    assert not report["gate_b"]
+    assert not report["gate_pass"]
+    assert "k0_control_cd" in report, "report must include k0_control_cd diagnostic field"
+
+
+def test_gate_a_uses_only_k1_plus_not_k0_mixed_batch(tmp_path):
+    """BLOCKER: gate A uses only k>=1 cells even in a mixed k=0+k=1 batch.
+
+    k=0 items converge (4/5 wrong -> CD>0), k=1 items all correct (CD=0).
+    If gate A included k=0 items it would PASS; correct behaviour is FAIL
+    because the k>=1 items have CD=0.
+    """
+    from pathlib import Path as _Path
+    from common.config import load_config
+    from harness.runner import Runner, RunnerConfig
+    from common.llm import LLMClient
+
+    cfg = load_config()
+    k0_tasks = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(2)]
+    k1_tasks = [_make_task(f"k1_{i}", regime="H1_external", k=1) for i in range(2)]
+    tasks = k0_tasks + k1_tasks
+    cp = str(tmp_path / "cp.jsonl")
+
+    records = []
+    for t in k0_tasks:
+        for seed_off in range(5):
+            label = "I1" if seed_off < 4 else "I0"
+            records.append(_make_run_record(t.id, "sc", "gpt-5.4", label,
+                                            seed=42 + seed_off, replicate_seed=42))
+        records.append({"type": "job_done", "task_id": t.id, "config": "sc",
+                        "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42})
+    for t in k1_tasks:
+        for seed_off in range(5):
+            records.append(_make_run_record(t.id, "sc", "gpt-5.4", "I0",
+                                            seed=42 + seed_off, replicate_seed=42))
+        records.append({"type": "job_done", "task_id": t.id, "config": "sc",
+                        "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42})
+    _write_jsonl(_Path(cp), records)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
+    runner_cfg = RunnerConfig(
+        tasks=tasks, configs=["sc"], seeds=[42],
+        models=[("tested_agents", "gpt-5.4")],
+        checkpoint_path=_Path(cp), rpm=0,
+    )
+    runner = Runner(runner_cfg, client)
+
+    report = _registered_run.run_pilot_gate(
+        cfg, tasks, checkpoint_path=cp,
+        offline=True, cache_dir=str(tmp_path / "llm_cache"),
+        _runner_override=(runner, client),
+    )
+
+    assert not report["gate_a"], (
+        "gate_a must FAIL: k=1 items all correct -> real_cd=0. "
+        "k=0 items (4/5 wrong) must NOT contribute to gate_a. "
+        f"real_cd={report['real_cd']:.4f}  k0_control_cd={report.get('k0_control_cd','N/A')}"
+    )
+    assert report.get("k0_control_cd", 0.0) > 0.0, (
+        "k0_control_cd diagnostic should be > 0 (k=0 items were 4/5 wrong)"
+    )
+
+
+def test_select_pilot_tasks_raises_if_h1_pool_is_all_k0():
+    """BLOCKER: selector raises when the entire H1 pool is k=0."""
+    h1_k0 = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(4)]
+    h2 = [_make_task(f"h2_{i}", regime="H2_derivable", k=1) for i in range(4)]
+    with pytest.raises(ValueError, match="k"):
+        _registered_run.select_pilot_tasks(h1_k0 + h2, n_pilot=10)
+
+
+# ── 14. MAJOR gate C: per-model cardinality, not pooled ──────────────────────
+
+def test_gate_c_fails_when_one_model_sc_job_has_zero_records(tmp_path):
+    """MAJOR gate C: one model's SC job has job_done but 0 agent records.
+
+    The OLD check grouped by (item, method, seed), pooling all models.  With
+    gpt-5.4 having 5 records and gpt-5.6-sol having 0, the pool group has 5
+    records and passes len>=5.  The NEW per-model enumeration catches that
+    gpt-5.6-sol has 0 records and fails gate_c.
+    """
+    from pathlib import Path as _Path
+    from common.config import load_config
+    from harness.runner import Runner, RunnerConfig
+    from common.llm import LLMClient
+
+    cfg = load_config()
+    tasks = [_make_task("t1", regime="H1_external", k=1)]
+    cp = str(tmp_path / "cp.jsonl")
+
+    records = []
+    for seed_off in range(5):
+        records.append(_make_run_record("t1", "sc", "gpt-5.4", "I1",
+                                        seed=42 + seed_off, replicate_seed=42))
+    records.append({"type": "job_done", "task_id": "t1", "config": "sc",
+                    "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42})
+    # gpt-5.6-sol has job_done but ZERO agent records.
+    records.append({"type": "job_done", "task_id": "t1", "config": "sc",
+                    "model_role": "tested_agents", "model_id": "gpt-5.6-sol", "seed": 42})
+    _write_jsonl(_Path(cp), records)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
+    runner_cfg = RunnerConfig(
+        tasks=tasks, configs=["sc"], seeds=[42],
+        models=[("tested_agents", "gpt-5.4"), ("tested_agents", "gpt-5.6-sol")],
+        checkpoint_path=_Path(cp), rpm=0,
+    )
+    runner = Runner(runner_cfg, client)
+
+    report = _registered_run.run_pilot_gate(
+        cfg, tasks, checkpoint_path=cp,
+        offline=True, cache_dir=str(tmp_path / "llm_cache"),
+        _runner_override=(runner, client),
+    )
+
+    assert not report["gate_c"], (
+        "gate_c must FAIL when one model SC job has 0 records. "
+        "MAJOR: per-model check must not be masked by pooled aggregation."
+    )
+    assert not report["gate_pass"]

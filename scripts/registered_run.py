@@ -249,18 +249,48 @@ def select_pilot_tasks(
     return selected_h1 + selected_h2
 
 
+def _validate_h1_k1_guarantee(tasks: List[Any]) -> None:
+    """Raise ValueError if *tasks* has no k≥1 ambiguity group with ≥2 items.
+
+    §11 requires ≥2 H1_external items sharing a k≥1 condition for gates A and
+    B.  This helper is called at the end of every code path inside
+    :func:`_select_h1_with_k1_guarantee` so the BLOCKER invariant is enforced
+    regardless of which branch was taken (pool selection, n<2 truncation, or
+    passthrough when len(tasks) ≤ n).
+    """
+    by_k: Dict[int, int] = {}
+    for t in tasks:
+        k = t.ambiguity_level
+        if k >= 1:
+            by_k[k] = by_k.get(k, 0) + 1
+    if not any(c >= 2 for c in by_k.values()):
+        raise ValueError(
+            "Pilot task list has no k≥1 group with ≥2 H1_external items. "
+            "§11 gates A and B require ≥2 H1 items sharing a k≥1 condition so "
+            "the shuffle null is not degenerate. Ensure the H1 bench includes "
+            "≥2 items at the same k≥1 ambiguity level and pass them to the pilot. "
+            f"k≥1 item counts in this batch: {dict(sorted(by_k.items()))}"
+        )
+
+
 def _select_h1_with_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
-    """Select up to n H1_external tasks, prioritising ≥2 items at some k≥1.
+    """Select up to n H1_external tasks, guaranteeing ≥2 items at some k≥1.
 
     If the pool has a k≥1 group with ≥2 items, seeds the selection with 2 items
     from that group (picking the group with the most items), then fills the rest
-    with balanced-k selection over the remainder.  Falls back to plain balanced-k
-    if no k≥1 group has ≥2 items or n < 2.
+    with balanced-k selection over the remainder.  RAISES ValueError if no k≥1
+    group has ≥2 items — there is no valid fallback for §11 gate A/B.
     """
     if len(tasks) <= n:
-        return list(tasks)
+        result = list(tasks)
+        _validate_h1_k1_guarantee(result)
+        return result
     if n < 2:
-        return _select_balanced_k(tasks, n)
+        raise ValueError(
+            f"Cannot select {n} H1 pilot tasks and guarantee ≥2 items at k≥1: "
+            "need n ≥ 2 to satisfy §11 gate A/B. "
+            "Increase PILOT_MAX_ITEMS or the H1 half-budget."
+        )
 
     # Find k≥1 groups with ≥2 items.
     by_k: Dict[int, List[Any]] = {}
@@ -278,16 +308,47 @@ def _select_h1_with_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
         fill = _select_balanced_k(remaining, n - 2)
         return guaranteed + fill
     else:
-        return _select_balanced_k(tasks, n)
+        raise ValueError(
+            "Pilot selector: no k≥1 ambiguity group has ≥2 H1_external items. "
+            "§11 gates A and B require the pilot gate on real UNDERSPECIFIED items "
+            "(k≥1) and the shuffle null requires ≥2 items per condition. "
+            f"H1 pool: {len(tasks)} items; k distribution: "
+            f"{dict(sorted((k, len(ts)) for k, ts in by_k.items()))}. "
+            "Ensure the H1 bench loader returns items with at least one k≥1 "
+            "ambiguity level that appears ≥2 times."
+        )
 
 
 def _select_h2_with_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
-    """Select up to n H2_derivable tasks, prioritising ≥2 items at some k≥1.
+    """Select up to n H2_derivable tasks, preferring ≥2 items at some k≥1.
 
-    Same guarantee logic as :func:`_select_h1_with_k1_guarantee` so gate B
-    can also evaluate H2_derivable underspecified conditions.
+    SOFT guarantee (H2): tries to include ≥2 items at the same k≥1 value for
+    H2 gate B coverage, but does NOT raise if the pool lacks such items.  Gate
+    A/B are primarily H1_external; H2 coverage is a bonus.  Use
+    :func:`_select_h1_with_k1_guarantee` for the hard H1 guarantee.
     """
-    return _select_h1_with_k1_guarantee(tasks, n)  # same algorithm
+    if len(tasks) <= n:
+        return list(tasks)
+    if n < 2:
+        return _select_balanced_k(tasks, n)
+
+    # Find k≥1 groups with ≥2 items.
+    by_k: Dict[int, List[Any]] = {}
+    for t in tasks:
+        k = t.ambiguity_level
+        by_k.setdefault(k, []).append(t)
+    k1_groups = [(k, ts) for k, ts in by_k.items() if k >= 1 and len(ts) >= 2]
+
+    if k1_groups:
+        best_k, best_ts = max(k1_groups, key=lambda x: len(x[1]))
+        guaranteed = best_ts[:2]
+        already_ids = {t.id for t in guaranteed}
+        remaining = [t for t in tasks if t.id not in already_ids]
+        fill = _select_balanced_k(remaining, n - 2)
+        return guaranteed + fill
+    else:
+        # H2 soft: no valid k≥1 group — fall back to balanced selection without error.
+        return _select_balanced_k(tasks, n)
 
 
 # ── Runner and analysis helpers ──────────────────────────────────────────────
@@ -418,6 +479,7 @@ def run_pilot_gate(
     from analysis.contrasts import COLS, compute_cell_cd
     from analysis.io import FRONTIER_MODEL_CLASS_MAP, load_runs_tidy
     from analysis.nulls import NULL_CD_TOLERANCE, MIN_ITEMS_FOR_NULL, cd_primary_shuffle_null
+    from harness.runner import endpoint_identity as _endpoint_identity, POOL_CONFIGS
 
     if len(tasks) > n_pilot:
         tasks = tasks[:n_pilot]
@@ -444,11 +506,19 @@ def run_pilot_gate(
     run_result = runner.run(dry_run=dry_run)
     total_cost = getattr(client, "_total_cost_usd", 0.0)
 
-    # Build tidy table via D3 adapter (reads checkpoint written by the run above).
-    tidy_df = load_runs_tidy(checkpoint_path, tasks,
-                             model_class_map=FRONTIER_MODEL_CLASS_MAP)
+    # Compute the endpoint namespace for the client used — filter tidy load to
+    # that endpoint so records from other provider runs (e.g. github_models from
+    # an earlier attempt) are never mixed into the same analysis cells.
+    expected_ep = _endpoint_identity(client.provider, client.base_url)
 
-    # ── Gate (c): pipeline integration (MAJOR 5 fix + MAJOR E cardinality) ───
+    # Build tidy table via D3 adapter (reads checkpoint written by the run above).
+    tidy_df = load_runs_tidy(
+        checkpoint_path, tasks,
+        model_class_map=FRONTIER_MODEL_CLASS_MAP,
+        expected_endpoint=expected_ep,
+    )
+
+    # ── Gate (c): pipeline integration (MAJOR 5 fix + MAJOR E/MAJOR cardinality) ──
     # (i) Run completed successfully (no failures, not a dry-run report).
     run_status = run_result.get("status")
     gate_c_status = (
@@ -465,19 +535,43 @@ def run_pilot_gate(
     _golden_target = "I0"
     _golden_expected = 0.8
     gate_c_golden = abs(_cd_primary_fn(_golden_labels, _golden_target) - _golden_expected) < 1e-9
-    # (iv) MAJOR E — cardinality: each completed SC job must have ≥ k=5 run records;
-    # each single job ≥ 1.  A stale checkpoint with only 1 surviving run record
-    # for an SC job has len(group) < 5 → gate_c_cardinality = False.
+    # (iv) MAJOR/MAJOR E — per-job cardinality: enumerate the runner's expected grid
+    # and validate each completed job independently.  The old pooled check (groupby
+    # item×method×seed across ALL models) masked missing model jobs — a 7-model SC
+    # run satisfied len(grp)≥5 even if one model's job had 0 records.  Now we check
+    # EACH (task, config, model_id, seed) job separately: non-pool configs require
+    # per-model record counts; pool configs check the total pool agent count.
     gate_c_cardinality = True
     if gate_c_status and gate_c_nonempty:
         item_col_v = COLS["item"]
         method_col_v = COLS["method"]
         seed_col_v = COLS["seed"]
-        for (_, meth, _), grp in tidy_df.groupby(
-            [item_col_v, method_col_v, seed_col_v], dropna=False
-        ):
-            min_expected = _GATE_C_MIN_AGENTS.get(meth, 1)
-            if len(grp) < min_expected:
+        model_col_v = "model"
+        run_is_fully_done = run_result.get("status") == "done"
+        for (task_id, cfg_name, model_role, model_id, rep_seed) in runner.enumerate_grid():
+            # For resumable runs, only check jobs already marked done.
+            if not run_is_fully_done:
+                if not runner._store.job_done(task_id, cfg_name, model_role, model_id, rep_seed):
+                    continue
+            min_expected = _GATE_C_MIN_AGENTS.get(cfg_name, 1)
+            if cfg_name in POOL_CONFIGS:
+                # Pool job: agents share (task, config, seed) but have distinct
+                # model slugs.  Check the TOTAL pool agent count.
+                count = int((
+                    (tidy_df[item_col_v] == task_id)
+                    & (tidy_df[method_col_v] == cfg_name)
+                    & (tidy_df[seed_col_v] == rep_seed)
+                ).sum())
+            else:
+                # Single-model job: match per-model so a missing model's job (zero
+                # records) is not masked by other models' records in the same cell.
+                count = int((
+                    (tidy_df[item_col_v] == task_id)
+                    & (tidy_df[method_col_v] == cfg_name)
+                    & (tidy_df[model_col_v] == model_id)
+                    & (tidy_df[seed_col_v] == rep_seed)
+                ).sum())
+            if count < min_expected:
                 gate_c_cardinality = False
                 break
     gate_c = gate_c_status and gate_c_nonempty and gate_c_golden and gate_c_cardinality
@@ -505,19 +599,33 @@ def run_pilot_gate(
                 "iperp_rate": n_perp / n if n else 0.0,
             })
 
-    # ── Gate (a): cd_primary > 0 on H1_external cells ─────────────────────────
+    # ── Gate (a): cd_primary > 0 on H1_external k≥1 (UNDERSPECIFIED) items ──
+    # BLOCKER fix: gates A and B MUST be restricted to k≥1 items.  k=0 is the
+    # fully-specified CONTROL — its CD should be ≈0 — including it would dilute
+    # the "CD>0" signal and confound the null.  k=0 CD is reported as a diagnostic.
     real_cd = 0.0
     h1_df = tidy_df[tidy_df[regime_col] == "H1_external"] if gate_c_nonempty else tidy_df.iloc[0:0]
+    h1_k1plus_df = h1_df[h1_df[ambiguity_col] >= 1] if len(h1_df) > 0 else h1_df
+    h1_k0_df = h1_df[h1_df[ambiguity_col] == 0] if len(h1_df) > 0 else h1_df
     h1_cells: Any = None
-    if len(h1_df) > 0:
-        h1_cells = compute_cell_cd(h1_df)
+    if len(h1_k1plus_df) > 0:
+        h1_cells = compute_cell_cd(h1_k1plus_df)
         if len(h1_cells) > 0:
             real_cd = float(h1_cells["cd_primary"].mean())
     gate_a = real_cd > 0.0
 
+    # k=0 CONTROL diagnostic (CD should be ≈0 for fully-specified items; NOT used
+    # for PASS/FAIL — reported as an internal-validity check only).
+    k0_control_cd = 0.0
+    if len(h1_k0_df) > 0:
+        k0_cells = compute_cell_cd(h1_k0_df)
+        if len(k0_cells) > 0:
+            k0_control_cd = float(k0_cells["cd_primary"].mean())
+
     # ── Gate (b): per-condition cd_primary shuffle null ≈ 0 (BLOCKER 2 fix) ───
     # Uses cd_primary_shuffle_null (NOT the frozen label_shuffle_null which calls
     # false_consensus_rate) so real and null metrics are consistent.
+    # BLOCKER fix: gate B uses ONLY k≥1 cells (h1_k1plus_df), same as gate A.
     gate_b = False
     null_cd = 0.0
     null_cd_vals: List[float] = []
@@ -530,11 +638,7 @@ def run_pilot_gate(
             n_cells = len(cond_cells)
             cond_real_cd = float(cond_cells["cd_primary"].mean())
 
-            # BLOCKER D fix: require ≥ MIN_ITEMS_FOR_NULL DISTINCT ITEMS (tasks),
-            # not just ≥ MIN_ITEMS_FOR_NULL cells.  Two replicate seeds from ONE
-            # item produce n_cells=2 but only 1 distinct item — the cross-item
-            # shuffle degenerates to a within-item permutation (no-op).  Only a
-            # genuine cross-item shuffle (≥2 distinct tasks) is meaningful.
+            # BLOCKER D fix: require ≥ MIN_ITEMS_FOR_NULL DISTINCT ITEMS (tasks).
             n_distinct_items = cond_cells[item_col].nunique()
             if n_distinct_items < MIN_ITEMS_FOR_NULL:
                 gate_b_details.append({
@@ -547,12 +651,13 @@ def run_pilot_gate(
                 continue
 
             # Reconstruct per-cell label lists for this condition.
+            # BLOCKER fix: slice from h1_k1plus_df (k≥1 only), not h1_df.
             cond_mask = (
-                (h1_df[method_col] == method)
-                & (h1_df[model_class_col] == mc)
-                & (h1_df[ambiguity_col] == ambi_k)
+                (h1_k1plus_df[method_col] == method)
+                & (h1_k1plus_df[model_class_col] == mc)
+                & (h1_k1plus_df[ambiguity_col] == ambi_k)
             )
-            cond_df = h1_df[cond_mask]
+            cond_df = h1_k1plus_df[cond_mask]
             target = str(cond_df[target_col].mode().iloc[0])
 
             cells_labels = [
@@ -590,6 +695,7 @@ def run_pilot_gate(
         "gate_b": gate_b,
         "gate_c": gate_c,
         "real_cd": real_cd,
+        "k0_control_cd": k0_control_cd,   # diagnostic: CD of k=0 controls (should ≈0)
         "null_cd": null_cd,
         "null_metric": "cd_primary",   # audit: confirms metric used for null
         "iperp_rate": iperp_rate,
