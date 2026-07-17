@@ -123,12 +123,79 @@ MAX_TOKENS_PER_CALL = 12288
 REASONER_SC_EXCLUDED_IDS: frozenset = frozenset(K_GRADIENT_IDS)
 
 
+# ── Roster abstraction (parametrizes the model plane; task plane is shared) ────
+# The GitHub-Models driver and the frontier (Copilot-proxy) re-validation driver
+# share the SAME task set, labeling, CD/I_perp math, report assembly and rendering.
+# The ONLY axis that differs is the model roster (which slugs run pass A / pass B
+# and how each slug is classified). A ``Roster`` bundles that model plane so the
+# frontier driver (scripts/default_check_frontier.py, Amendment 06) reuses every
+# pure function here with zero duplication.
+
+class Roster:
+    """The model plane of a default-check run (task plane stays shared/frozen).
+
+    - ``homogeneous_models``: (role, slug) grid swept by pass A (config "sc") — each
+      slug runs its OWN homogeneous within-ensemble sc ensemble (k samples).
+    - ``pool_models``: (role, slug) grid swept by pass B (config "single") — one
+      independent sample per family (the heterogeneous diverse pool).
+    - ``reasoner_slugs`` / ``weak_slugs`` / ``rho_baseline_slugs``: model_class tags
+      for per (task, regime, model_class) reporting.
+    - ``reasoner_sc_excluded_ids``: task ids removed from pass A (code_invoice kgrad).
+
+    Implemented as a plain (non-dataclass) class on purpose: this driver is loaded
+    via importlib as a NON-package module (scripts/ is not importable), so it is not
+    registered in ``sys.modules`` under its ``__module__`` name. ``@dataclass`` +
+    ``from __future__ import annotations`` would then fail its KW_ONLY/ClassVar probe
+    (``sys.modules.get(cls.__module__)`` → None). A hand-written ``__init__`` avoids
+    that entirely and keeps the roster hashable/immutable-in-practice.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        homogeneous_models,
+        pool_models,
+        reasoner_slugs,
+        weak_slugs,
+        reasoner_sc_excluded_ids=None,
+        rho_baseline_slugs=frozenset(),
+    ) -> None:
+        self.name = name
+        self.homogeneous_models = tuple(homogeneous_models)
+        self.pool_models = tuple(pool_models)
+        self.reasoner_slugs = frozenset(reasoner_slugs)
+        self.weak_slugs = frozenset(weak_slugs)
+        self.reasoner_sc_excluded_ids = (
+            frozenset(K_GRADIENT_IDS) if reasoner_sc_excluded_ids is None
+            else frozenset(reasoner_sc_excluded_ids)
+        )
+        self.rho_baseline_slugs = frozenset(rho_baseline_slugs)
+
+    def model_class(self, slug: str) -> str:
+        if slug in self.reasoner_slugs:
+            return "reasoner"
+        if slug in self.weak_slugs:
+            return "weak"
+        if slug in self.rho_baseline_slugs:
+            return "rho_baseline"
+        return "other"
+
+
+# The default (GitHub-Models) roster, assembled from the module constants above so
+# existing behavior is byte-identical when no roster is passed.
+GITHUB_ROSTER = Roster(
+    name="github_models",
+    homogeneous_models=tuple(HOMOGENEOUS_MODELS),
+    pool_models=tuple(POOL_MODELS),
+    reasoner_slugs=frozenset(REASONER_SLUGS),
+    weak_slugs=frozenset(WEAK_SLUGS),
+    reasoner_sc_excluded_ids=REASONER_SC_EXCLUDED_IDS,
+)
+
+
 def model_class(slug: str) -> str:
-    if slug in REASONER_SLUGS:
-        return "reasoner"
-    if slug in WEAK_SLUGS:
-        return "weak"
-    return "other"
+    """Back-compat module-level classifier (delegates to the default GitHub roster)."""
+    return GITHUB_ROSTER.model_class(slug)
 
 
 # ── Enumerated-only convergent delusion (thin helper — metrics.py is FROZEN) ──
@@ -252,17 +319,19 @@ def run_diagnostic(
     sc_k: int = SC_K,
     budget_usd: Optional[float] = BUDGET_USD,
     rpm: int = RPM,
+    roster: Roster = GITHUB_ROSTER,
 ) -> Dict[str, Any]:
     """Execute the diagnostic against *client* (offline mock OR live) and build the report.
 
     Two Runner passes share ONE checkpoint + the client's disk cache:
-      A. config "sc"     over HOMOGENEOUS_MODELS  → within-ensemble convergence (k samples).
-      B. config "single" over POOL_MODELS         → heterogeneous diverse pool +
-                                                     single reasoner resolution pass.
+      A. config "sc"     over roster.homogeneous_models → within-ensemble convergence.
+      B. config "single" over roster.pool_models        → heterogeneous diverse pool +
+                                                          single reasoner resolution pass.
 
     ``client`` fully controls online/offline (offline mock needs no token/network), so the
     same code path is exercised by the offline unit test and by the Manager's live run.
-    Returns the report dict (also written as JSONL alongside the checkpoint by ``main``).
+    ``roster`` selects the model plane (GitHub-Models by default; the frontier driver
+    passes FRONTIER_ROSTER). Returns the report dict (also written as JSONL by ``main``).
     """
     from harness.run import run_task as base_run_task
     from harness.runner import CheckpointStore
@@ -282,12 +351,12 @@ def run_diagnostic(
     # Pass A + B share the checkpoint; the Runner uses the injected run_task/label fns.
     from harness.runner import Runner, RunnerConfig
 
-    def _pass(configs, models):
+    def _pass(configs, models, pass_tasks):
         cfg = RunnerConfig(
-            tasks=tasks,
+            tasks=pass_tasks,
             configs=configs,
             seeds=[seed],
-            models=models,
+            models=list(models),
             checkpoint_path=Path(checkpoint_path),
             rpm=rpm,
             max_budget_usd=budget_usd,
@@ -295,23 +364,31 @@ def run_diagnostic(
         runner = Runner(cfg, client, run_task_fn=_run_task_fn, label_run_fn=label_fn)
         return runner.run()
 
-    # Pass A: reasoner homogeneous sc — code_invoice EXCLUDED (see REASONER_SC_EXCLUDED_IDS).
-    sc_tasks_orig = tasks
-    try:
-        tasks = [t for t in tasks if t.id not in REASONER_SC_EXCLUDED_IDS]
-        status_a = _pass(["sc"], HOMOGENEOUS_MODELS)
-    finally:
-        tasks = sc_tasks_orig  # restore full list for pass B
+    # Pass A: homogeneous sc — code_invoice EXCLUDED (see roster.reasoner_sc_excluded_ids).
+    sc_tasks = [t for t in tasks if t.id not in roster.reasoner_sc_excluded_ids]
+    status_a = _pass(["sc"], roster.homogeneous_models, sc_tasks)
 
     # Pass B: heterogeneous single pass over all tasks (including code_invoice kgrad).
-    status_b = _pass(["single"], POOL_MODELS)
+    status_b = _pass(["single"], roster.pool_models, tasks)
 
     # Read back every checkpointed run and build the report.
-    store = CheckpointStore(Path(checkpoint_path))
+    store = CheckpointStore(Path(checkpoint_path),
+                            endpoint=_endpoint_identity_for(client))
     report = build_report(store.all_runs(), tasks, task_role,
-                          total_cost_usd=store.aggregate_cost_usd)
+                          total_cost_usd=store.aggregate_cost_usd, roster=roster)
     report["runner_status"] = {"pass_a_sc": status_a, "pass_b_single": status_b}
+    report["roster_name"] = roster.name
     return report
+
+
+def _endpoint_identity_for(client) -> Optional[str]:
+    """Read-back must use the SAME endpoint namespace the Runner wrote under, so a
+    copilot_proxy run is not read through the github_models namespace (and vice versa)."""
+    try:
+        from harness.runner import endpoint_identity
+        return endpoint_identity(client.provider, client.base_url)
+    except Exception:
+        return None
 
 
 # ── Report assembly (pure function — offline-testable) ────────────────────────
@@ -322,6 +399,7 @@ def build_report(
     task_role: Dict[str, str],
     *,
     total_cost_usd: float = 0.0,
+    roster: Roster = GITHUB_ROSTER,
 ) -> Dict[str, Any]:
     """Build the machine-readable diagnostic report from checkpointed AgentRun records.
 
@@ -359,7 +437,7 @@ def build_report(
             "task_role": task_role.get(task_id),
             "ensemble_type": "homogeneous",
             "model_id": model_id,
-            "model_class": model_class(model_id),
+            "model_class": roster.model_class(model_id),
             **stats,
         })
 
@@ -385,7 +463,7 @@ def build_report(
     # Single reasoner-resolution rows on the H2 task (config "single", reasoner slugs).
     reasoner_resolution: List[Dict[str, Any]] = []
     for (task_id, config, model_id), labels in sorted(grouped.items()):
-        if config == "single" and task_id == H2_TASK_ID and model_id in REASONER_SLUGS:
+        if config == "single" and task_id == H2_TASK_ID and model_id in roster.reasoner_slugs:
             stats = ensemble_stats(labels)
             reasoner_resolution.append({
                 "task_id": task_id,
