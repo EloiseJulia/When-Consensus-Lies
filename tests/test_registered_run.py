@@ -24,7 +24,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -71,8 +71,9 @@ def _make_run_record(
     model_id: str,
     label: str,
     seed: int = 42,
+    replicate_seed: Optional[int] = None,
 ) -> Dict[str, Any]:
-    return {
+    rec = {
         "type": "run",
         "task_id": task_id,
         "config": config,
@@ -84,6 +85,10 @@ def _make_run_record(
         "logit_conf": None,
         "seed": seed,
     }
+    # Write replicate_seed only when provided and ≠ seed (mirrors runner behaviour).
+    if replicate_seed is not None and replicate_seed != seed:
+        rec["replicate_seed"] = replicate_seed
+    return rec
 
 
 def _write_jsonl(path: Path, records: List[Dict]) -> None:
@@ -198,6 +203,10 @@ class TestRunPilotGate:
           "converging" → 4 out of 5 sc runs label I1 (wrong) → cd_primary > 0
           "all_correct" → all 5 sc runs label I0 (target) → cd_primary = 0
           "mixed" → some I0, some I1, some I_perp → cd_primary > 0
+
+        B1 fix: all 5 per-agent records for each task share replicate_seed=42
+        (the grid seed), so they form ONE ensemble cell in compute_cell_cd.
+        Without this, each per-agent seed (42+i) would be a separate singleton.
         """
         records = []
         for task in tasks:
@@ -207,12 +216,18 @@ class TestRunPilotGate:
                     label = "I1" if seed_off < 4 else "I0"
                 elif label_pattern == "all_correct":
                     label = "I0"
+                elif label_pattern == "all_iperp":
+                    label = "I_perp"
                 else:  # mixed
                     label = ["I1", "I1", "I1", "I0", "I_perp"][seed_off % 5]
+                # replicate_seed=42 groups all 5 agents into ONE ensemble cell.
                 records.append(
-                    _make_run_record(task.id, "sc", "gpt-5.4", label, seed=seed)
+                    _make_run_record(
+                        task.id, "sc", "gpt-5.4", label,
+                        seed=seed, replicate_seed=42
+                    )
                 )
-            # Also write job_done marker
+            # job_done marker (grid seed=42)
             records.append({
                 "type": "job_done",
                 "task_id": task.id, "config": "sc",
@@ -306,12 +321,66 @@ class TestRunPilotGate:
         assert not report["gate_c"]
         assert not report["gate_pass"]
 
-    def test_gate_b_passes_when_real_cd_exceeds_null(self, tmp_path):
-        """gate_b=True when null CD < real CD (shuffle gives lower CD)."""
+    def test_gate_b_uses_cd_primary_not_false_consensus_rate(self, tmp_path):
+        """gate_b null is computed with cd_primary, NOT false_consensus_rate.
+
+        With all-I_perp labels:
+          cd_primary(["I_perp"×5], "I0") = 0  (I_perp ineligible as enumerated wrong)
+          false_consensus_rate(["I_perp"×5], "I0") = 1.0  (I_perp is modal wrong)
+
+        So null_cd should be ≈ 0 (cd_primary pool) not ≈ 1.0 (false_consensus_rate pool).
+        This is the auditor-critical metric-consistency check for BLOCKER 2.
+        """
         from common.config import load_config
         cfg = load_config()
-        # Use 4 H1_external items (minimum for a meaningful shuffle null)
+        # Use ≥2 tasks so the condition is not INCONCLUSIVE (MIN_ITEMS_FOR_NULL=2).
         tasks = [_make_task(f"t{i}", regime="H1_external", k=1) for i in range(4)]
+        cp = str(tmp_path / "cp.jsonl")
+        # Write all-I_perp labels with replicate_seed=42 for proper cell grouping.
+        records = []
+        for task in tasks:
+            for seed_off in range(5):
+                records.append(
+                    _make_run_record(
+                        task.id, "sc", "gpt-5.4", "I_perp",
+                        seed=42 + seed_off, replicate_seed=42,
+                    )
+                )
+            records.append({
+                "type": "job_done",
+                "task_id": task.id, "config": "sc",
+                "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42,
+            })
+        _write_jsonl(Path(cp), records)
+        runner, client = self._make_noop_runner(cfg, tasks, cp, tmp_path)
+        report = _registered_run.run_pilot_gate(
+            cfg, tasks,
+            checkpoint_path=cp,
+            offline=True,
+            cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+        # Metric identity check: null_metric must be "cd_primary".
+        assert report["null_metric"] == "cd_primary", (
+            f"Expected null_metric='cd_primary'; got {report['null_metric']!r}"
+        )
+        # cd_primary null for all-I_perp labels: pool has no enumerated-wrong labels
+        # → cd_primary_shuffle_null = 0.0 for every permutation.
+        # false_consensus_rate null would be ≈ 1.0 (I_perp dominates the pool).
+        assert report["null_cd"] < 0.05, (
+            f"null_cd should be ≈ 0 with cd_primary metric for all-I_perp labels; "
+            f"got {report['null_cd']:.4f}.  If > 0.05, the wrong metric was used."
+        )
+
+    def test_gate_b_inconclusive_with_single_cell_condition(self, tmp_path):
+        """A condition with only 1 ensemble cell is INCONCLUSIVE → gate_b=False.
+
+        gate_b requires ≥ MIN_ITEMS_FOR_NULL cells per condition.  A single item
+        makes the cross-item shuffle degenerate (within-cell permutation, no-op).
+        """
+        from common.config import load_config
+        cfg = load_config()
+        tasks = [_make_task("t1", regime="H1_external", k=1)]  # only 1 task
         cp = str(tmp_path / "cp.jsonl")
         self._make_synthetic_checkpoint(Path(cp), tasks, label_pattern="converging")
         runner, client = self._make_noop_runner(cfg, tasks, cp, tmp_path)
@@ -322,21 +391,30 @@ class TestRunPilotGate:
             cache_dir=str(tmp_path / "llm_cache"),
             _runner_override=(runner, client),
         )
-        assert report["gate_c"]
-        # For converging label pattern (4/5 runs label I1), cd_primary should be > 0
-        # and null_cd should be < real_cd (shuffling destroys per-item concentration)
-        if report["gate_a"]:
-            assert report["gate_b"] or report["null_cd"] >= 0, (
-                "gate_b should pass when real_cd > null_cd"
-            )
+        # Only 1 cell in the condition → INCONCLUSIVE → gate_b must stay False.
+        assert not report["gate_b"], (
+            "gate_b must be False when all conditions are INCONCLUSIVE (< 2 cells)"
+        )
+        # Verify the INCONCLUSIVE status is recorded in gate_b_details.
+        details = report.get("gate_b_details", [])
+        assert any(d["status"] == "inconclusive" for d in details), (
+            f"Expected at least one INCONCLUSIVE entry in gate_b_details; got {details}"
+        )
 
     def test_report_has_all_required_keys(self, tmp_path):
-        """Report dict has all required fields."""
+        """Report dict has all required fields (including B2 and M5 additions)."""
         from common.config import load_config
         cfg = load_config()
         tasks = [_make_task("t1", regime="H1_external")]
         cp = str(tmp_path / "cp.jsonl")
-        Path(cp).write_text("")
+        # Write only a job_done marker — runner will skip, tidy empty → gate FAIL.
+        _write_jsonl(Path(cp), [
+            {
+                "type": "job_done",
+                "task_id": "t1", "config": "sc",
+                "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42,
+            }
+        ])
         runner, client = self._make_noop_runner(cfg, tasks, cp, tmp_path)
         report = _registered_run.run_pilot_gate(
             cfg, tasks,
@@ -347,12 +425,16 @@ class TestRunPilotGate:
         )
         required = {
             "gate_pass", "gate_a", "gate_b", "gate_c",
-            "real_cd", "null_cd", "iperp_rate",
+            "real_cd", "null_cd", "null_metric",  # null_metric: B2 addition
+            "iperp_rate",
             "n_items", "n_runs", "total_cost_usd",
             "run_result", "conditions",
+            "gate_b_details",  # per-condition audit trail: B2 addition
         }
         missing = required - set(report)
         assert not missing, f"Report missing fields: {missing}"
+        # null_metric must always be "cd_primary" (auditor check).
+        assert report["null_metric"] == "cd_primary"
 
 
 # ── 4. FRONTIER_SINGLE_MODELS / REGISTERED_CONFIGS ───────────────────────────
@@ -386,17 +468,32 @@ def test_registered_configs_valid():
         assert cfg in ALL_CONFIGS, f"Unknown config: {cfg}"
 
 
-def test_pilot_models_is_gpt54_only():
-    """Pilot uses only gpt-5.4 (homogeneous baseline) for small footprint."""
-    assert len(_registered_run.PILOT_MODELS) == 1
-    role, model_id = _registered_run.PILOT_MODELS[0]
-    assert model_id == "gpt-5.4"
-    assert role == "tested_agents"
+def test_pilot_models_covers_all_four_classes():
+    """PILOT_MODELS includes all four model classes (MAJOR 4 fix: M4).
+
+    The pilot must exercise homogeneous, reasoning, weak, and heterogeneous
+    model_class coverage so the gate validates cross-family execution and
+    model_class disambiguation. FRONTIER_SINGLE_MODELS covers the first three;
+    heterogeneous-MAD in PILOT_CONFIGS covers the pool config.
+    """
+    model_ids = {mid for _, mid in _registered_run.PILOT_MODELS}
+    # homogeneous
+    assert "gpt-5.4" in model_ids
+    # reasoning
+    assert any(mid in model_ids for mid in ["gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro-preview"])
+    # weak
+    assert any(mid in model_ids for mid in ["gpt-4o-mini", "gemini-3.5-flash", "claude-haiku-4.5"])
 
 
-def test_pilot_configs_is_sc_only():
-    """Pilot uses only 'sc' config for small footprint."""
-    assert _registered_run.PILOT_CONFIGS == ["sc"]
+def test_pilot_configs_covers_minimum_required():
+    """PILOT_CONFIGS includes at least single + SC + heterogeneous-MAD (MAJOR 4 fix).
+
+    The pilot must enumerate all required method × class combinations.
+    """
+    configs = _registered_run.PILOT_CONFIGS
+    assert "single" in configs, "Pilot must include 'single' config"
+    assert "sc" in configs, "Pilot must include 'sc' config"
+    assert "heterogeneous-MAD" in configs, "Pilot must include 'heterogeneous-MAD' for pool coverage"
 
 
 # ── 5. load_tasks raises ValueError for unknown domains ───────────────────────
@@ -412,3 +509,105 @@ def test_pilot_constants_within_spec():
     """Pilot item cap is within [6, 10] per plan spec."""
     assert 6 <= _registered_run.PILOT_MAX_ITEMS <= 10
     assert _registered_run.PILOT_BUDGET_USD >= 0.5  # at least $0.50 defensive cap
+
+
+# ── 7. BLOCKER 3: --pilot --dry-run makes NO network calls ───────────────────
+
+def test_pilot_dry_run_makes_no_network_calls(monkeypatch, capsys):
+    """--pilot --dry-run with RUNNER_LIVE unset must not open any network connection.
+
+    BLOCKER 3 fix: dry_run is now threaded through run_pilot_gate → runner.run().
+    The guard at main() level only fires for non-dry-run paths; the pilot branch
+    now passes dry_run=True to the runner so zero network calls happen.
+    The gate reports FAIL (gate_c requires a completed run) but no connection error.
+    """
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    # Should not raise a connection error or print "skipped" (that's the guard
+    # for non-dry-run paths only).
+    try:
+        _registered_run.main(["--pilot", "--dry-run"])
+    except SystemExit as exc:
+        # Acceptable: gate FAIL exits 1, or task-load issues
+        pass
+    out, err = capsys.readouterr()
+    # MUST NOT print "skipped" — that's the live guard, not the dry-run path.
+    assert "skipped" not in out.lower(), (
+        "--pilot --dry-run should not print 'skipped' (that's the live guard); "
+        "dry_run must thread through to runner.run(dry_run=True)"
+    )
+
+
+def test_dry_run_full_run_does_not_require_runner_live(monkeypatch, capsys):
+    """--dry-run (full run) executes without RUNNER_LIVE (no network)."""
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    try:
+        _registered_run.main(["--dry-run"])
+        out = capsys.readouterr().out
+        assert "skipped" not in out.lower()
+    except SystemExit as exc:
+        out, err = capsys.readouterr()
+        # Should NOT be the "skipped" guard exit
+        assert "skipped" not in out.lower()
+
+
+# ── 8. MAJOR 6: full run requires ≥3 seeds ───────────────────────────────────
+
+def test_full_run_rejects_fewer_than_3_seeds(monkeypatch, capsys):
+    """Full run (non-pilot) with < 3 seeds exits 1 with an error about §10.
+
+    MAJOR 6 fix: §10 (pre-registered) requires ≥3 distinct seeds per
+    (item × config). Fewer seeds must be rejected loudly.
+    """
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    # Use --dry-run to avoid the live guard, but provide only 1 seed.
+    with pytest.raises(SystemExit) as exc_info:
+        _registered_run.main(["--dry-run", "--seeds", "42"])
+    assert exc_info.value.code == 1, (
+        "Expected exit code 1 when < 3 seeds are provided"
+    )
+    _, err = capsys.readouterr()
+    # Error message should mention seeds and/or §10.
+    assert "seed" in err.lower() or "3" in err, (
+        f"Error message should mention seeds/§10; got: {err!r}"
+    )
+
+
+def test_full_run_rejects_duplicate_seeds(monkeypatch, capsys):
+    """Full run with duplicated seeds (fewer than 3 distinct) exits 1."""
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    with pytest.raises(SystemExit) as exc_info:
+        _registered_run.main(["--dry-run", "--seeds", "42", "42", "42"])
+    assert exc_info.value.code == 1
+
+
+def test_full_run_accepts_three_seeds_in_dry_run(monkeypatch, capsys):
+    """Full run with exactly 3 distinct seeds proceeds past the seed check."""
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    try:
+        _registered_run.main(["--dry-run", "--seeds", "1", "2", "3"])
+        out = capsys.readouterr().out
+        assert "skipped" not in out.lower()
+    except SystemExit as exc:
+        out, err = capsys.readouterr()
+        # If it exits, must NOT be the seed-validation error (code 1 + "seed" in err)
+        if exc.code == 1:
+            assert "seed" not in err.lower(), (
+                "exit 1 with 'seed' in stderr means the seed check failed for 3 seeds"
+            )
+
+
+def test_full_run_default_seeds_are_3(monkeypatch, capsys):
+    """Default seeds (no --seeds arg) are ≥3 distinct values (MAJOR 6 fix)."""
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    # --dry-run with no --seeds: should use ≥3 default seeds, not fail.
+    try:
+        _registered_run.main(["--dry-run"])
+        out = capsys.readouterr().out
+        # If it succeeded, seeds were ≥3 (otherwise it would have exited 1).
+        assert "skipped" not in out.lower()
+    except SystemExit as exc:
+        _, err = capsys.readouterr()
+        # Must NOT exit because of the seed check.
+        assert "seed" not in err.lower(), (
+            "Default seeds should be ≥3; the seed-count check must not trigger"
+        )

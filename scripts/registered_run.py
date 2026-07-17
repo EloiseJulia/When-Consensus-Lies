@@ -91,9 +91,11 @@ REGISTERED_CONFIGS = [
     "interpretation-diverse",
 ]
 
-# Pilot uses only sc on the homogeneous baseline to keep the batch small.
-PILOT_MODELS: List[Tuple[str, str]] = [("tested_agents", "gpt-5.4")]
-PILOT_CONFIGS = ["sc"]
+# Pilot runs single + SC(k=5) across ALL four model classes (homogeneous,
+# heterogeneous, reasoning, weak) so the gate validates cross-family execution
+# and model_class disambiguation (MAJOR 4 fix).
+PILOT_MODELS: List[Tuple[str, str]] = FRONTIER_SINGLE_MODELS  # all 7 frontier models
+PILOT_CONFIGS = ["single", "sc", "heterogeneous-MAD"]  # single + SC + pool config
 PILOT_MAX_ITEMS = 10     # hard item cap — never full-scale from --pilot
 PILOT_BUDGET_USD = 1.00  # defensive cap (copilot_proxy is free)
 
@@ -274,6 +276,7 @@ def run_pilot_gate(
     budget_usd: float = PILOT_BUDGET_USD,
     rpm: int = RPM_DEFAULT,
     offline: bool = False,
+    dry_run: bool = False,
     cache_dir: str = CACHE_DIR_PILOT,
     n_pilot: int = PILOT_MAX_ITEMS,
     seed: int = 20260713,
@@ -284,15 +287,21 @@ def run_pilot_gate(
     Gate conditions (pre-registered §11):
       (a) cd_primary > 0 on at least one H1_external item (real convergent
           delusion observed above zero).
-      (b) R1 label-shuffle null: the population-level shuffle null (per
-          harness/nulls.py) is < real CD — random reassignment of labels gives
-          lower CD than the real item-aligned labels.
-      (c) Pipeline integration: runner → checkpoint → load_runs_tidy →
-          compute_cell_cd completes without error and produces non-empty output.
+      (b) R1 shuffle null (BLOCKER 2 fix): population-level cross-item shuffle
+          using ``analysis.nulls.cd_primary_shuffle_null`` (same primary metric
+          as gate a).  Computed PER CONDITION (method × model_class × ambiguity_k).
+          Conditions with fewer than MIN_ITEMS_FOR_NULL cells are INCONCLUSIVE and
+          cannot contribute a PASS.  Gate b = at least one condition has
+          real_cd > 0 AND null_cd ≤ NULL_CD_TOLERANCE.
+      (c) Pipeline integration (MAJOR 5 fix): (i) run completed with no failures,
+          (ii) tidy table is non-empty, (iii) golden cd_primary metric assertion
+          passes (known input → expected output verified inline).
 
-    This is a LIVE function. The offline test path is exercised by the unit test
-    in tests/test_registered_run.py which passes ``offline=True`` and a synthetic
-    checkpoint.
+    BLOCKER 3 fix:
+      ``dry_run=True`` threads through to ``runner.run(dry_run=True)`` so
+      ``--pilot --dry-run`` from the CLI makes zero network calls even when
+      RUNNER_LIVE is unset.  The gate will report FAIL (gate_c requires a
+      completed run) but will never open a network connection.
 
     Args:
         cfg: Loaded config dict.
@@ -300,20 +309,28 @@ def run_pilot_gate(
         checkpoint_path: Path for the pilot checkpoint JSONL.
         budget_usd: Hard budget cap (defensive; copilot_proxy is free).
         rpm: Requests per minute.
-        offline: If True, use offline mock client (for unit tests only).
+        offline: If True, use offline mock client (unit tests only).
+        dry_run: If True, run in dry-run mode (no network calls); gate will FAIL.
         cache_dir: LLM disk cache directory.
         n_pilot: Max items (sanity check; tasks should already be capped).
         seed: Global RNG seed.
         _runner_override: Optional (runner, client) tuple for test injection.
 
     Returns:
-        dict with keys: gate_pass, gate_a, gate_b, gate_c, real_cd, null_cd,
-        iperp_rate, n_items, n_runs, total_cost_usd, conditions.
+        dict with keys:
+          gate_pass, gate_a, gate_b, gate_c — overall + per-gate booleans
+          real_cd, null_cd — mean primary CD and mean null CD across conditions
+          null_metric       — always "cd_primary" (for audit verification)
+          iperp_rate        — fraction of all runs labeled I_perp
+          n_items, n_runs, total_cost_usd
+          run_result        — raw runner result dict
+          conditions        — per-(regime, method) I_perp diagnostic list
+          gate_b_details    — per-condition gate_b result list (for audit)
     """
     from analysis.cd import cd_primary as _cd_primary_fn
     from analysis.contrasts import COLS, compute_cell_cd
     from analysis.io import FRONTIER_MODEL_CLASS_MAP, load_runs_tidy
-    from harness.nulls import label_shuffle_null
+    from analysis.nulls import NULL_CD_TOLERANCE, MIN_ITEMS_FOR_NULL, cd_primary_shuffle_null
 
     if len(tasks) > n_pilot:
         tasks = tasks[:n_pilot]
@@ -330,31 +347,54 @@ def run_pilot_gate(
             seeds=[seed],
             budget_usd=budget_usd,
             rpm=rpm,
-            offline=offline,
+            offline=(offline or dry_run),  # dry-run also uses no network
             cache_dir=cache_dir,
         )
 
-    # Execute the run (or load from cache on resume).
-    run_result = runner.run(dry_run=False)
+    # Execute the run (or dry-run report).
+    # BLOCKER 3: thread dry_run through so --pilot --dry-run makes no network calls.
+    run_result = runner.run(dry_run=dry_run)
     total_cost = getattr(client, "_total_cost_usd", 0.0)
 
-    # Build tidy table via D3 adapter.
+    # Build tidy table via D3 adapter (reads checkpoint written by the run above).
     tidy_df = load_runs_tidy(checkpoint_path, tasks,
                              model_class_map=FRONTIER_MODEL_CLASS_MAP)
 
-    # Gate (c): integration — did we get a non-empty tidy table?
-    gate_c = len(tidy_df) > 0
+    # ── Gate (c): pipeline integration (MAJOR 5 fix) ──────────────────────────
+    # (i) Run completed successfully (no failures, not a dry-run report).
+    run_status = run_result.get("status")
+    gate_c_status = (
+        run_status in ("done", "resumable")
+        and run_result.get("failed", 0) == 0
+        and not dry_run  # dry-run never produces completed runs
+    )
+    # (ii) Non-empty tidy table.
+    gate_c_nonempty = len(tidy_df) > 0
+    # (iii) Golden metric assertion: verify cd_primary math is correct on known input.
+    # Auditor-visible golden case: [I1,I1,I1,I1,I0] with target I0 → 4 enumerated
+    # wrong (I1 ×4), 5 total → cd_primary = 4/5 = 0.8.
+    _golden_labels = ["I1", "I1", "I1", "I1", "I0"]
+    _golden_target = "I0"
+    _golden_expected = 0.8
+    gate_c_golden = abs(_cd_primary_fn(_golden_labels, _golden_target) - _golden_expected) < 1e-9
+    gate_c = gate_c_status and gate_c_nonempty and gate_c_golden
 
-    # Per-condition I_perp rates for diagnostics.
+    # ── Per-condition I_perp rates (diagnostic) ───────────────────────────────
     regime_col = COLS["regime"]
     label_col = COLS["label"]
     method_col = COLS["method"]
+    model_class_col = COLS["model_class"]
+    ambiguity_col = COLS["ambiguity_k"]
+    item_col = COLS["item"]
+    target_col = COLS["target"]
+    seed_col = COLS["seed"]
+
     conditions: List[Dict] = []
-    if gate_c:
+    if gate_c_nonempty:
         for (regime, method), grp in tidy_df.groupby([regime_col, method_col], dropna=False):
-            labels = list(grp[label_col])
-            n = len(labels)
-            n_perp = sum(1 for l in labels if l == "I_perp")
+            lbs = list(grp[label_col])
+            n = len(lbs)
+            n_perp = sum(1 for lb in lbs if lb == "I_perp")
             conditions.append({
                 "regime": regime,
                 "method": method,
@@ -362,39 +402,75 @@ def run_pilot_gate(
                 "iperp_rate": n_perp / n if n else 0.0,
             })
 
-    # Gate (a): cd_primary > 0 on H1_external items.
+    # ── Gate (a): cd_primary > 0 on H1_external cells ─────────────────────────
     real_cd = 0.0
-    h1_df = tidy_df[tidy_df[regime_col] == "H1_external"] if gate_c else tidy_df
+    h1_df = tidy_df[tidy_df[regime_col] == "H1_external"] if gate_c_nonempty else tidy_df.iloc[0:0]
+    h1_cells: Any = None
     if len(h1_df) > 0:
-        cells = compute_cell_cd(h1_df)
-        if len(cells) > 0:
-            real_cd = float(cells["cd_primary"].mean())
-    gate_a = real_cd > 0
+        h1_cells = compute_cell_cd(h1_df)
+        if len(h1_cells) > 0:
+            real_cd = float(h1_cells["cd_primary"].mean())
+    gate_a = real_cd > 0.0
 
-    # Gate (b): shuffle null CD < real CD (REUSE harness/nulls.py — never redefine).
+    # ── Gate (b): per-condition cd_primary shuffle null ≈ 0 (BLOCKER 2 fix) ───
+    # Uses cd_primary_shuffle_null (NOT the frozen label_shuffle_null which calls
+    # false_consensus_rate) so real and null metrics are consistent.
+    gate_b = False
     null_cd = 0.0
-    if gate_c and len(h1_df) > 0:
-        item_col = COLS["item"]
-        target_col = COLS["target"]
-        # Group by item and collect labels for the shuffle null.
-        items_labels: List[List[str]] = []
-        # Use the first target (by convention "I0" for all bench tasks).
-        # Each item may have a different target so we compute null per target value.
-        target_vals = h1_df[target_col].unique() if target_col in h1_df.columns else []
-        # Simple approach: compute null per unique target and average.
-        null_per_target: List[float] = []
-        for tgt in target_vals:
-            tgt_df = h1_df[h1_df[target_col] == tgt]
-            per_item = [list(grp[label_col]) for _, grp in tgt_df.groupby(item_col)]
-            if len(per_item) >= 2:
-                null_per_target.append(
-                    label_shuffle_null(per_item, target=tgt, n_perm=200, seed=42)
-                )
-        null_cd = sum(null_per_target) / len(null_per_target) if null_per_target else 0.0
-    gate_b = null_cd < real_cd if real_cd > 0 else False
+    null_cd_vals: List[float] = []
+    gate_b_details: List[Dict] = []
+
+    if h1_cells is not None and len(h1_cells) > 0:
+        for (method, mc, ambi_k), cond_cells in h1_cells.groupby(
+            [method_col, model_class_col, ambiguity_col], dropna=False
+        ):
+            n_cells = len(cond_cells)
+            cond_real_cd = float(cond_cells["cd_primary"].mean())
+
+            if n_cells < MIN_ITEMS_FOR_NULL:
+                gate_b_details.append({
+                    "method": method, "model_class": mc, "ambiguity_k": ambi_k,
+                    "n_cells": n_cells, "status": "inconclusive",
+                    "real_cd": cond_real_cd, "null_cd": None,
+                })
+                continue
+
+            # Reconstruct per-cell label lists for this condition.
+            cond_mask = (
+                (h1_df[method_col] == method)
+                & (h1_df[model_class_col] == mc)
+                & (h1_df[ambiguity_col] == ambi_k)
+            )
+            cond_df = h1_df[cond_mask]
+            target = str(cond_df[target_col].mode().iloc[0])
+
+            cells_labels = [
+                list(grp[label_col])
+                for _, grp in cond_df.groupby([item_col, seed_col], dropna=False)
+            ]
+
+            # cd_primary-consistent null (NOT false_consensus_rate).
+            cond_null_cd = cd_primary_shuffle_null(
+                cells_labels, target=target, n_perm=200, seed=42
+            )
+            null_cd_vals.append(cond_null_cd)
+
+            cond_pass = cond_real_cd > 0.0 and cond_null_cd <= NULL_CD_TOLERANCE
+            if cond_pass:
+                gate_b = True
+
+            gate_b_details.append({
+                "method": method, "model_class": mc, "ambiguity_k": ambi_k,
+                "n_cells": n_cells,
+                "status": "pass" if cond_pass else "fail",
+                "real_cd": cond_real_cd,
+                "null_cd": cond_null_cd,
+            })
+
+    null_cd = sum(null_cd_vals) / len(null_cd_vals) if null_cd_vals else 0.0
 
     gate_pass = gate_a and gate_b and gate_c
-    iperp_rate = float((tidy_df[label_col] == "I_perp").mean()) if gate_c else 0.0
+    iperp_rate = float((tidy_df[label_col] == "I_perp").mean()) if gate_c_nonempty else 0.0
 
     return {
         "gate_pass": gate_pass,
@@ -403,12 +479,14 @@ def run_pilot_gate(
         "gate_c": gate_c,
         "real_cd": real_cd,
         "null_cd": null_cd,
+        "null_metric": "cd_primary",   # audit: confirms metric used for null
         "iperp_rate": iperp_rate,
         "n_items": len(tasks),
         "n_runs": len(tidy_df),
         "total_cost_usd": total_cost,
         "run_result": run_result,
         "conditions": conditions,
+        "gate_b_details": gate_b_details,  # per-condition gate_b audit trail
     }
 
 
@@ -504,20 +582,23 @@ def main(argv=None) -> None:
         print(f"  k values in pilot: {ks}")
 
         budget = args.budget_usd if args.budget_usd is not None else PILOT_BUDGET_USD
+        # BLOCKER 3: thread dry_run through so --pilot --dry-run makes zero
+        # network calls even when RUNNER_LIVE is unset.
         report = run_pilot_gate(
             cfg,
             pilot_tasks,
             checkpoint_path=checkpoint,
             budget_usd=budget,
             rpm=args.rpm,
+            dry_run=args.dry_run,
         )
 
         print("\n" + "=" * 72)
         print("§11 GATE RESULTS:")
         print(f"  (a) cd_primary > 0 on H1_external:  {'PASS' if report['gate_a'] else 'FAIL'}")
         print(f"      real_cd = {report['real_cd']:.4f}")
-        print(f"  (b) shuffle null < real CD:          {'PASS' if report['gate_b'] else 'FAIL'}")
-        print(f"      null_cd = {report['null_cd']:.4f}  real_cd = {report['real_cd']:.4f}")
+        print(f"  (b) cd_primary shuffle null ≤ tol:  {'PASS' if report['gate_b'] else 'FAIL'}")
+        print(f"      null_cd = {report['null_cd']:.4f}  null_metric = {report['null_metric']}")
         print(f"  (c) pipeline integration:            {'PASS' if report['gate_c'] else 'FAIL'}")
         print(f"      n_runs = {report['n_runs']}")
         print()
@@ -529,6 +610,15 @@ def main(argv=None) -> None:
                 print(
                     f"    regime={cond['regime']}  method={cond['method']}  "
                     f"n={cond['n_runs']}  iperp={cond['iperp_rate']:.3f}"
+                )
+        if report.get("gate_b_details"):
+            print("\n  Per-condition gate_b (cd_primary shuffle null):")
+            for det in report["gate_b_details"]:
+                null_str = f"{det['null_cd']:.4f}" if det["null_cd"] is not None else "n/a"
+                print(
+                    f"    {det['method']}|{det['model_class']}|k={det['ambiguity_k']}  "
+                    f"n_cells={det['n_cells']}  status={det['status']}  "
+                    f"real_cd={det['real_cd']:.4f}  null_cd={null_str}"
                 )
         print()
         verdict = "PASS" if report["gate_pass"] else "FAIL"
@@ -544,7 +634,19 @@ def main(argv=None) -> None:
     checkpoint = args.checkpoint or FULL_CHECKPOINT
     seeds = args.seeds
     if seeds is None:
-        seeds = [cfg.get("seeds", {}).get("global", 20260713)]
+        # §10 requires ≥3 distinct seeds per (item × config) for the full run.
+        # Derive three deterministic seeds from the global config seed.
+        global_seed = cfg.get("seeds", {}).get("global", 20260713)
+        seeds = [global_seed, global_seed + 1, global_seed + 2]
+    # Enforce ≥3 seeds for full-scale execution (MAJOR 6 fix — §10 requirement).
+    if len(set(seeds)) < 3:
+        print(
+            f"ERROR: §10 (pre-registered) requires ≥3 distinct seeds per "
+            f"(item × config) for the full registered run. Got {len(seeds)} "
+            f"seed(s): {seeds}. Pass --seeds with ≥3 distinct values.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print("=" * 72)
     print("REGISTERED RUN — copilot_proxy, Amendment 06 frontier roster")

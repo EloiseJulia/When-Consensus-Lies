@@ -10,12 +10,28 @@ Columns emitted (matching analysis.contrasts.COLS):
     task         — AgentRun.task_id
     method       — AgentRun.config (e.g. "single", "sc", "homogeneous-MAD")
     model_class  — DERIVED from (config, model_id, model_class_map); see below
-    seed         — AgentRun.seed
+    seed         — REPLICATE SEED (the runner JOB's grid seed, not per-agent seed)
     label        — AgentRun.label
     target       — is_target=True interpretation id (from the Task list)
     regime       — Task.regime ("H1_external" | "H2_derivable" | None)
     ambiguity_k  — Task.ambiguity_level (1 | 2 | 3)
     model        — AgentRun.model_id (extra; carries full slug for diagnostics)
+
+BLOCKER 1 FIX — replicate_seed vs per-agent seed:
+  An analysis "cell" = ONE ensemble replicate = ONE runner JOB.  An SC job with
+  k=5 produces k agents all belonging to ONE cell.  harness/run.py assigns each
+  agent seed = base_seed + i (distinct per agent), but compute_cell_cd groups by
+  (item, method, model_class, seed) — so using the per-agent seed would split one
+  5-agent ensemble into 5 singleton cells, corrupting CD to degenerate values.
+
+  Fix: harness/runner.py CheckpointStore.add_run() now persists ``replicate_seed``
+  (the runner grid seed shared by all agents in a job) alongside the per-agent
+  ``seed``.  This adapter reads ``replicate_seed`` if present; for legacy records
+  (single-agent jobs) where the field is absent, the per-agent ``seed`` is used
+  as fallback (it IS the grid seed for single-agent jobs, so no information loss).
+
+  Result: all k agents from one SC job get the SAME seed in the tidy table and
+  form EXACTLY ONE cell in compute_cell_cd.
 
 Model-class derivation (INVIOLABLE — do NOT change common/schema.py):
   AgentRun persists: task_id, config, model_role, model_id, output, label,
@@ -35,6 +51,7 @@ Auditor note (for hostile cross-family review):
   new schema field. The only mutation risk is a wrong entry in FRONTIER_MODEL_CLASS_MAP
   or a caller-supplied map. Tests in tests/test_analysis_io.py exercise the
   priority order: heterogeneous-MAD overrides the map; map lookup overrides heuristic.
+  The replicate_seed fallback logic is exercised by test_sc_ensemble_forms_one_cell.
 """
 from __future__ import annotations
 
@@ -176,7 +193,9 @@ def load_runs_tidy(
             target, regime, ambiguity_level = meta
             config_name = rec.get("config", "")
             model_id = rec.get("model_id", "")
-            seed = int(rec.get("seed", 0))
+            # B1 fix: use replicate_seed (grid/job seed) if persisted; fall back
+            # to per-agent seed for legacy single-agent records where both are equal.
+            seed = int(rec.get("replicate_seed", rec.get("seed", 0)))
             mc = _derive_model_class(config_name, model_id, model_class_map)
             rows.append({
                 _ITEM: task_id,

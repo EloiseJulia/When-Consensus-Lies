@@ -351,3 +351,81 @@ def test_weak_slugs_map_correctly():
     assert FRONTIER_MODEL_CLASS_MAP["gpt-4o-mini"] == "weak"
     assert FRONTIER_MODEL_CLASS_MAP["gemini-3.5-flash"] == "weak"
     assert FRONTIER_MODEL_CLASS_MAP["claude-haiku-4.5"] == "weak"
+
+
+# ── 6. BLOCKER 1 golden test: SC ensemble → ONE cell (not k singletons) ──────
+
+def test_sc_ensemble_forms_one_cell(tmp_path):
+    """Golden B1 test: 5 SC agents with same replicate_seed → ONE cell.
+
+    Without the BLOCKER 1 fix, each per-agent seed (42+i) would produce a
+    separate cell → 5 singleton cells → degenerate CD.  With the fix, all 5
+    rows in the tidy table share replicate_seed=42 (the grid seed) and
+    compute_cell_cd groups them into exactly ONE cell.
+
+    Labels [I1,I1,I1,I1,I0] with target I0:
+        cd_primary = 4 (max enumerated wrong) / 5 (total) = 0.8
+    """
+    from analysis.contrasts import compute_cell_cd
+
+    task = _make_task("t1", regime="H1_external", k=1, target_id="I0")
+    cp = tmp_path / "sc_ensemble.jsonl"
+
+    # 5 SC agents: per-agent seeds 42..46, but all share replicate_seed=42.
+    labels = ["I1", "I1", "I1", "I1", "I0"]
+    records = [
+        _make_run_record(
+            "t1", "sc", "gpt-5.4", lbl,
+            seed=42 + i,
+            replicate_seed=42,  # grid seed shared by all 5 agents
+        )
+        for i, lbl in enumerate(labels)
+    ]
+    _write_jsonl(cp, records)
+
+    tidy = load_runs_tidy(cp, [task])
+
+    # All 5 rows should carry the replicate seed (42), not the per-agent seeds.
+    assert list(tidy[_SEED]) == [42] * 5, (
+        f"Expected seed=42 for all rows; got {list(tidy[_SEED])}"
+    )
+
+    # compute_cell_cd must produce EXACTLY ONE cell (not 5 singletons).
+    cells = compute_cell_cd(tidy)
+    assert len(cells) == 1, (
+        f"Expected 1 cell; got {len(cells)}.  "
+        "BLOCKER 1: replicate_seed fix may not be applied."
+    )
+    cell = cells.iloc[0]
+    assert cell["n_agents"] == 5, f"Expected 5 agents in cell; got {cell['n_agents']}"
+
+    # cd_primary = max_enumerated_wrong / n_total = 4 / 5 = 0.8
+    expected_cd = 0.8
+    assert abs(cell["cd_primary"] - expected_cd) < 1e-9, (
+        f"Expected cd_primary={expected_cd}; got {cell['cd_primary']}"
+    )
+
+
+def test_sc_ensemble_without_replicate_seed_uses_per_agent_seed(tmp_path):
+    """Legacy records without replicate_seed fall back to AgentRun.seed (per-agent).
+
+    For single-agent configs (single, verifier), per-agent seed == grid seed,
+    so the fallback is lossless.  For multi-agent configs in legacy checkpoints
+    (pre-B1 fix), each agent still gets its own per-agent seed — this matches
+    the old behaviour and is the correct fallback for old data.
+    """
+    task = _make_task("t1", regime="H1_external", k=1)
+    cp = tmp_path / "legacy.jsonl"
+
+    # 3 records, no replicate_seed → each gets its own seed
+    records = [
+        _make_run_record("t1", "sc", "gpt-5.4", "I1", seed=10),
+        _make_run_record("t1", "sc", "gpt-5.4", "I1", seed=11),
+        _make_run_record("t1", "sc", "gpt-5.4", "I0", seed=12),
+    ]
+    _write_jsonl(cp, records)
+
+    tidy = load_runs_tidy(cp, [task])
+    assert list(sorted(tidy[_SEED])) == [10, 11, 12], (
+        "Legacy fallback: seed column should carry per-agent seeds"
+    )
