@@ -7,6 +7,38 @@
 > trusted. Raw artifacts: session files/ (default_check_summary.jsonl, default_check_table.txt,
 > default_check_live.log). Total: 122 live calls, $0.176 (cap $0.50), gpt-4o-mini EXCLUDED.
 
+## 🚀 FRONTIER RE-VALIDATION 2026-07-17 (Amendment 06, Copilot proxy — EXPLORATORY)
+Re-ran the default-check on the FRONTIER roster (OpenAI gpt-5.4/gpt-5.6-sol, Anthropic claude-opus-4.8/
+sonnet-4.6/haiku-4.5, Google gemini-3.1-pro/3.5-flash; gpt-4o-mini weak) via the unlimited proxy. 313
+calls, $0.00, ONE pass (no cap). Two findings:
+
+### ⭐⭐ WIN — H1 is DRAMATICALLY confirmed on FRONTIER models
+On all 3 strong H1 traps (code_quarter fiscal, data_activeusers org-KPI, policy_overtime 35h): **CD=1.000
+for EVERY class** — including the frontier REASONERS gpt-5.6-sol, claude-opus-4.8, gemini-3.1-pro (all →
+the same wrong default). And the 3-family HETEROGENEOUS pool (gpt-5.4 + claude-sonnet-4.6 + gemini-3.1-pro)
+converges CROSS-FAMILY at **CD=1.000** on every strong H1 trap. → The strongest possible H1 result:
+**three independent FRONTIER families silently converge on the SAME wrong interpretation under
+external-knowledge ambiguity.** "Even GPT-5.6 / Claude Opus 4.8 / Gemini 3.1 Pro default to calendar
+quarters / any-activity / 40h-overtime."
+
+### ⚠️ CONSTRUCT-VALIDITY FINDING — the H2 median-skew demonstrator is TOO EASY for the frontier tier
+On data_typical (H2 median-under-visible-skew): **BOTH reasoner AND "weak" frontier classes resolve →I0=
+1.000** (claude-haiku-4.5 / gemini-3.5-flash / gpt-4o-mini all get the median, same as opus/gpt-5.6/
+gemini-pro). The reasoner-vs-weak H2 SPLIT that held on the OLD roster (mistral →I0=0.40 vs reasoners 1.0)
+COLLAPSES — frontier "weak" models are strong enough to see the visible skew and pick the median.
+→ The pre-registered H2 `regime × model_class` interaction (reasoners resolve, weak default wrong) does NOT
+show a contrast on the frontier roster because ALL frontier models resolve the derivable ambiguity. (Note:
+rho_baseline gpt-5.4 shows →I0=0 but that is an I_perp/answer-format artifact on the median task, not a
+genuine mean-default — gpt-5.4 emitted unparseable output; flag for a labeler/format check.)
+
+### O2 saturation (holds): strong mean CD 1.0 vs subtler 0.59-0.73 → measure DISCRIMINATES on frontier too.
+### I_perp overall 0.115 (<0.20 OK). Elevated: gpt-5.4 on data_typical (all I_perp — answer-format), claude-sonnet single 0.36.
+
+### ⭐ Implication (→ owner decision): H1 is stronger than ever on frontier; but H2 needs re-calibration for
+the frontier tier — either a HARDER derivable-ambiguity H2 task (that frontier reasoners resolve but
+frontier weak models miss), or a genuinely WEAKER weak-model tier (e.g. gpt-3.5-turbo, available on the
+proxy), or a reframe of the H2 model_class contrast. See the escalation.
+
 ## 🎉 UPDATE 2026-07-17 — REASONER ARM COMPLETE (two-regime demarcation empirically confirmed)
 The reasoner arm finished (watcher, attempt 6 after the ~15:00 cap reset; 174 total calls, $0.35). **The core
 two-regime result now holds with reasoner data:**
