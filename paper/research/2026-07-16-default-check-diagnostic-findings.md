@@ -7,6 +7,22 @@
 > trusted. Raw artifacts: session files/ (default_check_summary.jsonl, default_check_table.txt,
 > default_check_live.log). Total: 122 live calls, $0.176 (cap $0.50), gpt-4o-mini EXCLUDED.
 
+## 🔬 FRONTIER H2 RE-RUN 2 (2026-07-17) — harder H2 + gpt-3.5-turbo: NO reasoner-vs-weak split
+Added 2 harder H2_derivable demonstrators (data_avgprice quantity-weighted; data_rate unequal-interval) +
+the genuinely-weak gpt-3.5-turbo. Result (439 calls, $0.00):
+- **ALL 3 H2 derivable tasks are resolved by ALL model classes** — reasoner →I0=1.0, weak →I0≈1.0, AND
+  **gpt-3.5-turbo →I0 = 1.0 (avgprice), 1.0 (rate), 0.8 (median)**. The genuinely-weak anchor resolves
+  derivable ambiguity too. **The pre-registered reasoner-vs-weak H2 INTERACTION does NOT materialize** —
+  even the harder tasks + a genuinely-weak model do not split. (I_perp on gpt-3.5-turbo = 0.02 — it produces
+  valid answers, it just resolves.)
+- H1 unchanged: CD=1.0 for ALL classes incl. frontier reasoners + cross-family pool. O2 holds (strong 1.0
+  vs subtler 0.62-0.74). Overall I_perp 0.089.
+- ⭐ **EMPIRICAL CONCLUSION (final arbiter, EXPLORATORY):** the two-regime demarcation is a REGIME MAIN
+  EFFECT, not a model_class interaction — **H1 external-knowledge ambiguity traps EVERYONE (even GPT-5.6 /
+  Claude-Opus / Gemini-Pro, cross-family, CD=1.0); H2 derivable ambiguity is resolved by EVERYONE (even
+  GPT-3.5-turbo).** Model capability is NOT the axis; the disambiguator's LOCATION (external vs derivable)
+  is. This is arguably a CLEANER, stronger story than the interaction. → owner framing decision (escalated).
+
 ## 🚀 FRONTIER RE-VALIDATION 2026-07-17 (Amendment 06, Copilot proxy — EXPLORATORY)
 Re-ran the default-check on the FRONTIER roster (OpenAI gpt-5.4/gpt-5.6-sol, Anthropic claude-opus-4.8/
 sonnet-4.6/haiku-4.5, Google gemini-3.1-pro/3.5-flash; gpt-4o-mini weak) via the unlimited proxy. 313
