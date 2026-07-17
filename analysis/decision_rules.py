@@ -305,14 +305,23 @@ def _cross_family_metric(cd_col: str) -> Callable[[pd.DataFrame], float]:
 
 
 def _item_level_cells(df: pd.DataFrame) -> pd.DataFrame:
-    """Item-level CD cells with a representative ``model`` id per cell.
+    """Item-level CD cells with a STABLE, order-independent model-level id.
 
     ``compute_cell_cd`` groups by (task, method, model_class, seed) and computes
     CD over the cell's agents (it does NOT split by the specific model, so a
-    heterogeneous cell correctly aggregates across models). For the §8 parallel
-    item-level model we still need a ``model`` grouping column, so we attach the
-    cell's representative model id (the first model in the cell) — enabling the
-    frozen ``(1|model)`` random intercept without disturbing the CD values.
+    heterogeneous cell correctly aggregates across models). The frozen §8
+    parallel item-level model needs a ``model`` grouping column for its
+    ``(1|model)`` random intercept, so we attach a model level per cell:
+
+    - a SINGLE-model cell keeps its own model id;
+    - a HETEROGENEOUS / pool cell (multiple distinct models) enters as ONE
+      canonical POOL unit ``"pool:<sorted models>"`` — NOT an arbitrary member.
+
+    Using the sorted model set makes the assigned level ORDER-INDEPENDENT
+    (reversing the input rows yields the SAME id) and gives a heterogeneous cell
+    a single, genuine pool-level identity for the random intercept, rather than
+    leaking the first member's model id (which was order-dependent: reversing
+    the input flipped z-model -> a-model).
     """
     cells = compute_cell_cd(df)
     if cells.empty or MODEL_COL not in df.columns:
@@ -321,8 +330,13 @@ def _item_level_cells(df: pd.DataFrame) -> pd.DataFrame:
     keys = [k for k in keys if k in df.columns and k in cells.columns]
     if not keys:
         return cells
+
+    def _pool_id(s: pd.Series) -> str:
+        uniq = sorted({str(x) for x in s})
+        return uniq[0] if len(uniq) == 1 else "pool:" + "|".join(uniq)
+
     rep = df.groupby(_group_key(keys), sort=False)[MODEL_COL].agg(
-        lambda s: s.iloc[0]).reset_index()
+        _pool_id).reset_index()
     return cells.merge(rep, on=keys, how="left")
 
 
@@ -363,7 +377,7 @@ def _frozen_re_terms(cells: pd.DataFrame) -> str:
     return (" + " + " + ".join(terms)) if terms else ""
 
 
-def _h1b_coef_ci(df: pd.DataFrame, cd_col: str) -> CI:
+def _h1b_coef_ci(df: pd.DataFrame, cd_col: str) -> Tuple[CI, str]:
     """H1b: the AMBIGUITY_K coefficient CI from the FROZEN §8 item-level model.
 
     Fits the pre-registered parallel item-level convergent-delusion model
@@ -371,20 +385,28 @@ def _h1b_coef_ci(df: pd.DataFrame, cd_col: str) -> CI:
     and returns the CI of the ``ambiguity_k`` coefficient (H1b SUPPORTED iff it
     is > 0 with the CI excluding 0). Both random intercepts are retained; if the
     crossed fit does not converge the LABELED fallback chain applies (BLOCKER A).
+
+    Returns:
+        ``(ci, status)`` where ``status`` is the fitter's path
+        (``"ok:crossed"`` / ``"ok:single_re:<v>"`` / ``"ok:ols_cluster_fallback"``
+        / a ``degenerate`` / ``error`` label). The status is PROPAGATED so a
+        consumer can tell whether a FALLBACK produced the CI rather than the full
+        crossed fit — a fallback must never masquerade as the crossed model.
     """
     cells = _item_level_cells(df)
     if cells.empty or cd_col not in cells.columns:
-        return _NAN_CI
+        return _NAN_CI, "degenerate:no_cells"
     k_col = COLS["ambiguity_k"]
     if k_col not in cells.columns or cells[k_col].nunique() < 2:
-        return _NAN_CI
+        return _NAN_CI, "degenerate:k_constant"
     formula = f"{cd_col} ~ {_frozen_fixed_rhs(cells)}{_frozen_re_terms(cells)}"
     res = fit_mixed_effects_model(cells, formula)
+    status = str(res.get("status", "unknown"))
     coef = res["coefficients"].get(k_col)
     ci = res["confidence_intervals"].get(k_col)
     if coef is None or ci is None:
-        return _NAN_CI
-    return (float(coef), float(ci[0]), float(ci[1]))
+        return _NAN_CI, status
+    return (float(coef), float(ci[0]), float(ci[1])), status
 
 
 # --------------------------------------------------------------------------- #
@@ -497,30 +519,37 @@ def evaluate_from_data(
         model_family_map: optional ``{model_id: family}`` fallback for R2.
 
     Returns:
-        Dict with ``verdicts`` (per-hypothesis), ``cis`` (the computed CIs), and
-        ``cd_variant``.
+        Dict with ``verdicts`` (per-hypothesis), ``cis`` (the computed CIs),
+        ``statuses`` (the model-fit / data path behind the model-based CIs:
+        keys ``h1b``, ``h2_interaction``, ``r2`` — e.g. ``"ok:crossed"`` vs a
+        labeled fallback, or ``"incomplete_family_map"`` for R2), and
+        ``cd_variant``. A fallback / incomplete path is therefore never
+        indistinguishable from a full crossed fit in the returned result.
     """
     regime_col = COLS["regime"]
     h1 = df[df[regime_col] == "H1_external"] if regime_col in df.columns else df
 
     cis: Dict[str, CI] = {}
+    statuses: Dict[str, str] = {}
     cis["h1a"] = bootstrap_confidence_intervals(
         _h1a_metric(cd_col), h1, n_bootstrap=n_bootstrap,
         cluster=_cluster_cols(h1), seed=seed)
-    cis["h1b"] = _h1b_coef_ci(h1, cd_col)
-    cis["r2"] = _r2_construction_ci(h1, cd_col, n_bootstrap, seed,
-                                    tested_family_col, model_family_map)
+    cis["h1b"], statuses["h1b"] = _h1b_coef_ci(h1, cd_col)
+    cis["r2"], statuses["r2"] = _r2_construction_ci(
+        h1, cd_col, n_bootstrap, seed, tested_family_col, model_family_map)
     cis["r1"] = bootstrap_confidence_intervals(
         _r1_metric(cd_col, n_perm=r1_n_perm), h1,
         n_bootstrap=max(80, n_bootstrap // 5),
         cluster=_cluster_cols(h1), seed=seed)
 
-    cis["h2_interaction"] = _h2_interaction_ci(df, cd_col, reasoning_model_class)
+    cis["h2_interaction"], statuses["h2_interaction"] = _h2_interaction_ci(
+        df, cd_col, reasoning_model_class)
     cis["h2_reasoner_vs_single"] = _h2_reasoner_vs_single_ci(
         df, cd_col, reasoning_model_class, n_bootstrap, seed)
 
     verdicts = evaluate_all(cis)
-    return {"verdicts": verdicts, "cis": cis, "cd_variant": cd_col}
+    return {"verdicts": verdicts, "cis": cis, "statuses": statuses,
+            "cd_variant": cd_col}
 
 
 def _tested_family(df: pd.DataFrame, tested_family_col: str,
@@ -534,7 +563,7 @@ def _tested_family(df: pd.DataFrame, tested_family_col: str,
 
 
 def _r2_construction_ci(df, cd_col, n_bootstrap, seed,
-                        tested_family_col, model_family_map) -> CI:
+                        tested_family_col, model_family_map) -> Tuple[CI, str]:
     """R2: aggregation-vs-single CD effect on RELATIONALLY cross-family items.
 
     R2 is the cross-family CONSTRUCTION control: an observation is cross-family
@@ -544,21 +573,42 @@ def _r2_construction_ci(df, cd_col, n_bootstrap, seed,
     then EVERY observation is cross-family). R2 is SUPPORTED iff the
     aggregation-vs-single effect on that cross-family subset has a CI excluding 0
     and positive (the H1 effect SURVIVES cross-family construction).
+
+    An observation can only be classified when BOTH its ``constructor_family``
+    and its TESTED-model family are known. Rows whose tested family is missing
+    (an incomplete ``model_family_map`` / tested-family column) are EXCLUDED —
+    never silently treated as cross-family (``NaN != constructor`` is always
+    True, which would spuriously admit unknown-family rows). When any row is
+    excluded for this reason the returned status is ``"incomplete_family_map"``
+    so the incompleteness is visible rather than a blanket SUPPORTED.
+
+    Returns:
+        ``(ci, status)`` with status in ``{"ok", "incomplete_family_map",
+        "no_constructor_col", "no_tested_family", "empty_cross_family"}``.
     """
     if CONSTRUCTOR_COL not in df.columns:
-        return _NAN_CI
+        return _NAN_CI, "no_constructor_col"
     fam = _tested_family(df, tested_family_col, model_family_map)
     if fam is None:
-        return _NAN_CI
-    cross = df[df[CONSTRUCTOR_COL].astype(object) != fam.astype(object)]
+        return _NAN_CI, "no_tested_family"
+    fam = fam.reindex(df.index)
+    constr = df[CONSTRUCTOR_COL]
+    known = fam.notna() & constr.notna()
+    incomplete = not bool(known.all())
+    df_known = df[known]
+    if df_known.empty:
+        return _NAN_CI, "incomplete_family_map"
+    fam_known = fam[known]
+    cross = df_known[df_known[CONSTRUCTOR_COL].astype(object) != fam_known.astype(object)]
     if cross.empty:
-        return _NAN_CI
-    return bootstrap_confidence_intervals(
+        return _NAN_CI, ("incomplete_family_map" if incomplete else "empty_cross_family")
+    ci = bootstrap_confidence_intervals(
         _cross_family_metric(cd_col), cross, n_bootstrap=n_bootstrap,
         cluster=_cluster_cols(cross), seed=seed)
+    return ci, ("incomplete_family_map" if incomplete else "ok")
 
 
-def _h2_interaction_ci(df, cd_col, reasoning_model_class) -> CI:
+def _h2_interaction_ci(df, cd_col, reasoning_model_class) -> Tuple[CI, str]:
     """H2 interaction: the regime x model_class coefficient CI from the FROZEN §8 model.
 
     Fits the pre-registered item-level model
@@ -568,6 +618,13 @@ def _h2_interaction_ci(df, cd_col, reasoning_model_class) -> CI:
     ``regime x model_class`` interaction term (the reasoning x H2_derivable
     coefficient), isolating it from any higher-order interaction that also
     involves method or ambiguity_k.
+
+    Returns:
+        ``(ci, status)`` where ``status`` is the fitter's path (``"ok:crossed"``
+        / ``"ok:single_re:<v>"`` / ``"ok:ols_cluster_fallback"`` / a degenerate
+        label). The status is PROPAGATED so a consumer can distinguish the full
+        crossed fit from a fallback (BLOCKER: a fallback must never be presented
+        as an ordinary crossed-model coefficient CI).
     """
     cells = _item_level_cells(df)
     regime_col = COLS["regime"]
@@ -576,9 +633,10 @@ def _h2_interaction_ci(df, cd_col, reasoning_model_class) -> CI:
     k_col = COLS["ambiguity_k"]
     if (cells.empty or regime_col not in cells.columns or mc_col not in cells.columns
             or cells[regime_col].nunique() < 2 or cells[mc_col].nunique() < 2):
-        return _NAN_CI
+        return _NAN_CI, "degenerate:missing_regime_or_model_class"
     formula = f"{cd_col} ~ {_frozen_fixed_rhs(cells)}{_frozen_re_terms(cells)}"
     res = fit_mixed_effects_model(cells, formula)
+    status = str(res.get("status", "unknown"))
     coefs = res["coefficients"]
     cis = res["confidence_intervals"]
 
@@ -600,9 +658,9 @@ def _h2_interaction_ci(df, cd_col, reasoning_model_class) -> CI:
                 name = k
                 break
     if name is None or name not in cis:
-        return _NAN_CI
+        return _NAN_CI, status
     lo, hi = cis[name]
-    return (float(coefs[name]), float(lo), float(hi))
+    return (float(coefs[name]), float(lo), float(hi)), status
 
 
 def _h2_reasoner_vs_single_ci(df, cd_col, reasoning_model_class, n_bootstrap, seed) -> CI:

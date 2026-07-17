@@ -334,6 +334,142 @@ def test_r2_uses_constructor_family_not_aggregation_method():
     assert out2["verdicts"]["R2"] == dr.SUPPORTED, out2["cis"]["r2"]
 
 
+def test_item_level_cells_pool_identity_order_independent():
+    """BLOCKER (i): the ``(1|model)`` level assigned to a heterogeneous/pool cell
+    must be a STABLE, order-INDEPENDENT canonical POOL id — not the arbitrary
+    FIRST model in the cell. A cell aggregating multiple models enters the model
+    random effect as ONE pool unit; reversing the input row order must NOT change
+    the assigned level (the pre-fix ``s.iloc[0]`` flipped z-model <-> a-model)."""
+    from analysis.decision_rules import _item_level_cells
+
+    rows = []
+    # One HETEROGENEOUS cell: three distinct models share (task, method, mc, seed).
+    for m in ("z9", "a1", "m5"):
+        rows.append(dict(task="t0", model=m, regime="H1_external", ambiguity_k=1,
+                         method="heterogeneous-MAD", model_class="reasoning",
+                         seed=0, label="I1", target="I0"))
+    # One SINGLE-model cell keeps its own id.
+    rows.append(dict(task="t1", model="solo", regime="H1_external", ambiguity_k=1,
+                     method="single", model_class="reasoning", seed=0,
+                     label="I0", target="I0"))
+    df = pd.DataFrame(rows)
+
+    fwd = _item_level_cells(df).sort_values("task")["model"].tolist()
+    rev = _item_level_cells(df.iloc[::-1].reset_index(drop=True)) \
+        .sort_values("task")["model"].tolist()
+    assert fwd == rev, ("pool identity must be order-independent", fwd, rev)
+    # The heterogeneous cell gets a genuine canonical pool id (sorted members).
+    assert "pool:a1|m5|z9" in fwd, fwd
+    # The single-model cell keeps its own model id (not a pool id).
+    assert "solo" in fwd, fwd
+
+
+def test_model_fit_status_propagated_through_result():
+    """BLOCKER (ii): the fit PATH behind the model-based CIs must be PROPAGATED
+    through the decision-rule result, so a single-RE / OLS-cluster FALLBACK is
+    never presented as an ordinary crossed-model coefficient CI. And on data
+    where the crossed fit IS feasible the helper must report ``ok:crossed``.
+
+    (Pre-fix the helpers returned a BARE CI with the status discarded, so the
+    result had no ``statuses`` field and the fallback path was hidden — both
+    unpacking ``ci, status = _h1b_coef_ci(...)`` and reading ``out["statuses"]``
+    fail on the pre-fix code.)"""
+    from analysis.decision_rules import _h1b_coef_ci, _h2_interaction_ci
+
+    # (a) status surfaced through evaluate_from_data on the project synthetic data.
+    df = _structured_df(0)
+    out = dr.evaluate_from_data(df, cd_col="cd_primary", n_bootstrap=120,
+                                r1_n_perm=40)
+    assert "statuses" in out, out.keys()
+    for key in ("h1b", "h2_interaction", "r2"):
+        assert key in out["statuses"], out["statuses"]
+        assert isinstance(out["statuses"][key], str) and out["statuses"][key]
+    # The H1b/H2 model paths are reported honestly (crossed OR a labeled fallback).
+    for key in ("h1b", "h2_interaction"):
+        s = out["statuses"][key]
+        assert s.startswith(("ok:", "degenerate", "error")), (key, s)
+
+    # (b) on data where a TRUE crossed fit is feasible, the helper reports
+    # ok:crossed (single regime/method/model_class -> fixed part is ambiguity_k,
+    # with genuinely crossed task x model random intercepts).
+    rng = np.random.default_rng(0)
+    models = [f"m{j}" for j in range(6)]
+    task_re = {f"t{i}": rng.normal(0, 0.15) for i in range(24)}
+    model_re = {m: rng.normal(0, 0.15) for m in models}
+    rows = []
+    for i in range(24):
+        k = (i % 3) + 1
+        for j, m in enumerate(models):
+            frac = 0.15 * k + task_re[f"t{i}"] + model_re[m] + rng.normal(0, 0.05)
+            w = int(np.clip(round(frac * 5), 0, 5))
+            for lab in ["I1"] * w + ["I0"] * (5 - w):
+                rows.append(dict(task=f"t{i}", model=m, regime="H1_external",
+                                 ambiguity_k=k, method="homogeneous-MAD",
+                                 model_class="reasoning", seed=j, label=lab,
+                                 target="I0"))
+    crossed = pd.DataFrame(rows)
+    ci, status = _h1b_coef_ci(crossed, "cd_primary")
+    assert status == "ok:crossed", status
+    assert not np.isnan(ci[0])
+
+
+def test_r2_incomplete_family_map_excludes_unknown_rows():
+    """MAJOR: R2 must require a NON-NULL tested family per observation. Rows whose
+    tested family is unknown (an incomplete ``model_family_map``) are EXCLUDED —
+    never silently admitted as cross-family (``NaN != constructor`` is always
+    True) — and the result must FLAG the incompleteness, not report a blanket
+    SUPPORTED.
+
+    Pre-fix: unknown-family rows were included as cross-family, and the status
+    was not surfaced at all -> the ``statuses`` field is missing (fails)."""
+    from analysis.decision_rules import _r2_construction_ci, _cross_family_metric
+    from analysis.stats import bootstrap_confidence_intervals
+
+    rows = []
+
+    def add(task, model, method, labels):
+        for lab in labels:
+            rows.append(dict(task=task, model=model, regime="H1_external",
+                             ambiguity_k=1, method=method, model_class="reasoning",
+                             seed=0, label=lab, target="I0",
+                             constructor_family="cohere"))
+
+    # Known-family models m0/m1: cross-family (cohere) with a STRONG gap (single
+    # correct CD 0, hetero wrong CD 1) -> known-subset effect = +1.0.
+    # Unknown-family models m2/m3: single ALSO wrong (CD 1), so including them
+    # DILUTES the single baseline and changes the point estimate.
+    for t in range(10):
+        add(f"k_s_{t}", "m0", "single", ["I0"])
+        add(f"k_h_{t}", "m1", "heterogeneous-MAD", ["I1", "I1", "I1", "I1"])
+        add(f"u_s_{t}", "m2", "single", ["I1"])
+        add(f"u_h_{t}", "m3", "heterogeneous-MAD", ["I1", "I1", "I1", "I1"])
+    df = pd.DataFrame(rows)
+    fmap = {"m0": "openai", "m1": "openai"}  # m2, m3 deliberately missing
+
+    ci, status = _r2_construction_ci(df, "cd_primary", 200, 7, "model_family", fmap)
+    assert status == "incomplete_family_map", status
+    # The point estimate is computed on the KNOWN cross-family rows only (=1.0),
+    # NOT on all rows (which the pre-fix NaN-inclusion would use, giving 0.5).
+    known = df[df["model"].isin(["m0", "m1"])]
+    known_pt = _cross_family_metric("cd_primary")(known)
+    all_pt = _cross_family_metric("cd_primary")(df)
+    assert abs(ci[0] - known_pt) < 1e-9, (ci[0], known_pt)
+    assert abs(known_pt - all_pt) > 1e-2, (known_pt, all_pt)
+
+    # ALL-unknown case (the auditor's headline): an empty / no-coverage map means
+    # every row is unknown -> excluded -> INCONCLUSIVE + incomplete flag, NOT a
+    # blanket SUPPORTED. Pre-fix would have admitted all rows as cross-family.
+    out = dr.evaluate_from_data(df, cd_col="cd_primary", n_bootstrap=200,
+                                r1_n_perm=40, model_family_map={"other": "openai"})
+    assert out["statuses"]["r2"] == "incomplete_family_map", out["statuses"]
+    assert out["verdicts"]["R2"] == dr.INCONCLUSIVE, out["cis"]["r2"]
+    # Sanity: had those unknown rows been (wrongly) included as cross-family,
+    # the effect would have registered a non-nan CI.
+    fam_none = df["model"].map({"other": "openai"})
+    pre = df[df["constructor_family"].astype(object) != fam_none.astype(object)]
+    assert not pre.empty  # pre-fix would have used these rows
+
+
 def test_h1b_driven_by_mixed_model_coefficient():
     """BLOCKER 5 + BLOCKER A: H1b comes from the AMBIGUITY_K coefficient of the
     FROZEN §8 item-level model
@@ -348,7 +484,8 @@ def test_h1b_driven_by_mixed_model_coefficient():
 
     df = _structured_df(0)
     h1 = df[df["regime"] == "H1_external"]
-    ci = _h1b_coef_ci(h1, "cd_primary")
+    ci, status = _h1b_coef_ci(h1, "cd_primary")
+    assert status.startswith("ok"), status
 
     cells = _item_level_cells(h1)
     frozen = f"cd_primary ~ {_frozen_fixed_rhs(cells)}{_frozen_re_terms(cells)}"
@@ -379,8 +516,9 @@ def test_h2_interaction_from_model_coefficient():
     from analysis.stats import fit_mixed_effects_model
 
     df = _structured_df(0)
-    ci = _h2_interaction_ci(df, "cd_primary", "reasoning")
+    ci, status = _h2_interaction_ci(df, "cd_primary", "reasoning")
     assert not np.isnan(ci[0])
+    assert status.startswith("ok"), status
 
     cells = _item_level_cells(df)
     frozen = f"cd_primary ~ {_frozen_fixed_rhs(cells)}{_frozen_re_terms(cells)}"
