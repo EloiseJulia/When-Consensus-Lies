@@ -60,11 +60,17 @@ FRONTIER_REASONING_MODELS: Tuple[Tuple[str, str], ...] = (
     ("tested_agents", "claude-opus-4.8"),       # Claude  reasoner
     ("tested_agents", "gemini-3.1-pro-preview"),# Gemini  reasoner
 )
-# Weak arm (H2 weak-model contrast — reasoner-vs-weak): 3 families.
+# Weak arm (H2 weak-model contrast — reasoner-vs-weak): 4 families, now including a
+# GENUINELY-WEAK non-frontier model (gpt-3.5-turbo) added per the 2026-07-17 owner ruling.
+# The 3 frontier-weak models (claude-haiku-4.5 / gemini-3.5-flash / gpt-4o-mini) resolve
+# the ORIGINAL easy median-skew H2 item, collapsing the reasoner-vs-weak contrast; adding a
+# genuinely-weak model plus the HARDER H2 demonstrators (data_avgprice_001, data_rate_001)
+# restores a measurable split. All run on the copilot_proxy.
 FRONTIER_WEAK_MODELS: Tuple[Tuple[str, str], ...] = (
     ("tested_agents", "gpt-4o-mini"),           # OpenAI  weak (logprobs-capable)
     ("tested_agents", "gemini-3.5-flash"),      # Gemini  weak
     ("tested_agents", "claude-haiku-4.5"),      # Claude  weak
+    ("tested_agents", "gpt-3.5-turbo"),         # OpenAI  genuinely-weak (non-frontier)
 )
 # ρ→1 fake-redundancy baseline (A06 §2 homogeneous role — OpenAI logprobs+temperature,
 # "sampled repeatedly"). Included in the homogeneous-sc pass so H1 persistence is also

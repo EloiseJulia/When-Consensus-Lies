@@ -73,8 +73,21 @@ K_GRADIENT_IDS = [
     "code_invoice_001_k3_all",
 ]
 
-# H2 median-under-visible-skew item — reasoners should RESOLVE to I0 (median).
-H2_TASK_ID = "data_typical_001_k1_central_tendency"
+# H2 derivable demonstrators — reasoners should RESOLVE to I0, weak models default wrong.
+#   - median-under-visible-skew (data_typical_001): the ORIGINAL easy demonstrator; the
+#     frontier re-validation found ALL frontier models (reasoner AND weak) resolve it, so
+#     the reasoner-vs-weak H2 contrast collapses on this item alone.
+#   - HARDER frontier-calibrated demonstrators (2026-07-17-harder-h2-plan.md): the
+#     quantity-weighted average (data_avgprice_001) and the unequal-interval rate of
+#     change (data_rate_001). Both keep the disambiguator PRESENT in the data (derivable,
+#     H2) but require a genuine reasoning step a weak model skips — so they are expected
+#     to SPLIT frontier reasoners (resolve I0) from frontier-weak (default to the foil).
+H2_TASK_ID = "data_typical_001_k1_central_tendency"  # kept for back-compat / table label
+H2_TASK_IDS = [
+    H2_TASK_ID,
+    "data_avgprice_001_k1_price_weighting",
+    "data_rate_001_k1_rate_interval",
+]
 
 # Diagnostic SUBTLER traps come from bench.diagnostic.generate_tasks() (ids diag_*).
 
@@ -271,7 +284,7 @@ def select_tasks() -> Tuple[List[Any], Dict[str, str]]:
     wanted: List[Tuple[str, str]] = (
         [(tid, "strong") for tid in STRONG_TRAP_IDS]
         + [(tid, "kgrad") for tid in K_GRADIENT_IDS]
-        + [(H2_TASK_ID, "h2")]
+        + [(tid, "h2") for tid in H2_TASK_IDS]
     )
 
     tasks: List[Any] = []
@@ -462,7 +475,7 @@ def build_report(
     # Single reasoner-resolution rows on the H2 task (config "single", reasoner slugs).
     reasoner_resolution: List[Dict[str, Any]] = []
     for (task_id, config, model_id), labels in sorted(grouped.items()):
-        if config == "single" and task_id == H2_TASK_ID and model_id in roster.reasoner_slugs:
+        if config == "single" and task_id in H2_TASK_IDS and model_id in roster.reasoner_slugs:
             stats = ensemble_stats(labels)
             reasoner_resolution.append({
                 "task_id": task_id,
@@ -553,7 +566,7 @@ def render_table(report: Dict[str, Any]) -> str:
         )
 
     lines.append("")
-    lines.append("H2 REASONER RESOLUTION (data_typical median-skew — expect resolve->I0):")
+    lines.append("H2 REASONER RESOLUTION (derivable demonstrators — expect resolve->I0):")
     if report["reasoner_resolution_h2"]:
         for r in report["reasoner_resolution_h2"]:
             lines.append(f"  {r['model_id']:32} resolve->I0={r['resolve_rate_to_I0']:.3f} "

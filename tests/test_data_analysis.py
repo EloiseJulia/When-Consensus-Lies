@@ -28,6 +28,8 @@ from bench.data_analysis import (
     _TIMEOUT_SECONDS,
     _RESULT_CACHE,
     problem_typical_value,
+    problem_avg_price,
+    problem_avg_rate,
     problem_active_users,
     problem_activity_report,
 )
@@ -50,11 +52,15 @@ def clear_result_cache():
 # ============================================================================
 
 def test_checkers_exist():
-    """All 8 checker IDs (2 per k=1 family × 2 + 4 for the k=2 family) are present
+    """All 12 checker IDs (2 per k=1 family × 4 + 4 for the k=2 family) are present
     in CHECKERS and REFERENCE_IMPLEMENTATIONS."""
     required_checkers = [
         # data_typical_001 (central_tendency axis, H2_derivable)
         "typical_median", "typical_mean",
+        # data_avgprice_001 (price_weighting axis, H2_derivable)
+        "avgprice_weighted", "avgprice_simple",
+        # data_rate_001 (rate_interval axis, H2_derivable)
+        "rate_total", "rate_stepmean",
         # data_activeusers_001 (active_user_threshold axis, H1_external)
         "active_threshold3", "active_threshold1",
         # data_report_001 (active_user_threshold + avg_rounding axes, H1_external)
@@ -142,8 +148,8 @@ def test_task_generation():
     """Tasks are generated with correct structure (Amendment 03 invariant)."""
     tasks = generate_tasks()
 
-    assert len(tasks) == 8, (
-        f"Expected 8 tasks (4 from two k=1 families + 4 from the k=2 family), "
+    assert len(tasks) == 12, (
+        f"Expected 12 tasks (8 from four k=1 families + 4 from the k=2 family), "
         f"got {len(tasks)}"
     )
 
@@ -204,17 +210,19 @@ def test_task_regime_valid():
 
 
 def test_regime_distribution():
-    """The domain carries H1_external families plus the H2_derivable median demonstrator;
-    no task is left untagged (None)."""
+    """The domain carries H1_external families plus THREE H2_derivable demonstrators
+    (the median-skew trap + the two harder frontier-calibrated traps); no task is left
+    untagged (None)."""
     tasks = generate_tasks()
     regimes = {t.regime for t in tasks}
     assert "H1_external" in regimes, "No H1_external tasks found"
-    assert "H2_derivable" in regimes, "Missing the H2_derivable median demonstrator"
+    assert "H2_derivable" in regimes, "Missing the H2_derivable demonstrators"
     assert None not in regimes, "All reconstructed tasks must carry a regime value"
 
-    # The H2_derivable tasks are exactly the data_typical_001 family.
+    # The H2_derivable tasks are exactly the three derivable-trap families.
     h2_ids = {t.id.rsplit("_k", 1)[0] for t in tasks if t.regime == "H2_derivable"}
-    assert h2_ids == {"data_typical_001"}, f"Unexpected H2_derivable families: {h2_ids}"
+    assert h2_ids == {"data_typical_001", "data_avgprice_001", "data_rate_001"}, \
+        f"Unexpected H2_derivable families: {h2_ids}"
 
 
 def test_target_description_labels_nondefault():
@@ -222,6 +230,8 @@ def test_target_description_labels_nondefault():
     '[combined-default]' (Amendment 03 marker) in every FullSpec."""
     problems = [
         problem_typical_value(),
+        problem_avg_price(),
+        problem_avg_rate(),
         problem_active_users(),
         problem_activity_report(),
     ]
@@ -284,6 +294,36 @@ def typical_value(data):
         "Mean default must PASS the I_d foil (I1 = mean)"
 
 
+def test_wavg_natural_default_is_simple_mean_foil():
+    """REVERSED property (H2_derivable, harder): a model that averages the visible
+    unit_price column (ignoring the quantity weights PRESENT in the data) FAILS the
+    quantity-weighted target and PASSES only the simple-mean foil."""
+    simple_default = """
+def average_price(items):
+    prices = [p for q, p in items]
+    return f"{sum(prices) / len(prices):.2f}"
+"""
+    assert not CHECKERS["avgprice_weighted"].check(simple_default).passed, \
+        "Simple-mean default must FAIL the I0 target (I0 = quantity-weighted average)"
+    assert CHECKERS["avgprice_simple"].check(simple_default).passed, \
+        "Simple-mean default must PASS the I_d foil (I1 = unweighted column mean)"
+
+
+def test_rate_natural_default_is_stepmean_foil():
+    """REVERSED property (H2_derivable, harder): a model that averages the per-step
+    value deltas (ignoring the unequal time gaps PRESENT in the data) FAILS the
+    total-change/total-elapsed-time target and PASSES only the step-mean foil."""
+    stepmean_default = """
+def avg_rate(series):
+    deltas = [series[i + 1][1] - series[i][1] for i in range(len(series) - 1)]
+    return f"{sum(deltas) / len(deltas):.2f}"
+"""
+    assert not CHECKERS["rate_total"].check(stepmean_default).passed, \
+        "Step-mean default must FAIL the I0 target (I0 = total change / total elapsed time)"
+    assert CHECKERS["rate_stepmean"].check(stepmean_default).passed, \
+        "Step-mean default must PASS the I_d foil (I1 = mean of per-step deltas)"
+
+
 # ============================================================================
 # GOLDEN numeric pins (frozen I0-vs-default values)
 # ============================================================================
@@ -312,6 +352,40 @@ def test_golden_median_under_skew():
     # Tightness: the median reference must NOT match the mean gold and vice-versa.
     assert not CHECKERS["typical_median"].check(REFERENCE_IMPLEMENTATIONS["typical_mean"]).passed
     assert not CHECKERS["typical_mean"].check(REFERENCE_IMPLEMENTATIONS["typical_median"]).passed
+
+
+def test_golden_quantity_weighted_average():
+    """GOLDEN (harder H2_derivable): quantity-weighted average price primary dataset.
+
+    dataset [[1,10],[1,20],[18,100]]: I0 weighted = 1830/20 = '91.50';
+    default simple column mean = 130/3 = '43.33'. Frozen; MUST NOT drift."""
+    dataset = [[1, 10.0], [1, 20.0], [18, 100.0]]
+    assert (dataset, "91.50") in TEST_CASES["avgprice_weighted"], \
+        "weighted gold '91.50' missing from TEST_CASES"
+    assert (dataset, "43.33") in TEST_CASES["avgprice_simple"], \
+        "simple gold '43.33' missing from TEST_CASES"
+    _pin("average_price", dataset, "91.50", "avgprice_weighted")
+    _pin("average_price", dataset, "43.33", "avgprice_simple")
+    # Tightness: each reference matches only its own gold across the family.
+    assert not CHECKERS["avgprice_weighted"].check(REFERENCE_IMPLEMENTATIONS["avgprice_simple"]).passed
+    assert not CHECKERS["avgprice_simple"].check(REFERENCE_IMPLEMENTATIONS["avgprice_weighted"]).passed
+
+
+def test_golden_unequal_interval_rate():
+    """GOLDEN (harder H2_derivable): unequal-interval rate of change primary dataset.
+
+    dataset [[0,0],[1,10],[10,100]]: I0 total/elapsed = (100-0)/(10-0) = '10.00';
+    default mean of per-step deltas = mean(10,90) = '50.00'. Frozen; MUST NOT drift."""
+    dataset = [[0, 0], [1, 10], [10, 100]]
+    assert (dataset, "10.00") in TEST_CASES["rate_total"], \
+        "total-rate gold '10.00' missing from TEST_CASES"
+    assert (dataset, "50.00") in TEST_CASES["rate_stepmean"], \
+        "step-mean gold '50.00' missing from TEST_CASES"
+    _pin("avg_rate", dataset, "10.00", "rate_total")
+    _pin("avg_rate", dataset, "50.00", "rate_stepmean")
+    # Tightness: each reference matches only its own gold across the family.
+    assert not CHECKERS["rate_total"].check(REFERENCE_IMPLEMENTATIONS["rate_stepmean"]).passed
+    assert not CHECKERS["rate_stepmean"].check(REFERENCE_IMPLEMENTATIONS["rate_total"]).passed
 
 
 def test_golden_org_kpi_threshold():
