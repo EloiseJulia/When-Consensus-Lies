@@ -67,14 +67,15 @@ def artifacts_dir():
 def test_frontier_roster_slugs_match_amendment_06():
     r = frontier.FRONTIER_ROSTER
     assert r.reasoner_slugs == {"gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro-preview"}
-    assert r.weak_slugs == {"gpt-4o-mini", "gemini-3.5-flash", "claude-haiku-4.5"}
+    assert r.weak_slugs == {"gpt-4o-mini", "gemini-3.5-flash", "claude-haiku-4.5",
+                            "gpt-3.5-turbo"}
     assert r.rho_baseline_slugs == {"gpt-5.4"}
 
     homo = [m for _role, m in r.homogeneous_models]
     # ρ-baseline + reasoners + weak all run their own homogeneous sc ensemble (pass A).
     assert homo[0] == "gpt-5.4"  # ρ-baseline first
     for slug in ("gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro-preview",
-                 "gpt-4o-mini", "gemini-3.5-flash", "claude-haiku-4.5"):
+                 "gpt-4o-mini", "gemini-3.5-flash", "claude-haiku-4.5", "gpt-3.5-turbo"):
         assert slug in homo, f"{slug} missing from homogeneous-sc pass"
 
     pool = [m for _role, m in r.pool_models]
@@ -94,6 +95,7 @@ def test_frontier_model_class_tags():
     assert r.model_class("gpt-4o-mini") == "weak"
     assert r.model_class("gemini-3.5-flash") == "weak"
     assert r.model_class("claude-haiku-4.5") == "weak"
+    assert r.model_class("gpt-3.5-turbo") == "weak"
     assert r.model_class("gpt-5.4") == "rho_baseline"
 
 
@@ -220,7 +222,7 @@ def test_offline_frontier_run_wiring(artifacts_dir):
     # Homogeneous reasoner + weak slugs each ran their own sc ensemble.
     sc_models = {r["model_id"] for r in store.all_runs() if r["config"] == "sc"}
     for slug in ("gpt-5.6-sol", "claude-opus-4.8", "gpt-4o-mini",
-                 "gemini-3.5-flash", "claude-haiku-4.5", "gpt-5.4"):
+                 "gemini-3.5-flash", "claude-haiku-4.5", "gpt-3.5-turbo", "gpt-5.4"):
         assert slug in sc_models, f"{slug} missing from the homogeneous-sc pass"
 
     # Table renders without error.

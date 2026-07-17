@@ -207,11 +207,24 @@ class DataChecker(GoldChecker):
 #
 # Binary convention axes (Amendment 03), each strictly {target, default}:
 #   central_tendency:      target=median          default=arithmetic mean   (H2_derivable)
+#   price_weighting:       target=qty-weighted avg default=simple col mean   (H2_derivable)
+#   rate_interval:         target=Δtotal/Δtime    default=mean of step deltas(H2_derivable)
 #   active_user_threshold: target=>=3 (org KPI)   default=>=1 (any activity)(H1_external)
 #   avg_rounding:          target=round-half-up    default=round-half-even   (H1_external)
 #
+# HARDER H2 demonstrators (frontier-calibrated, per 2026-07-17-harder-h2-plan.md): the
+# median-skew trap (data_typical_001) is resolved by ALL frontier models (reasoner AND
+# weak), collapsing the reasoner-vs-weak H2 contrast. price_weighting + rate_interval are
+# SUBTLER derivable traps: the disambiguator is PRESENT in the data (quantities /
+# unequal time gaps), so a strong reasoner CAN recover I0, but the derivation requires a
+# genuine reasoning step a weak model skips (it averages the visible column). Both are
+# pure-stdlib executable gold (no numpy/pandas → run under the DataChecker `python -S`
+# sandbox); the live default-check is the empirical arbiter of which actually splits.
+#
 # Families:
 #   data_typical_001      k_max=1  axis central_tendency       -> 2 variants (k0,k1)  H2_derivable
+#   data_avgprice_001     k_max=1  axis price_weighting        -> 2 variants (k0,k1)  H2_derivable
+#   data_rate_001         k_max=1  axis rate_interval          -> 2 variants (k0,k1)  H2_derivable
 #   data_activeusers_001  k_max=1  axis active_user_threshold  -> 2 variants (k0,k1)  H1_external
 #   data_report_001       k_max=2  active_user_threshold+avg_rounding -> 4 variants  H1_external
 #
@@ -277,6 +290,160 @@ def problem_typical_value():
         ],
         key_questions=[
             "Which measure of central tendency represents the 'typical value' (mean/median)?",
+        ],
+    )
+
+
+def problem_avg_price():
+    """k=1 family, axis price_weighting: average price PAID PER UNIT (quantity-weighted).
+
+    H2_derivable (HARDER trap), FAIR + requires-derivation (2026-07-18): the retained
+    k1 prompt asks for "the average price per unit across ALL units purchased" over a
+    table with a QUANTITY column, but does NOT state the formula. Averaging over the
+    individual UNITS (each of the 18 units in the big lot has price 100) UNIQUELY denotes
+    total amount spent / total number of units = the quantity-weighted value. Averaging
+    over the 3 LOTS (the naive column mean) is NOT "across all units" — it gives a 1-unit
+    lot the same weight as an 18-unit lot, so it is genuinely WRONG.
+
+    WHY it is FAIR (prereg §2): a competent reader lands ONLY on the per-unit (weighted)
+    reading — the intent is uniquely recoverable from the RETAINED prompt + data, not from
+    the hidden latent_spec.
+    WHY it still SPLITS (requires derivation): the retained prompt does NOT spell out
+    "= total/total units". A reasoner must DERIVE that "per unit across all units" means
+    averaging over units (weighting by quantity), not over the listed lots; a weak model
+    naively averages the three visible unit_price values. The explicit formula lives ONLY
+    in the k0 latent_spec / the deleted clause, so k0 is fully specified and deleting it
+    at k1 leaves the unique-intent-but-requires-derivation phrasing.
+    WHY H2 (not H1-external): no external convention is needed — the unique answer is
+    derivable purely from the prompt + data.
+    PURE STDLIB: sum/`/`/f-string only — runs under the DataChecker `python -S` sandbox
+    with no third-party library.
+
+    1 req class -> 2^1=2 interps: I0 (weighted, target) + I1 (simple, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_avgprice_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `average_price(items)` that returns the average price "
+            "per unit across ALL units purchased, as a string rounded to 2 decimal "
+            "places. Each record is a [quantity, unit_price] pair, where quantity is how "
+            "many units were bought at that unit_price: [[1, 10.0], [1, 20.0], "
+            "[18, 100.0]]."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="price_weighting",
+                description="Explicit formula for the average price paid per unit",
+                clauses=[
+                    "Compute it as the total amount spent (sum of quantity*unit_price "
+                    "over all records) divided by the total number of units (sum of "
+                    "quantity); do NOT report the unweighted mean of the unit_price "
+                    "column, which ignores how many units each lot contained. Answer to "
+                    "2 decimals."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: average price PAID PER UNIT = total spent / total units "
+                    "(target, uniquely derivable). [[1,10],[1,20],[18,100]] -> 1830/20 = "
+                    "'91.50'."
+                ),
+                is_target=True,
+                gold_check="avgprice_weighted",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: unweighted simple mean of the "
+                    "unit_price column (genuinely WRONG — averages lot prices, ignoring "
+                    "unit counts). [[1,10],[1,20],[18,100]] -> (10+20+100)/3 = '43.33'."
+                ),
+                is_target=False,
+                gold_check="avgprice_simple",
+                opened_by="price_weighting",
+            ),
+        ],
+        key_questions=[
+            "How is the average price paid per unit computed — total spent / total units "
+            "(weighted), or the unweighted mean of the unit_price column?",
+        ],
+    )
+
+
+def problem_avg_rate():
+    """k=1 family, axis rate_interval: rate of change over UNEQUAL time intervals.
+
+    H2_derivable (HARDER trap): the prompt embeds a series of [time, value] points
+    whose time gaps are UNEQUAL. The unequal spacing is PRESENT in the data, so a
+    reasoning model can DERIVE that "the average rate of change per unit time" is the
+    total change divided by the total elapsed time (which accounts for the spacing),
+    not the naive mean of the per-step value deltas (which implicitly treats every
+    step as one unit of time). The naive per-step-delta mean is the WRONG foil.
+
+    WHY H2 (not H1-external): the disambiguator (the unequal time gaps) is inside the
+    prompt's data, recoverable WITHOUT any external convention — a strong reasoner
+    divides total change by total elapsed time; a weak model averages the step deltas.
+    WHY a weak model defaults to the foil: "average rate of change" reads as "average
+    the step-to-step changes"; accounting for unequal spacing is a step it skips.
+    PURE STDLIB: indexing/sum/`/`/f-string only — runs under the DataChecker `python -S`
+    sandbox with no third-party library.
+
+    1 req class -> 2^1=2 interps: I0 (total/elapsed, target) + I1 (step-mean, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_rate_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `avg_rate(series)` that returns the average rate of "
+            "change per unit time of the following measurements as a string rounded "
+            "to 2 decimal places. Each point is a [time, value] pair (times are NOT "
+            "evenly spaced): [[0, 0], [1, 10], [10, 100]]."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="rate_interval",
+                description="How to average the rate of change given unequal time gaps",
+                clauses=[
+                    "Because the time points are NOT evenly spaced, the 'average rate of "
+                    "change per unit time' is the TOTAL change (last value minus first "
+                    "value) divided by the TOTAL elapsed time (last time minus first "
+                    "time), NOT the unweighted mean of the per-step value deltas. Answer "
+                    "to 2 decimals."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: total change / total elapsed time (target). Accounts "
+                    "for the unequal spacing present in the data. [[0,0],[1,10],[10,100]] "
+                    "-> (100-0)/(10-0) = '10.00'."
+                ),
+                is_target=True,
+                gold_check="rate_total",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: unweighted mean of the per-step "
+                    "value deltas (ignores unequal spacing). [[0,0],[1,10],[10,100]] -> "
+                    "mean(10, 90) = '50.00'."
+                ),
+                is_target=False,
+                gold_check="rate_stepmean",
+                opened_by="rate_interval",
+            ),
+        ],
+        key_questions=[
+            "Is 'average rate of change per unit time' total-change/total-elapsed-time "
+            "or the mean of the per-step value deltas?",
         ],
     )
 
@@ -459,6 +626,32 @@ def typical_value(data):
     return f"{mean:.2f}"
 """,
 
+    # -- data_avgprice_001 (price_weighting axis, H2_derivable) ---------------
+    "avgprice_weighted": """
+def average_price(items):
+    total_cost = sum(q * p for q, p in items)
+    total_qty = sum(q for q, p in items)
+    return f"{total_cost / total_qty:.2f}"
+""",
+    "avgprice_simple": """
+def average_price(items):
+    prices = [p for q, p in items]
+    return f"{sum(prices) / len(prices):.2f}"
+""",
+
+    # -- data_rate_001 (rate_interval axis, H2_derivable) ---------------------
+    "rate_total": """
+def avg_rate(series):
+    t0, v0 = series[0]
+    t1, v1 = series[-1]
+    return f"{(v1 - v0) / (t1 - t0):.2f}"
+""",
+    "rate_stepmean": """
+def avg_rate(series):
+    deltas = [series[i + 1][1] - series[i][1] for i in range(len(series) - 1)]
+    return f"{sum(deltas) / len(deltas):.2f}"
+""",
+
     # -- data_activeusers_001 (active_user_threshold axis) --------------------
     "active_threshold3": """
 def count_active(sessions):
@@ -520,6 +713,38 @@ TEST_CASES = {
         ([10, 20, 30, 1000], "265.00"),         # mean 1060/4=265.00
     ],
 
+    # -- data_avgprice_001 ----------------------------------------------------
+    # Datasets where quantity-weighted avg != simple column mean (clear margins).
+    # A [[1,10],[1,20],[18,100]]:  weighted 1830/20=91.50; simple 130/3=43.33
+    # B [[2,5],[3,10],[5,20]]:     weighted 140/10=14.00;  simple 35/3=11.67
+    # C [[10,1],[1,100]]:          weighted 110/11=10.00;  simple 101/2=50.50
+    "avgprice_weighted": [
+        ([[1, 10.0], [1, 20.0], [18, 100.0]], "91.50"),
+        ([[2, 5.0], [3, 10.0], [5, 20.0]], "14.00"),
+        ([[10, 1.0], [1, 100.0]], "10.00"),
+    ],
+    "avgprice_simple": [
+        ([[1, 10.0], [1, 20.0], [18, 100.0]], "43.33"),
+        ([[2, 5.0], [3, 10.0], [5, 20.0]], "11.67"),
+        ([[10, 1.0], [1, 100.0]], "50.50"),
+    ],
+
+    # -- data_rate_001 --------------------------------------------------------
+    # Datasets with UNEQUAL time gaps where total/elapsed != mean(step deltas).
+    # A [[0,0],[1,10],[10,100]]:   total 100/10=10.00; stepmean mean(10,90)=50.00
+    # B [[0,100],[2,120],[3,110]]: total 10/3=3.33;    stepmean mean(20,-10)=5.00
+    # C [[0,0],[5,50],[6,50]]:     total 50/6=8.33;    stepmean mean(50,0)=25.00
+    "rate_total": [
+        ([[0, 0], [1, 10], [10, 100]], "10.00"),
+        ([[0, 100], [2, 120], [3, 110]], "3.33"),
+        ([[0, 0], [5, 50], [6, 50]], "8.33"),
+    ],
+    "rate_stepmean": [
+        ([[0, 0], [1, 10], [10, 100]], "50.00"),
+        ([[0, 100], [2, 120], [3, 110]], "5.00"),
+        ([[0, 0], [5, 50], [6, 50]], "25.00"),
+    ],
+
     # -- data_activeusers_001 -------------------------------------------------
     # Datasets where count>=3 != count>=1 so the two checkers are disjoint.
     "active_threshold3": [
@@ -565,6 +790,12 @@ ENTRYPOINTS = {
     # k=1 family: central tendency
     "typical_median":       "typical_value",
     "typical_mean":         "typical_value",
+    # k=1 family: quantity-weighted average price (H2_derivable)
+    "avgprice_weighted":    "average_price",
+    "avgprice_simple":      "average_price",
+    # k=1 family: unequal-interval rate of change (H2_derivable)
+    "rate_total":           "avg_rate",
+    "rate_stepmean":        "avg_rate",
     # k=1 family: active-user threshold
     "active_threshold3":    "count_active",
     "active_threshold1":    "count_active",
@@ -588,7 +819,7 @@ for _check_id, _test_cases in TEST_CASES.items():
 # ============================================================================
 
 def generate_tasks() -> List[Task]:
-    """Generate all 8 data_analysis tasks (Amendment 03 combinatorial invariant).
+    """Generate all 12 data_analysis tasks (Amendment 03 combinatorial invariant).
 
     Amended invariant per variant (enforced by post-generation assertion):
         len(key_questions) == k'       (deleted-axis count)
@@ -597,9 +828,13 @@ def generate_tasks() -> List[Task]:
         k0 control: prompt==latent_spec, 1 interp, empty key_questions.
 
     Task count:
-        2 k=1 families x 2 variants  =  4
+        4 k=1 families x 2 variants  =  8
         1 k=2 family   x 4 variants  =  4
-        Total                        =  8
+        Total                        = 12
+
+    The 4 k=1 families are 3 H2_derivable (central_tendency, price_weighting,
+    rate_interval) + 1 H1_external (active_user_threshold); the k=2 family is
+    H1_external (active_user_threshold x avg_rounding).
     """
     tasks = []
 
@@ -608,6 +843,14 @@ def generate_tasks() -> List[Task]:
         (problem_typical_value(), [
             ("_k0", []),
             ("_k1_central_tendency", ["central_tendency"]),
+        ]),
+        (problem_avg_price(), [
+            ("_k0", []),
+            ("_k1_price_weighting", ["price_weighting"]),
+        ]),
+        (problem_avg_rate(), [
+            ("_k0", []),
+            ("_k1_rate_interval", ["rate_interval"]),
         ]),
         (problem_active_users(), [
             ("_k0", []),
@@ -727,6 +970,51 @@ def typical_value(data):
     if n % 2 == 0:
         return str((s[mid - 1] + s[mid]) / 2.0)
     return str(s[mid])
+""",
+        ]
+
+    elif task_id_base == "data_avgprice_001":
+        return [
+            # Total spent (no division at all); matches 0
+            """
+def average_price(items):
+    return f"{sum(q * p for q, p in items):.2f}"
+""",
+            # Weighted total divided by NUMBER OF RECORDS (not total qty); matches 0
+            """
+def average_price(items):
+    total = sum(q * p for q, p in items)
+    return f"{total / len(items):.2f}"
+""",
+            # Quantity-weighted average WITHOUT the 2-decimal format (str); matches 0
+            """
+def average_price(items):
+    total_cost = sum(q * p for q, p in items)
+    total_qty = sum(q for q, p in items)
+    return str(total_cost / total_qty)
+""",
+        ]
+
+    elif task_id_base == "data_rate_001":
+        return [
+            # Total change WITHOUT dividing by elapsed time; matches 0
+            """
+def avg_rate(series):
+    return f"{series[-1][1] - series[0][1]:.2f}"
+""",
+            # Mean of per-step RATES (delta_v/delta_t); differs from both golds
+            # across the datasets (accidental single-dataset hits cancel out); matches 0
+            """
+def avg_rate(series):
+    rates = [(series[i + 1][1] - series[i][1]) / (series[i + 1][0] - series[i][0])
+             for i in range(len(series) - 1)]
+    return f"{sum(rates) / len(rates):.2f}"
+""",
+            # Total change divided by NUMBER OF POINTS (not elapsed time); matches 0
+            """
+def avg_rate(series):
+    change = series[-1][1] - series[0][1]
+    return f"{change / len(series):.2f}"
 """,
         ]
 
