@@ -314,10 +314,12 @@ def bootstrap_confidence_intervals(
     - ``cluster="model"`` -> resample distinct model clusters.
     - ``cluster=["task", "model"]`` -> INDEPENDENT two-way cluster bootstrap:
       the task levels and the model levels are each resampled with replacement
-      independently, and every (task, model) cell enters with multiplicity =
-      product of its levels' resample counts. This respects BOTH item and model
-      clustering and (correctly) yields WIDER CIs than a naive joint-cell
-      resample that wrongly treats each (task, model) cell as independent.
+      independently. Every sampled cluster OCCURRENCE is relabeled with a UNIQUE
+      id, so a task/model drawn twice becomes two DISTINCT groups downstream —
+      this preserves the resample multiplicity through any downstream cell
+      aggregation (a metric that regroups by ``task`` would otherwise merge the
+      duplicated draws and understate the CI). Correctly yields WIDER CIs than a
+      naive joint-cell resample.
 
     Args:
         metric_fn: Callable taking a DataFrame and returning a float.
@@ -353,74 +355,71 @@ def bootstrap_confidence_intervals(
     if not cluster_cols:
         return (point, float("nan"), float("nan"))
 
-    if len(cluster_cols) == 1:
-        return _one_way_cluster_bootstrap(
-            metric_fn, data, cluster_cols[0], n_bootstrap, rng, point, lo_pct, hi_pct)
-
-    return _multiway_cluster_bootstrap(
+    return _cluster_bootstrap(
         metric_fn, data, cluster_cols, n_bootstrap, rng, point, lo_pct, hi_pct)
 
 
-def _one_way_cluster_bootstrap(metric_fn, data, col, n_bootstrap, rng, point, lo_pct, hi_pct):
-    """Resample the distinct levels of a single clustering column."""
-    grouped = data.groupby(col, dropna=False, sort=False)
-    keys = list(grouped.groups.keys())
-    index_map = {k: np.asarray(grouped.groups[k]) for k in keys}
-    if len(keys) < 2:
-        return (point, point, point)
-    key_idx = np.arange(len(keys))
-    stats: List[float] = []
-    for _ in range(n_bootstrap):
-        chosen = rng.choice(key_idx, size=len(keys), replace=True)
-        boot_index = np.concatenate([index_map[keys[i]] for i in chosen])
-        stats.append(_safe_metric(metric_fn, data.loc[boot_index]))
-    return _summarize(point, stats, lo_pct, hi_pct)
+def _cluster_bootstrap(metric_fn, data, cluster_cols, n_bootstrap, rng,
+                       point, lo_pct, hi_pct):
+    """Cluster bootstrap with UNIQUE occurrence relabeling (one- and multi-way).
 
+    Each clustering dimension's levels are resampled with replacement
+    INDEPENDENTLY (the standard multi-way / two-way cluster bootstrap). Crucially
+    every sampled cluster OCCURRENCE is given a UNIQUE relabeled id in its
+    cluster column, so that a task (or model) drawn twice becomes TWO distinct
+    groups downstream. Without this, a metric that re-aggregates by the cluster
+    id (e.g. ``compute_cell_cd`` grouping by ``task``) would merge the duplicated
+    draws back into a single cell — silently discarding the resample multiplicity
+    and yielding a CI that is far too narrow. Relabeling propagates the
+    multiplicity through any downstream cell aggregation.
 
-def _multiway_cluster_bootstrap(metric_fn, data, cluster_cols, n_bootstrap, rng,
-                                point, lo_pct, hi_pct):
-    """Independent multi-way (e.g. item AND model) cluster bootstrap.
-
-    The STANDARD two-way cluster bootstrap: each clustering dimension's set of
-    levels is resampled with replacement INDEPENDENTLY, then a joint (item,
-    model) cell enters the resampled dataset with multiplicity equal to the
-    PRODUCT of its levels' resample counts. This treats items and models as
-    independently exchangeable and correctly widens the CI relative to naive
-    joint-cell resampling (which wrongly treats every (item, model) cell as an
-    independent unit and yields CIs that are far too narrow).
+    For a single clustering column this reduces to the ordinary cluster
+    bootstrap (with the same occurrence-relabeling fix). A joint (task, model)
+    cell contributes its rows under every combination of the resampled
+    task-occurrence x model-occurrence relabelings.
     """
-    from collections import Counter
+    import itertools
 
-    dim_levels = [np.asarray(pd.unique(data[c])) for c in cluster_cols]
+    dim_levels = [list(pd.unique(data[c])) for c in cluster_cols]
     if all(len(lv) < 2 for lv in dim_levels):
         return (point, point, point)
 
-    cell_groups = data.groupby(cluster_cols, dropna=False, sort=False)
-    cell_index = {}
-    for key, idx in cell_groups.groups.items():
+    joint = data.groupby(_gb(cluster_cols), dropna=False, sort=False)
+    joint_index = {}
+    for key, idx in joint.groups.items():
         key_t = key if isinstance(key, tuple) else (key,)
-        cell_index[key_t] = np.asarray(idx)
+        joint_index[key_t] = np.asarray(idx)
 
+    n_dims = len(cluster_cols)
     stats: List[float] = []
     for _ in range(n_bootstrap):
-        counts = []
-        for levels in dim_levels:
-            samp = rng.choice(len(levels), size=len(levels), replace=True)
-            counts.append(Counter(levels[i] for i in samp))
-        parts = []
-        for key_t, idx in cell_index.items():
-            mult = 1
-            for d, val in enumerate(key_t):
-                mult *= counts[d].get(val, 0)
-                if mult == 0:
-                    break
-            if mult > 0:
-                parts.append(np.tile(idx, mult))
-        if parts:
-            boot_index = np.concatenate(parts)
-            stats.append(_safe_metric(metric_fn, data.loc[boot_index]))
-        else:
+        # Resample each dimension's levels; relabel each occurrence uniquely.
+        occ = []  # per dim: list of (orig_level, new_label)
+        for d, levels in enumerate(dim_levels):
+            draws = rng.choice(len(levels), size=len(levels), replace=True)
+            occ.append([(levels[i], f"{cluster_cols[d]}##b{j}") for j, i in enumerate(draws)])
+
+        take_idx: List[np.ndarray] = []
+        relabels: List[List[np.ndarray]] = [[] for _ in range(n_dims)]
+        for combo in itertools.product(*occ):
+            orig_key = tuple(o[0] for o in combo)
+            idx = joint_index.get(orig_key)
+            if idx is None or len(idx) == 0:
+                continue
+            take_idx.append(idx)
+            n = len(idx)
+            for d in range(n_dims):
+                relabels[d].append(np.full(n, combo[d][1], dtype=object))
+
+        if not take_idx:
             stats.append(float("nan"))
+            continue
+        all_idx = np.concatenate(take_idx)
+        boot = data.loc[all_idx].copy()
+        boot.reset_index(drop=True, inplace=True)
+        for d, c in enumerate(cluster_cols):
+            boot[c] = np.concatenate(relabels[d])
+        stats.append(_safe_metric(metric_fn, boot))
     return _summarize(point, stats, lo_pct, hi_pct)
 
 

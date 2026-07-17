@@ -196,6 +196,58 @@ def test_two_way_cluster_ci_materially_wider_than_one_way():
         f"({w_one:.3f}); the joint-cell resample bug makes it too narrow")
 
 
+def test_two_way_bootstrap_preserves_task_multiplicity():
+    """BLOCKER B (audit): the cluster bootstrap must relabel each sampled cluster
+    OCCURRENCE with a UNIQUE id, so a task drawn twice becomes two distinct
+    groups downstream. Otherwise a metric that RE-AGGREGATES by ``task`` (here
+    ``compute_cell_cd``, which groups by task) merges the duplicated draws back
+    into a single cell — discarding the resample multiplicity and producing a CI
+    that is too NARROW.
+
+    The metric is the mean cell CD (``compute_cell_cd`` regroups by task). With
+    12 single-cell tasks split 6 CD=1 / 6 CD=0, the correct multiplicity-
+    preserving bootstrap (each occurrence a distinct cell) gives a materially
+    WIDER CI than the buggy regrouping (each distinct drawn task counted once).
+    We compare the function's CI width to BOTH reference behaviours computed by
+    hand — not to a row mean — so a regrouping implementation fails."""
+    rows = []
+    for t in range(12):
+        lab = "I1" if t % 2 == 0 else "I0"      # I1 wrong -> CD 1 ; I0 -> CD 0
+        rows.append(dict(task=f"t{t}", model="m0", regime="H1_external",
+                         ambiguity_k=1, method="single", model_class="reasoning",
+                         seed=0, label=lab, target="I0"))
+    df = pd.DataFrame(rows)
+
+    def metric(frame):
+        cells = compute_cell_cd(frame)
+        return float(cells["cd_primary"].mean()) if len(cells) else float("nan")
+
+    _, lo, hi = bootstrap_confidence_intervals(
+        metric, df, n_bootstrap=4000, cluster="task", seed=3)
+    func_w = hi - lo
+
+    # Reference behaviours over the same 6/6 split.
+    cd = [1.0 if t % 2 == 0 else 0.0 for t in range(12)]
+    rng = np.random.default_rng(11)
+    relabel, regroup = [], []
+    for _ in range(6000):
+        draws = rng.integers(0, 12, size=12)
+        relabel.append(np.mean([cd[i] for i in draws]))          # multiplicity kept
+        regroup.append(np.mean([cd[i] for i in set(draws.tolist())]))  # merged draws
+
+    def width(a):
+        a = np.asarray(a)
+        return float(np.percentile(a, 97.5) - np.percentile(a, 2.5))
+
+    relabel_w, regroup_w = width(relabel), width(regroup)
+    # The two behaviours genuinely differ (documents the bug magnitude).
+    assert relabel_w - regroup_w > 0.03, (relabel_w, regroup_w)
+    # The function must match the multiplicity-preserving (relabel) width ...
+    assert abs(func_w - relabel_w) < 0.03, (func_w, relabel_w)
+    # ... and be materially wider than the buggy regrouping width.
+    assert func_w > regroup_w + 0.03, (func_w, regroup_w)
+
+
 def test_crossed_gaussian_status_labeled_honestly():
     """BLOCKER 2 (audit): a TRUE crossed random-intercepts Gaussian fit must be
     labeled ``ok:crossed`` (constant top-level group + variance components for

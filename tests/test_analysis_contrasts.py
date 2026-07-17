@@ -163,7 +163,13 @@ def test_evaluate_all_and_robustness():
         "cd_sensitivity_frozen": cis,
         "cd_sensitivity_drop_iperp": weaker,  # same signs, looser CIs
     })
-    assert all(v.startswith("robust:+") for v in robust.values()), robust
+    # Single-key hypotheses agree in sign -> "robust:+". H2 is COMPOSITE
+    # (MAJOR D): interaction is + and the matched reasoner-vs-single component
+    # is - across every variant, so H2 reports both component signs and stays
+    # robust only because BOTH components are sign-stable.
+    for h in ("H1a", "H1b", "R1", "R2"):
+        assert robust[h].startswith("robust:+"), robust
+    assert robust["H2"] == "robust:+&-", robust
 
     # A genuine SIGN FLIP on H1a is reported divergent even though one variant
     # alone would read SUPPORTED and the other REFUTED.
@@ -180,6 +186,33 @@ def test_evaluate_all_and_robustness():
         "cd_sensitivity_frozen": {"h1a": (0.03, -0.01, 0.09)},  # INCONCLUSIVE, same sign
     })
     assert not_divergent["H1a"].startswith("robust:+"), not_divergent
+
+
+def test_h2_robustness_is_composite_over_both_components():
+    """MAJOR D: H2 is COMPOSITE (prereg §9) — its cross-variant robustness must
+    consider BOTH the regime x model_class interaction AND the matched
+    reasoner-H2-vs-single baseline component. Here the interaction sign is
+    STABLE (+) across variants but the matched-baseline component FLIPS sign
+    (- -> +), so H2 must be reported ``divergent``. The old logic (which checked
+    only ``h2_interaction``) would have called it robust."""
+    base = {
+        "h1a": (0.1, 0.02, 0.2), "h1b": (0.1, 0.01, 0.2),
+        "h2_interaction": (0.2, 0.05, 0.3),
+        "h2_reasoner_vs_single": (-0.1, -0.3, 0.05),   # negative here
+        "r1": (0.3, 0.1, 0.5), "r2": (0.2, 0.05, 0.4),
+    }
+    flipped = dict(base)
+    flipped["h2_reasoner_vs_single"] = (0.15, -0.05, 0.35)  # POSITIVE in sensitivity
+    out = dr.robustness_across_variants({
+        "cd_primary": base,
+        "cd_sensitivity_frozen": flipped,
+    })
+    # Interaction alone is sign-stable, so an interaction-only check would say
+    # robust; the composite check catches the flipped baseline component.
+    assert out["H2"].startswith("divergent:"), out
+    assert "h2_reasoner_vs_single" in out["H2"], out
+    # The other (single-key) hypotheses remain robust.
+    assert out["H1a"].startswith("robust:+"), out
 
 
 def test_evaluate_from_data_supports_h1_and_r1_wiring():
@@ -262,70 +295,111 @@ def test_r1_metric_variant_aware_and_conditioned():
 
 
 def test_r2_uses_constructor_family_not_aggregation_method():
-    """BLOCKER 4: R2 is the H1 aggregation-vs-single effect on items CONSTRUCTED
-    by a cross-family constructor, NOT a heterogeneous-vs-single aggregation
-    contrast. Here the effect is large on NATIVE-constructed items but VANISHES
-    on cross-constructed items, so R2 must be INCONCLUSIVE. The old
-    hetero-minus-single metric (pooling all items) would read strongly positive
-    -> SUPPORTED."""
+    """BLOCKER C: R2's cross-family construction control is RELATIONAL — an
+    observation is cross-family-constructed iff its ``constructor_family``
+    differs from the TESTED model's family. Here EVERY tested model is family
+    ``openai`` and EVERY item is constructed by ``cohere``, so every observation
+    is cross-family and R2 is the ordinary H1 aggregation-vs-single effect on the
+    whole (cross-constructed) set — which is strongly positive -> SUPPORTED.
+
+    The old "non-modal constructor" heuristic would declare the SOLE/ modal
+    constructor ``cohere`` to be 'native', exclude it, find an EMPTY
+    cross-family subset, and return nan -> INCONCLUSIVE. So this asserts the
+    relational behaviour that fails on the pre-fix heuristic."""
     rows = []
 
-    def add(task, method, constructor, labels):
+    def add(task, method, labels):
         for lab in labels:
             rows.append(dict(task=task, model="m0", regime="H1_external",
                              ambiguity_k=1, method=method, model_class="reasoning",
                              seed=0, label=lab, target="I0",
-                             constructor_family=constructor))
+                             model_family="openai", constructor_family="cohere"))
 
-    for t in range(8):
-        # NATIVE items: big aggregation-vs-single gap (single correct, hetero wrong).
-        add(f"nat_s_{t}", "single", "native", ["I0"])
-        add(f"nat_h_{t}", "heterogeneous-MAD", "native", ["I1", "I1", "I1", "I1"])
-    for t in range(8):
-        # CROSS-constructed items: NO gap (both single and hetero equally wrong).
-        add(f"cr_s_{t}", "single", "cross", ["I1"])
-        add(f"cr_h_{t}", "heterogeneous-MAD", "cross", ["I1", "I1", "I1", "I1"])
+    for t in range(12):
+        add(f"s_{t}", "single", ["I0"])                        # single correct -> CD 0
+        add(f"h_{t}", "heterogeneous-MAD", ["I1", "I1", "I1", "I1"])  # aggregated wrong -> CD 1
 
     df = pd.DataFrame(rows)
-    out = dr.evaluate_from_data(df, cd_col="cd_primary", n_bootstrap=150,
-                                r1_n_perm=40, native_constructor="native")
-    assert out["verdicts"]["R2"] == dr.INCONCLUSIVE, out["cis"]["r2"]
+    out = dr.evaluate_from_data(df, cd_col="cd_primary", n_bootstrap=200,
+                                r1_n_perm=40)
+    assert out["verdicts"]["R2"] == dr.SUPPORTED, out["cis"]["r2"]
+    lo = out["cis"]["r2"][1]
+    assert lo > 0, out["cis"]["r2"]
+
+    # And via the model->family MAP fallback (no explicit family column): drop
+    # the family column and supply a mapping, same relational result.
+    df2 = df.drop(columns=["model_family"])
+    out2 = dr.evaluate_from_data(df2, cd_col="cd_primary", n_bootstrap=200,
+                                 r1_n_perm=40, model_family_map={"m0": "openai"})
+    assert out2["verdicts"]["R2"] == dr.SUPPORTED, out2["cis"]["r2"]
 
 
 def test_h1b_driven_by_mixed_model_coefficient():
-    """BLOCKER 5: H1b comes from the fitted mixed-model AMBIGUITY_K coefficient
-    CI (not a raw polyfit slope). The helper must return exactly the model's
-    ambiguity_k coefficient + CI."""
-    from analysis.decision_rules import _h1b_coef_ci
+    """BLOCKER 5 + BLOCKER A: H1b comes from the AMBIGUITY_K coefficient of the
+    FROZEN §8 item-level model
+    ``<cd> ~ regime*ambiguity_k*method*model_class + (1|task) + (1|model)``
+    (both random intercepts retained). The helper must return exactly that
+    frozen model's ambiguity_k coefficient + CI — and that CI must DIFFER from a
+    reduced pre-fix model (e.g. ``<cd> ~ ambiguity_k + (1|model_class)``), so a
+    helper still wired to the reduced structure fails this test."""
+    from analysis.decision_rules import (_h1b_coef_ci, _item_level_cells,
+                                          _frozen_fixed_rhs, _frozen_re_terms)
     from analysis.stats import fit_mixed_effects_model
 
     df = _structured_df(0)
     h1 = df[df["regime"] == "H1_external"]
     ci = _h1b_coef_ci(h1, "cd_primary")
-    cells = compute_cell_cd(h1)
-    res = fit_mixed_effects_model(cells, "cd_primary ~ ambiguity_k + (1|model_class)")
+
+    cells = _item_level_cells(h1)
+    frozen = f"cd_primary ~ {_frozen_fixed_rhs(cells)}{_frozen_re_terms(cells)}"
+    res = fit_mixed_effects_model(cells, frozen)
     coef = res["coefficients"]["ambiguity_k"]
     lo, hi = res["confidence_intervals"]["ambiguity_k"]
     assert abs(ci[0] - coef) < 1e-9
     assert abs(ci[1] - lo) < 1e-9 and abs(ci[2] - hi) < 1e-9
     assert ci[1] > 0, f"k CI should exclude 0 (positive), got {ci}"
 
+    # Discriminating: the FROZEN structure's CI must NOT coincide with the
+    # reduced pre-fix model's CI (different RE structure -> different width).
+    reduced = fit_mixed_effects_model(cells, "cd_primary ~ ambiguity_k + (1|model_class)")
+    rlo, rhi = reduced["confidence_intervals"]["ambiguity_k"]
+    assert abs(hi - lo) - abs(rhi - rlo) > 1e-3, (
+        "frozen and reduced CIs should differ materially", (lo, hi), (rlo, rhi))
+
 
 def test_h2_interaction_from_model_coefficient():
-    """BLOCKER 5: H2's interaction CI comes from the §8 mixed-model
-    regime x model_class coefficient (not a raw mean gap)."""
-    from analysis.decision_rules import _h2_interaction_ci
+    """BLOCKER 5 + BLOCKER A: H2's interaction CI comes from the regime x
+    model_class coefficient of the FROZEN §8 model (both ``(1|task)`` and
+    ``(1|model)`` retained), NOT a raw mean gap and NOT a reduced model. The
+    helper must equal the frozen model's two-way interaction coefficient + CI,
+    and that CI must DIFFER from a reduced pre-fix model
+    (``regime*model_class + ambiguity_k + (1|method)``)."""
+    from analysis.decision_rules import (_h2_interaction_ci, _item_level_cells,
+                                         _frozen_fixed_rhs, _frozen_re_terms)
     from analysis.stats import fit_mixed_effects_model
 
     df = _structured_df(0)
     ci = _h2_interaction_ci(df, "cd_primary", "reasoning")
     assert not np.isnan(ci[0])
-    cells = compute_cell_cd(df)
-    res = fit_mixed_effects_model(
-        cells, "cd_primary ~ regime * model_class + ambiguity_k + (1|method)")
+
+    cells = _item_level_cells(df)
+    frozen = f"cd_primary ~ {_frozen_fixed_rhs(cells)}{_frozen_re_terms(cells)}"
+    res = fit_mixed_effects_model(cells, frozen)
     name = [k for k in res["coefficients"]
-            if ":" in k and "regime" in k and "reasoning" in k][0]
+            if k.count(":") == 1 and "regime[" in k and "model_class[" in k
+            and "method[" not in k and "ambiguity_k" not in k][0]
+    flo, fhi = res["confidence_intervals"][name]
     assert abs(ci[0] - res["coefficients"][name]) < 1e-9
+    assert abs(ci[1] - flo) < 1e-9 and abs(ci[2] - fhi) < 1e-9
+
+    # Discriminating: reduced pre-fix model gives a materially different CI.
+    reduced = fit_mixed_effects_model(
+        cells, "cd_primary ~ regime * model_class + ambiguity_k + (1|method)")
+    rname = [k for k in reduced["coefficients"]
+             if k.count(":") == 1 and "regime[" in k and "model_class[" in k][0]
+    rlo, rhi = reduced["confidence_intervals"][rname]
+    assert abs((fhi - flo) - (rhi - rlo)) > 1e-3, (
+        "frozen and reduced interaction CIs should differ", (flo, fhi), (rlo, rhi))
 
 
 def test_h2_reasoner_vs_single_is_matched():
