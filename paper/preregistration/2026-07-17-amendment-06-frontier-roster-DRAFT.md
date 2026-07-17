@@ -22,31 +22,34 @@ calendar quarters (the wrong default) — i.e. H1 convergent delusion appears to
   R1/R2 nulls + directions, decision rules (§9), executable gold, the reversed/combinatorial benchmark
   construction (Amdt 01/03), Task.regime (Amdt 02). This amendment does NOT touch any of those.
 
-## 2. ⭐ Proposed provenance-separated roster (Hard Law 6) — OWNER TO CONFIRM/ADJUST
+## 2. ⭐ Provenance-separated roster (Hard Law 6) — OWNER CHOSE OPTION (a) 2026-07-17
 Available families on the proxy: OpenAI (O), Anthropic/Claude (A), Google/Gemini (G), Microsoft/mai-code (M).
-| Role | Proposed model(s) | Family |
+| Role | Model(s) | Family |
 |------|-------------------|--------|
 | tested_agents.heterogeneous (⭐ cross-family MAD — the row-35 headline) | gpt-5.4, claude-sonnet-4.6, gemini-3.1-pro-preview | O, A, G |
-| tested_agents.homogeneous (ρ→1 fake-redundancy baseline) | gpt-5.4 (sampled repeatedly) | O |
+| tested_agents.homogeneous (ρ→1 fake-redundancy baseline; ⭐ needs logprobs → OpenAI) | **gpt-5.4** (logprobs+temperature capable; sampled repeatedly) | O |
 | tested_agents.reasoning (H2 strong-reasoner condition) | gpt-5.6-sol, claude-opus-4.8, gemini-3.1-pro-preview | O, A, G |
-| tested_agents.weak (H2 weak-model contrast — needed for reasoner-vs-weak) | gpt-4o-mini (or gemini-3.5-flash / claude-haiku-4.5) | O (or G/A) |
+| tested_agents.weak (H2 weak-model contrast — reasoner-vs-weak) | gpt-4o-mini (logprobs-capable) / gemini-3.5-flash / claude-haiku-4.5 | O / G / A |
 | constructor (R2 cross-family construction control) | mai-code-1-flash-picker | M |
-| judge (fallback ONLY — executable gold ⇒ ~never invoked) | mai-code-1-flash-picker | M |
-| code_reviewer (CODE-audit plane, orthogonal to the experiment; implementer=Claude) | gpt-5.6-sol | O |
+| judge (fallback ONLY — executable gold ⇒ ~never invoked; VESTIGIAL) | mai-code-1-flash-picker | M |
+| code_reviewer (CODE-audit plane, orthogonal; implementer=Claude) | gpt-5.6-sol | O |
 
-## 3. ⭐ Family-count tension (owner decision needed)
-Hard Law 6 wants constructor ≠ tested ≠ judge ≠ code_reviewer as DISTINCT families. The frontier roster has
-3 major families (O/A/G) + mai-code (M). Putting all 3 majors in the TESTED pool (best for the cross-family
-headline) leaves only M for constructor + judge, so constructor and judge would share family M (and
-code_reviewer=O overlaps tested-O). Options — please pick:
-- **(a) [recommended]** Tested pool = O/A/G (frontier cross-family, strongest headline); constructor = M;
-  judge = M but explicitly VESTIGIAL (executable gold is always available, judge never invoked → the
-  constructor/judge family overlap is moot in practice); code_reviewer treated as a SEPARATE plane
-  (code-audit, orthogonal to the experiment per the handoff), = O (non-Claude implementer). Document all this.
-- **(b)** Shrink the tested heterogeneous pool to 2 families (e.g. O + A) to free G for constructor and M for
-  judge — cleaner Hard-Law-6 separation but a weaker cross-family headline (2 vs 3 families).
-- **(c)** Keep the OLD GitHub-Models `cohere` as the R2 constructor (different endpoint) so all 3 proxy
-  families can be tested — mixes endpoints for the R2 control only.
+## 2b. ⭐ logprobs availability (from live proxy probing 2026-07-17) — affects the silent-failure signal
+Only **OpenAI** families return logprobs on the proxy: gpt-4o-mini ✓, gpt-5.4 ✓; but gpt-5.6-sol ✗,
+claude-* ✗, gemini-* ✗, mai-code ✗. The prereg §5 silent-failure **logit-confidence (`logit_conf`)**
+signature is therefore only directly measurable on the OpenAI logprobs-capable models; Claude/Gemini/
+reasoners degrade to **verbalized confidence** (the client already does this for reasoning models). ⇒ the
+homogeneous ρ-baseline is set to **gpt-5.4** (OpenAI, logprobs+temperature) so the logit-conf silent-failure
+signature has a clean home; the cross-family + reasoning conditions use verbalized confidence. Request
+shapes handled by the merged provider (proxy always uses max_completion_tokens, requests logprobs
+harmlessly, omits temperature for gpt-5.6 / mai-code). This is a REPORTING/coverage note, not a metric change.
+
+## 3. Family-count tension — RESOLVED: owner selected option (a) (2026-07-17)
+Tested pool = all 3 frontier families O/A/G (strongest cross-family headline); constructor = mai-code (M);
+judge = mai-code (M) but explicitly VESTIGIAL (executable gold is always available ⇒ judge never invoked,
+so the constructor/judge family overlap is moot in practice); code_reviewer = OpenAI (O) treated as a
+SEPARATE code-audit plane (orthogonal to the experiment, per the handoff). Documented; provenance separation
+holds on the experiment plane (constructor M ≠ tested O/A/G ≠ judge-when-used).
 
 ## 4. Reasoning vs weak in the frontier roster (H2 operationalization)
 On the proxy, all frontier models "reason"; the H2 contrast is REASONER (frontier top: gpt-5.6-sol /
