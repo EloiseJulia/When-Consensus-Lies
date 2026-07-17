@@ -295,20 +295,26 @@ def problem_typical_value():
 
 
 def problem_avg_price():
-    """k=1 family, axis price_weighting: quantity-weighted average price.
+    """k=1 family, axis price_weighting: average price PAID PER UNIT (quantity-weighted).
 
-    H2_derivable (HARDER trap): the prompt embeds a purchase table whose rows carry
-    a QUANTITY column. The quantities are PRESENT in the data, so a reasoning model
-    can DERIVE that "the average price" over purchases is the quantity-WEIGHTED
-    average (total spent / total units), not the simple mean of the unit_price
-    column. The natural default (average the visible unit_price column, ignoring the
-    quantities) is the WRONG foil.
+    H2_derivable (HARDER trap), FAIR (unique-derivability fix 2026-07-17): the prompt
+    embeds a purchase table whose rows carry a QUANTITY column, AND the retained
+    question asks for "the average price PAID PER UNIT across ALL units purchased".
+    That phrasing UNIQUELY denotes total amount spent / total number of units — the
+    quantity-weighted value — because the average paid per unit MUST divide all money
+    by all units. The naive default (unweighted mean of the per-lot unit_price column)
+    is then genuinely WRONG: it averages lot prices, giving a 1-unit lot the same weight
+    as an 18-unit lot, so it is NOT the price paid per unit.
 
-    WHY H2 (not H1-external): the disambiguator (the quantity weights) is inside the
-    prompt's data, recoverable WITHOUT any external convention — a strong reasoner
-    weights by quantity; a weak model averages the column it sees.
-    WHY a weak model defaults to the foil: "average price" reads as "mean of the
-    price column"; weighting by quantity is an extra derivation step it skips.
+    WHY it is now FAIR (prereg §2): the disambiguator is TWO-fold and BOTH live in the
+    RETAINED prompt — the quantities in the data AND the "per unit across all units"
+    wording. A careful reader (not just the hidden latent_spec) can UNIQUELY recover I0;
+    the simple column mean is demonstrably wrong, not a defensible alternate reading.
+    WHY H2 (not H1-external): no external convention is needed — the unique answer is
+    derivable purely from the prompt + data.
+    WHY a weak model defaults to the foil: "average price" pattern-matches to "mean of
+    the price column"; converting "per unit across all units" into total/units is the
+    derivation step a weak model skips.
     PURE STDLIB: sum/`/`/f-string only — runs under the DataChecker `python -S` sandbox
     with no third-party library.
 
@@ -320,18 +326,22 @@ def problem_avg_price():
         regime="H2_derivable",
         prompt_core=(
             "Write a function `average_price(items)` that returns the average price "
-            "of the following purchase records as a string rounded to 2 decimal "
-            "places. Each record is a [quantity, unit_price] pair: "
-            "[[1, 10.0], [1, 20.0], [18, 100.0]]."
+            "PAID PER UNIT across ALL units purchased, as a string rounded to 2 decimal "
+            "places. Each record is a [quantity, unit_price] pair, where quantity is how "
+            "many units were bought at that unit_price: [[1, 10.0], [1, 20.0], "
+            "[18, 100.0]]. (The average paid per unit is the total amount spent divided "
+            "by the total number of units bought.)"
         ),
         requirement_classes=[
             RequirementClass(
                 id="price_weighting",
-                description="How to weight unit prices when averaging (by quantity vs unweighted)",
+                description="Explicit formula for the average price paid per unit",
                 clauses=[
-                    "The 'average price' is the QUANTITY-WEIGHTED average: total spent "
-                    "(sum of quantity*unit_price) divided by the total quantity, NOT the "
-                    "unweighted mean of the unit_price column. Answer to 2 decimals."
+                    "Compute it as the total amount spent (sum of quantity*unit_price "
+                    "over all records) divided by the total number of units (sum of "
+                    "quantity); do NOT report the unweighted mean of the unit_price "
+                    "column, which ignores how many units each lot contained. Answer to "
+                    "2 decimals."
                 ],
             ),
         ],
@@ -339,9 +349,9 @@ def problem_avg_price():
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NON-default: QUANTITY-WEIGHTED average price (target). The quantity "
-                    "weights are present in the data. [[1,10],[1,20],[18,100]] -> "
-                    "1830/20 = '91.50'."
+                    "NON-default: average price PAID PER UNIT = total spent / total units "
+                    "(target, uniquely derivable). [[1,10],[1,20],[18,100]] -> 1830/20 = "
+                    "'91.50'."
                 ),
                 is_target=True,
                 gold_check="avgprice_weighted",
@@ -350,8 +360,8 @@ def problem_avg_price():
                 id="I1",
                 description=(
                     "MODEL DEFAULT [combined-default]: unweighted simple mean of the "
-                    "unit_price column. [[1,10],[1,20],[18,100]] -> (10+20+100)/3 = "
-                    "'43.33'."
+                    "unit_price column (genuinely WRONG — averages lot prices, ignoring "
+                    "unit counts). [[1,10],[1,20],[18,100]] -> (10+20+100)/3 = '43.33'."
                 ),
                 is_target=False,
                 gold_check="avgprice_simple",
@@ -359,8 +369,8 @@ def problem_avg_price():
             ),
         ],
         key_questions=[
-            "Is 'average price' the quantity-weighted average or the unweighted mean "
-            "of the unit_price column?",
+            "How is the average price paid per unit computed — total spent / total units "
+            "(weighted), or the unweighted mean of the unit_price column?",
         ],
     )
 
