@@ -29,6 +29,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 from common.llm import (
     GITHUB_MODELS_BASE_URL,
@@ -57,13 +58,26 @@ class LedgerWriteError(Exception):
 def _normalize_base_url(base_url: Optional[str]) -> str:
     """Normalize a base URL for use in a checkpoint namespace.
 
-    Strips surrounding whitespace, a trailing slash, and lowercases the whole
-    string (scheme + host are case-insensitive; our endpoint paths are ASCII and
-    case-insensitive in practice). This makes ``http://127.0.0.1:8313/v1`` and
-    ``http://127.0.0.1:8313/v1/`` the SAME namespace while keeping different
-    hosts/ports/paths DISTINCT.
+    Lowercases ONLY the case-insensitive components — the scheme and the host/port
+    (netloc) — and strips a single trailing slash, so
+    ``http://127.0.0.1:8313/v1`` and ``http://127.0.0.1:8313/v1/`` are the SAME
+    namespace. The PATH case is PRESERVED (URL paths are case-sensitive per
+    RFC 3986), so ``/API`` and ``/api`` remain DISTINCT endpoints. Different
+    hosts/ports/paths always stay distinct.
     """
-    return (base_url or "").strip().rstrip("/").lower()
+    raw = (base_url or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if not parts.scheme and not parts.netloc:
+        # Not a standard scheme://host URL (e.g. a bare path) — preserve as-is
+        # (only surrounding whitespace + trailing slash already stripped).
+        return raw
+    # scheme + netloc (host:port) are case-insensitive → lowercase; path/query/
+    # fragment are case-SENSITIVE → preserve exactly.
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
+    )
 
 
 def endpoint_identity(provider: Optional[str], base_url: Optional[str]) -> str:
@@ -101,17 +115,20 @@ def run_identity(run: AgentRun, endpoint: str = "") -> str:
     ``endpoint`` (default "") is an OPTIONAL runner-level namespace prefix
     (provider + normalized base_url via :func:`endpoint_identity`) so that the
     SAME AgentRun identity executed against different online endpoints is stored
-    as distinct checkpoint records. It defaults to "" so the schema identity and
-    all existing callers are unchanged.
+    as distinct checkpoint records. When it is "" (the canonical default) the key
+    is BYTE-IDENTICAL to the pre-change 5-field value — the endpoint dimension is
+    prepended ONLY when non-empty.
     """
-    return "\x00".join([
-        endpoint,
+    parts = [
         run.task_id,
         run.config,
         run.model_role,
         run.model_id,
         str(run.seed),
-    ])
+    ]
+    if endpoint:
+        parts.insert(0, endpoint)
+    return "\x00".join(parts)
 
 
 def job_key(
@@ -133,21 +150,24 @@ def job_key(
     PROVIDER fix: an OPTIONAL leading ``endpoint`` namespace (provider +
     normalized base_url) makes a job on ``copilot_proxy`` distinct from the same
     job on ``github_models`` (or on a different proxy port), so resume never skips
-    or dedups a genuinely different endpoint's execution. It defaults to "" so the
-    key is byte-identical to the pre-change key for existing callers and mirrors
-    :func:`run_identity` exactly (both prepend the same ``endpoint`` dimension).
+    or dedups a genuinely different endpoint's execution. When ``endpoint`` is ""
+    (the canonical default) the key is BYTE-IDENTICAL to the pre-change 5-field
+    value — the endpoint dimension is prepended ONLY when non-empty — and it
+    mirrors :func:`run_identity` exactly.
 
     Null-byte separators prevent collisions between field values that contain the
     separator character.
     """
-    return "\x00".join([
-        endpoint,
+    parts = [
         task_id,
         config,
         model_role,
         model_id,
         str(seed),
-    ])
+    ]
+    if endpoint:
+        parts.insert(0, endpoint)
+    return "\x00".join(parts)
 
 
 # ── Checkpoint store ─────────────────────────────────────────────────────────
@@ -284,7 +304,6 @@ class CheckpointStore:
             return  # already stored — idempotent, no duplicate write
         record: Dict[str, Any] = {
             "type": "run",
-            "endpoint": self._endpoint,
             "task_id": run.task_id,
             "config": run.config,
             "model_role": run.model_role,
@@ -295,6 +314,10 @@ class CheckpointStore:
             "logit_conf": run.logit_conf,
             "seed": run.seed,
         }
+        # Persist the endpoint namespace ONLY when non-empty so default-provider
+        # records are byte-for-byte identical to the pre-change format.
+        if self._endpoint:
+            record["endpoint"] = self._endpoint
         self._write(record)
         self._run_ids.add(rid)
         self._runs.append(record)
@@ -311,15 +334,19 @@ class CheckpointStore:
         k = job_key(task_id, config, model_role, model_id, seed, endpoint=self._endpoint)
         if k in self._done_jobs:
             return  # already marked — idempotent
-        self._write({
+        record: Dict[str, Any] = {
             "type": "job_done",
-            "endpoint": self._endpoint,
             "task_id": task_id,
             "config": config,
             "model_role": model_role,
             "model_id": model_id,
             "seed": seed,
-        })
+        }
+        # Persist the endpoint namespace ONLY when non-empty so default-provider
+        # job_done markers are byte-for-byte identical to the pre-change format.
+        if self._endpoint:
+            record["endpoint"] = self._endpoint
+        self._write(record)
         self._done_jobs.add(k)
 
     def add_cost(self, delta_usd: float) -> None:

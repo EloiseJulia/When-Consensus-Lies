@@ -1912,6 +1912,47 @@ class TestProviderCheckpointNamespace:
                      endpoint=endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1"))
         assert base != px, "same 5-dim job under a different endpoint must differ"
 
+    def test_default_key_is_byte_identical_to_prefix_5field(self):
+        """BLOCKER byte-compat: default (endpoint="") key MUST equal the exact
+        pre-fix 5-field null-separated string — no leading endpoint dimension."""
+        expected = "t\x00single\x00tested_agents\x00m\x001"
+        assert job_key("t", "single", "tested_agents", "m", 1) == expected
+        assert job_key("t", "single", "tested_agents", "m", 1, endpoint="") == expected
+        run = make_run("t", "single", "tested_agents", "m", seed=1)
+        assert run_identity(run) == expected
+        assert run_identity(run, endpoint="") == expected
+
+    def test_default_records_have_no_endpoint_field(self, tmp_path):
+        """Default-provider (endpoint="") checkpoint records must NOT carry an
+        'endpoint' key — byte-for-byte identical to the pre-change format."""
+        cp = tmp_path / "cp.jsonl"
+        store = CheckpointStore(cp)  # endpoint="" (default)
+        store.mark_job_done("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+        run = make_run("t1", "single", "tested_agents", "gpt-4o-mini", seed=42)
+        store.add_run(run)
+        for line in cp.read_text(encoding="utf-8").splitlines():
+            rec = json.loads(line)
+            assert "endpoint" not in rec, f"default record must omit endpoint: {rec}"
+
+    def test_nondefault_records_persist_endpoint_field(self, tmp_path):
+        """A non-default endpoint MUST be persisted so it survives resume."""
+        cp = tmp_path / "cp.jsonl"
+        ep = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1")
+        store = CheckpointStore(cp, endpoint=ep)
+        store.mark_job_done("t1", "single", "tested_agents", "gpt-4o-mini", 42)
+        recs = [json.loads(l) for l in cp.read_text(encoding="utf-8").splitlines()]
+        assert any(r.get("endpoint") == ep for r in recs)
+
+    def test_endpoint_identity_preserves_path_case(self):
+        """MAJOR: path case is significant — /API and /api must NOT collide."""
+        upper = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/API")
+        lower = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/api")
+        assert upper != lower, "case-sensitive URL paths must yield distinct endpoints"
+        # But scheme + host ARE case-insensitive → same namespace.
+        a = endpoint_identity("copilot_proxy", "HTTP://127.0.0.1:8313/v1")
+        b = endpoint_identity("copilot_proxy", "http://127.0.0.1:8313/v1")
+        assert a == b, "scheme/host case must be normalized (case-insensitive)"
+
     def test_store_namespaces_markers_by_endpoint(self, tmp_path):
         cp = tmp_path / "cp.jsonl"
         ep_gh = endpoint_identity("github_models", "https://models.github.ai/inference")
