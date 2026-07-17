@@ -121,6 +121,54 @@ def proxy_omits_temperature(slug: str, patterns=_PROXY_NO_TEMPERATURE_DEFAULT) -
     return any(p in slug for p in patterns)
 
 
+def resolve_provider_config(
+    config: Dict[str, Any],
+    provider: Optional[str] = None,
+    base_url: Optional[str] = None,
+    require_auth: Optional[bool] = None,
+    no_temperature_models: Optional[tuple] = None,
+) -> Dict[str, Any]:
+    """Resolve provider settings from explicit params, config, then built-in defaults.
+
+    Single source of truth for provider resolution, shared by ``LLMClient.__init__``
+    and the CLI live-guard (so the runner can decide whether a token is required
+    BEFORE constructing a client). Resolution order per field: explicit param >
+    config ``providers[provider]`` > config ``providers.default`` (for the provider
+    name only) > built-in provider default.
+
+    Returns a dict with keys ``provider``, ``base_url`` (trailing slash stripped),
+    ``require_auth`` (bool), ``no_temperature_models`` (tuple).
+    """
+    providers_cfg = config.get("providers", {}) if isinstance(config, dict) else {}
+    if not isinstance(providers_cfg, dict):
+        providers_cfg = {}
+    if provider is None:
+        provider = providers_cfg.get("default", PROVIDER_GITHUB_MODELS)
+    if provider not in _PROVIDER_DEFAULTS:
+        raise ValueError(
+            f"Unknown provider {provider!r}; expected one of "
+            f"{sorted(_PROVIDER_DEFAULTS)}"
+        )
+    defaults = _PROVIDER_DEFAULTS[provider]
+    conf = providers_cfg.get(provider, {})
+    if not isinstance(conf, dict):
+        conf = {}
+    if base_url is None:
+        base_url = conf.get("base_url", defaults["base_url"])
+    if require_auth is None:
+        require_auth = conf.get("require_auth", defaults["require_auth"])
+    if no_temperature_models is None:
+        no_temperature_models = tuple(
+            conf.get("no_temperature_models", _PROXY_NO_TEMPERATURE_DEFAULT)
+        )
+    return {
+        "provider": provider,
+        "base_url": base_url.rstrip("/"),
+        "require_auth": bool(require_auth),
+        "no_temperature_models": tuple(no_temperature_models),
+    }
+
+
 @dataclass
 class Completion:
     """LLM completion result."""
@@ -183,35 +231,18 @@ class LLMClient:
         """
         self.config = config
 
-        # ── Resolve provider (param > config > default) ───────────────────────
-        providers_cfg = (config or {}).get("providers", {}) if isinstance(config, dict) else {}
-        if provider is None:
-            provider = providers_cfg.get("default", PROVIDER_GITHUB_MODELS)
-        if provider not in _PROVIDER_DEFAULTS:
-            raise ValueError(
-                f"Unknown provider {provider!r}; expected one of "
-                f"{sorted(_PROVIDER_DEFAULTS)}"
-            )
-        self.provider = provider
-        provider_defaults = _PROVIDER_DEFAULTS[provider]
-        provider_conf = providers_cfg.get(provider, {}) if isinstance(providers_cfg, dict) else {}
-
-        # ── Resolve base_url (explicit param > config > provider default) ─────
-        if base_url is None:
-            base_url = provider_conf.get("base_url", provider_defaults["base_url"])
-        self.base_url = base_url.rstrip("/")
-
-        # ── Resolve auth requirement (explicit param > config > provider default)
-        if require_auth is None:
-            require_auth = provider_conf.get("require_auth", provider_defaults["require_auth"])
-        self.require_auth = bool(require_auth)
-
-        # ── Resolve the proxy no-temperature roster (param > config > default) ─
-        if no_temperature_models is None:
-            no_temperature_models = tuple(
-                provider_conf.get("no_temperature_models", _PROXY_NO_TEMPERATURE_DEFAULT)
-            )
-        self.no_temperature_models = tuple(no_temperature_models)
+        # ── Resolve provider settings (param > config > default) ──────────────
+        resolved = resolve_provider_config(
+            config if isinstance(config, dict) else {},
+            provider=provider,
+            base_url=base_url,
+            require_auth=require_auth,
+            no_temperature_models=no_temperature_models,
+        )
+        self.provider = resolved["provider"]
+        self.base_url = resolved["base_url"]
+        self.require_auth = resolved["require_auth"]
+        self.no_temperature_models = resolved["no_temperature_models"]
 
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
