@@ -99,6 +99,38 @@ PILOT_CONFIGS = ["single", "sc", "heterogeneous-MAD"]  # single + SC + pool conf
 PILOT_MAX_ITEMS = 10     # hard item cap — never full-scale from --pilot
 PILOT_BUDGET_USD = 1.00  # defensive cap (copilot_proxy is free)
 
+# BLOCKER C fix: per-config kwargs forwarded to run_task.
+# homogeneous-MAD: §10 requires N≥5; run_task default is 3 (too low).
+# sc: k=5 (matches §10 registered default; explicit to avoid ambiguity).
+# heterogeneous-MAD: n_agents=4 (default); explicit for auditability.
+REGISTERED_CONFIG_KWARGS: Dict[str, Dict[str, Any]] = {
+    "sc":               {"k": 5},
+    "homogeneous-MAD":  {"n_agents": 5},
+    "heterogeneous-MAD": {"n_agents": 4},
+}
+# Pilot uses the same per-config params (pilot is a representative subset).
+PILOT_CONFIG_KWARGS: Dict[str, Dict[str, Any]] = REGISTERED_CONFIG_KWARGS
+
+# BLOCKER A (defense-in-depth): generate replicate seeds with a stride ≥ max
+# ensemble size (k=5 for SC, n_agents=5 for MAD) so per-agent seed ranges
+# [base..base+k-1] NEVER OVERLAP across replicates.  With stride 1000 a full
+# k=5 range occupies seeds [base..base+4] leaving [base+5..base+999] unused
+# before the next replicate — 200× safety margin.
+# The identity fix (run_identity now includes replicate_seed) is the primary
+# defense; this stride is defense-in-depth hygiene.
+_SEED_STRIDE = 1000
+
+# Gate C cardinality: minimum expected AgentRuns per completed job.
+# A job_done marker with fewer run records indicates a partial/stale checkpoint.
+_GATE_C_MIN_AGENTS: Dict[str, int] = {
+    "single": 1,
+    "sc": 5,             # k=5 (REGISTERED_CONFIG_KWARGS)
+    "homogeneous-MAD": 5,   # n_agents=5 (REGISTERED_CONFIG_KWARGS / §10)
+    "heterogeneous-MAD": 4,  # n_agents=4 (default)
+    "verifier": 1,
+    "interpretation-diverse": 1,  # varies by task; check ≥1 as minimum
+}
+
 PROVIDER = "copilot_proxy"
 FULL_CHECKPOINT = "registered_run_checkpoint.jsonl"
 PILOT_CHECKPOINT = "pilot_gate_checkpoint.jsonl"
@@ -176,6 +208,12 @@ def select_pilot_tasks(
     Both halves are drawn with balanced ambiguity_level (k) values so the gate
     exercises both regime classes and multiple k levels.
 
+    MAJOR F fix: the batch MUST include ≥2 H1_external items that share a k≥1
+    value so gate B can evaluate the shuffle null on underspecified items (§11
+    requires the gate on k≥1 items; a condition with only 1 item is INCONCLUSIVE
+    per MIN_ITEMS_FOR_NULL).  When the input H1_external pool has such a group,
+    we prioritise picking ≥2 items from it before filling the rest with balanced k.
+
     When one regime is sparse (fewer than half), the other regime backfills to
     maximise the batch size up to n_pilot.
 
@@ -184,25 +222,72 @@ def select_pilot_tasks(
         n_pilot: Max total tasks (hard cap; default PILOT_MAX_ITEMS).
 
     Returns:
-        List of at most n_pilot tasks, balanced across regimes and k values.
+        List of at most n_pilot tasks, balanced across regimes and k values,
+        with ≥2 H1_external items at the same k≥1 (when the pool permits).
     """
     h1 = [t for t in all_tasks if t.regime == "H1_external"]
     h2 = [t for t in all_tasks if t.regime == "H2_derivable"]
 
-    # Request half from each regime.
     half = min(n_pilot // 2, len(h1))
-    selected_h1 = _select_balanced_k(h1, half)
+
+    # MAJOR F fix: guarantee ≥2 H1 items sharing a k≥1 value so gate B has
+    # at least one evaluable underspecified condition.
+    selected_h1 = _select_h1_with_k1_guarantee(h1, half)
 
     rest = min(n_pilot - len(selected_h1), len(h2))
-    selected_h2 = _select_balanced_k(h2, rest)
+    selected_h2 = _select_h2_with_k1_guarantee(h2, rest)
 
     # Backfill from H1 if H2 is sparse.
     shortage = n_pilot - len(selected_h1) - len(selected_h2)
-    if shortage > 0 and len(h1) > len(selected_h1):
-        extra = min(shortage, len(h1) - len(selected_h1))
-        selected_h1 = _select_balanced_k(h1, len(selected_h1) + extra)
+    if shortage > 0:
+        already_ids = {t.id for t in selected_h1}
+        remaining = [t for t in h1 if t.id not in already_ids]
+        extra = min(shortage, len(remaining))
+        if extra > 0:
+            selected_h1 = selected_h1 + _select_balanced_k(remaining, extra)
 
     return selected_h1 + selected_h2
+
+
+def _select_h1_with_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
+    """Select up to n H1_external tasks, prioritising ≥2 items at some k≥1.
+
+    If the pool has a k≥1 group with ≥2 items, seeds the selection with 2 items
+    from that group (picking the group with the most items), then fills the rest
+    with balanced-k selection over the remainder.  Falls back to plain balanced-k
+    if no k≥1 group has ≥2 items or n < 2.
+    """
+    if len(tasks) <= n:
+        return list(tasks)
+    if n < 2:
+        return _select_balanced_k(tasks, n)
+
+    # Find k≥1 groups with ≥2 items.
+    by_k: Dict[int, List[Any]] = {}
+    for t in tasks:
+        k = t.ambiguity_level
+        by_k.setdefault(k, []).append(t)
+    k1_groups = [(k, ts) for k, ts in by_k.items() if k >= 1 and len(ts) >= 2]
+
+    if k1_groups:
+        # Pick the k≥1 group with the most items (maximises future coverage).
+        best_k, best_ts = max(k1_groups, key=lambda x: len(x[1]))
+        guaranteed = best_ts[:2]
+        already_ids = {t.id for t in guaranteed}
+        remaining = [t for t in tasks if t.id not in already_ids]
+        fill = _select_balanced_k(remaining, n - 2)
+        return guaranteed + fill
+    else:
+        return _select_balanced_k(tasks, n)
+
+
+def _select_h2_with_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
+    """Select up to n H2_derivable tasks, prioritising ≥2 items at some k≥1.
+
+    Same guarantee logic as :func:`_select_h1_with_k1_guarantee` so gate B
+    can also evaluate H2_derivable underspecified conditions.
+    """
+    return _select_h1_with_k1_guarantee(tasks, n)  # same algorithm
 
 
 # ── Runner and analysis helpers ──────────────────────────────────────────────
@@ -243,6 +328,7 @@ def build_runner(
     rpm: int,
     offline: bool,
     cache_dir: str,
+    config_kwargs: Optional[Dict[str, Dict[str, Any]]] = None,
 ):
     """Build a configured Runner instance."""
     from harness.runner import Runner, RunnerConfig
@@ -262,6 +348,7 @@ def build_runner(
         checkpoint_path=Path(checkpoint_path),
         rpm=rpm,
         max_budget_usd=budget_usd,
+        config_kwargs=config_kwargs,
     )
     return Runner(runner_cfg, client), client
 
@@ -349,6 +436,7 @@ def run_pilot_gate(
             rpm=rpm,
             offline=(offline or dry_run),  # dry-run also uses no network
             cache_dir=cache_dir,
+            config_kwargs=PILOT_CONFIG_KWARGS,  # BLOCKER C: sc k=5, homogeneous-MAD n_agents=5
         )
 
     # Execute the run (or dry-run report).
@@ -360,7 +448,7 @@ def run_pilot_gate(
     tidy_df = load_runs_tidy(checkpoint_path, tasks,
                              model_class_map=FRONTIER_MODEL_CLASS_MAP)
 
-    # ── Gate (c): pipeline integration (MAJOR 5 fix) ──────────────────────────
+    # ── Gate (c): pipeline integration (MAJOR 5 fix + MAJOR E cardinality) ───
     # (i) Run completed successfully (no failures, not a dry-run report).
     run_status = run_result.get("status")
     gate_c_status = (
@@ -377,7 +465,22 @@ def run_pilot_gate(
     _golden_target = "I0"
     _golden_expected = 0.8
     gate_c_golden = abs(_cd_primary_fn(_golden_labels, _golden_target) - _golden_expected) < 1e-9
-    gate_c = gate_c_status and gate_c_nonempty and gate_c_golden
+    # (iv) MAJOR E — cardinality: each completed SC job must have ≥ k=5 run records;
+    # each single job ≥ 1.  A stale checkpoint with only 1 surviving run record
+    # for an SC job has len(group) < 5 → gate_c_cardinality = False.
+    gate_c_cardinality = True
+    if gate_c_status and gate_c_nonempty:
+        item_col_v = COLS["item"]
+        method_col_v = COLS["method"]
+        seed_col_v = COLS["seed"]
+        for (_, meth, _), grp in tidy_df.groupby(
+            [item_col_v, method_col_v, seed_col_v], dropna=False
+        ):
+            min_expected = _GATE_C_MIN_AGENTS.get(meth, 1)
+            if len(grp) < min_expected:
+                gate_c_cardinality = False
+                break
+    gate_c = gate_c_status and gate_c_nonempty and gate_c_golden and gate_c_cardinality
 
     # ── Per-condition I_perp rates (diagnostic) ───────────────────────────────
     regime_col = COLS["regime"]
@@ -427,10 +530,18 @@ def run_pilot_gate(
             n_cells = len(cond_cells)
             cond_real_cd = float(cond_cells["cd_primary"].mean())
 
-            if n_cells < MIN_ITEMS_FOR_NULL:
+            # BLOCKER D fix: require ≥ MIN_ITEMS_FOR_NULL DISTINCT ITEMS (tasks),
+            # not just ≥ MIN_ITEMS_FOR_NULL cells.  Two replicate seeds from ONE
+            # item produce n_cells=2 but only 1 distinct item — the cross-item
+            # shuffle degenerates to a within-item permutation (no-op).  Only a
+            # genuine cross-item shuffle (≥2 distinct tasks) is meaningful.
+            n_distinct_items = cond_cells[item_col].nunique()
+            if n_distinct_items < MIN_ITEMS_FOR_NULL:
                 gate_b_details.append({
                     "method": method, "model_class": mc, "ambiguity_k": ambi_k,
-                    "n_cells": n_cells, "status": "inconclusive",
+                    "n_cells": n_cells,
+                    "n_distinct_items": n_distinct_items,
+                    "status": "inconclusive",
                     "real_cd": cond_real_cd, "null_cd": None,
                 })
                 continue
@@ -462,6 +573,7 @@ def run_pilot_gate(
             gate_b_details.append({
                 "method": method, "model_class": mc, "ambiguity_k": ambi_k,
                 "n_cells": n_cells,
+                "n_distinct_items": n_distinct_items,
                 "status": "pass" if cond_pass else "fail",
                 "real_cd": cond_real_cd,
                 "null_cd": cond_null_cd,
@@ -635,9 +747,13 @@ def main(argv=None) -> None:
     seeds = args.seeds
     if seeds is None:
         # §10 requires ≥3 distinct seeds per (item × config) for the full run.
-        # Derive three deterministic seeds from the global config seed.
+        # BLOCKER A (defense-in-depth): space seeds by _SEED_STRIDE (1000) so
+        # per-agent seed ranges [base..base+k-1] NEVER OVERLAP across replicates
+        # (k=5 for SC/MAD, so stride 1000 gives 200× safety margin).
+        # The identity fix (run_identity includes replicate_seed) is the primary
+        # defense; the stride is hygiene for correctness at the runner level too.
         global_seed = cfg.get("seeds", {}).get("global", 20260713)
-        seeds = [global_seed, global_seed + 1, global_seed + 2]
+        seeds = [global_seed, global_seed + _SEED_STRIDE, global_seed + 2 * _SEED_STRIDE]
     # Enforce ≥3 seeds for full-scale execution (MAJOR 6 fix — §10 requirement).
     if len(set(seeds)) < 3:
         print(
@@ -670,6 +786,7 @@ def main(argv=None) -> None:
         rpm=args.rpm,
         offline=False,
         cache_dir=CACHE_DIR_FULL,
+        config_kwargs=REGISTERED_CONFIG_KWARGS,  # BLOCKER C: homogeneous-MAD n_agents=5, sc k=5
     )
 
     result = runner.run(dry_run=args.dry_run)

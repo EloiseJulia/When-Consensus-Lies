@@ -429,3 +429,108 @@ def test_sc_ensemble_without_replicate_seed_uses_per_agent_seed(tmp_path):
     assert list(sorted(tidy[_SEED])) == [10, 11, 12], (
         "Legacy fallback: seed column should carry per-agent seeds"
     )
+
+
+# ── 7. BLOCKER B (false positive): model column emitted; multi-model pools ────
+#    The auditor flagged multi-model classes (3 reasoning models, method=single,
+#    same item/seed) as potentially splitting into 3 cells.  This is a FALSE
+#    POSITIVE — compute_cell_cd groups by (task, method, model_class, seed), NOT
+#    by model_id, so 3 agents with model_class="reasoning" and same item/seed form
+#    ONE cell.  decision_rules._item_level_cells assigns a "pool:" model id.
+#
+#    Tests here confirm:
+#    (a) load_runs_tidy emits a "model" column (required by _item_level_cells).
+#    (b) 3 reasoning agents, same item/method/seed → ONE cell in compute_cell_cd.
+#    (c) _item_level_cells assigns a "pool:" model id for that multi-model cell.
+#    NO behavior change: the frozen §8 pool logic is correct as-is.
+
+def test_load_runs_tidy_emits_model_column(tmp_path):
+    """load_runs_tidy always emits a 'model' column (required by _item_level_cells)."""
+    task = _make_task("t1", regime="H1_external", k=1)
+    cp = tmp_path / "cp.jsonl"
+    _write_jsonl(cp, [_make_run_record("t1", "single", "gpt-5.4", "I0")])
+    df = load_runs_tidy(cp, [task])
+    assert "model" in df.columns, "load_runs_tidy must emit a 'model' column"
+    assert df.iloc[0]["model"] == "gpt-5.4"
+
+
+def test_multi_model_reasoning_class_forms_one_pooled_cell(tmp_path):
+    """BLOCKER B golden test: 3 reasoning models, method=single, same item/seed →
+    ONE cell in compute_cell_cd (NOT 3 separate cells).
+
+    This is the frozen §8 design: compute_cell_cd groups by
+    (task, method, model_class, seed) — NOT by model_id — so a heterogeneous
+    set of agents sharing (task, method, model_class, seed) is ONE ensemble cell.
+    This is CORRECT and INTENDED; the auditor's concern was a false positive.
+    """
+    from analysis.contrasts import compute_cell_cd
+
+    task = _make_task("t1", regime="H1_external", k=1, target_id="I0")
+    cp = tmp_path / "reasoning_pool.jsonl"
+
+    # 3 reasoning models, all with the same seed=42 (single config, replicate seed)
+    reasoning_models = ["gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro-preview"]
+    records = [
+        _make_run_record("t1", "single", model, "I1", seed=42)
+        for model in reasoning_models
+    ]
+    _write_jsonl(cp, records)
+
+    tidy = load_runs_tidy(cp, [task])
+
+    # All 3 rows must have model_class="reasoning" (from FRONTIER_MODEL_CLASS_MAP)
+    assert all(tidy[_MODEL_CLASS] == "reasoning"), (
+        f"Expected all model_class='reasoning'; got {list(tidy[_MODEL_CLASS])}"
+    )
+    # The 'model' column must carry the individual model slugs
+    assert set(tidy["model"]) == set(reasoning_models), (
+        "model column must carry the individual slugs"
+    )
+
+    # compute_cell_cd groups by (task, method, model_class, seed) → ONE cell.
+    cells = compute_cell_cd(tidy)
+    assert len(cells) == 1, (
+        f"Expected 1 pooled cell for 3 reasoning agents with same item/method/seed; "
+        f"got {len(cells)}.  This is the FROZEN §8 pool design — do NOT split by model."
+    )
+    assert cells.iloc[0]["n_agents"] == 3, "pooled cell must contain all 3 agents"
+
+
+def test_item_level_cells_assigns_pool_id_for_multi_model_cell(tmp_path):
+    """BLOCKER B: decision_rules._item_level_cells assigns 'pool:' model id for
+    a multi-model class cell (not a single member's slug).
+
+    This confirms the frozen §8 random-intercept model will receive a stable,
+    order-independent pool id rather than an arbitrary single-member model slug.
+    """
+    from analysis.contrasts import compute_cell_cd
+    from analysis.decision_rules import _item_level_cells
+
+    task = _make_task("t1", regime="H1_external", k=1, target_id="I0")
+    cp = tmp_path / "pool_id.jsonl"
+
+    # 3 reasoning models with same item/method/seed
+    reasoning_models = ["gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro-preview"]
+    records = [
+        _make_run_record("t1", "single", model, "I1", seed=42)
+        for model in reasoning_models
+    ]
+    _write_jsonl(cp, records)
+
+    tidy = load_runs_tidy(cp, [task])
+
+    # _item_level_cells attaches a "model" column to the cell-level table.
+    cells_with_model = _item_level_cells(tidy)
+    assert "model" in cells_with_model.columns, (
+        "_item_level_cells must attach a 'model' column"
+    )
+    model_id_val = cells_with_model.iloc[0]["model"]
+    assert model_id_val.startswith("pool:"), (
+        f"Multi-model cell must get a 'pool:' model id; got {model_id_val!r}.  "
+        "This confirms the frozen §8 design aggregates correctly."
+    )
+    # The pool id is built from the SORTED set of model slugs.
+    for slug in reasoning_models:
+        assert slug in model_id_val, (
+            f"Pool id must include each member slug; {slug!r} missing in {model_id_val!r}"
+        )

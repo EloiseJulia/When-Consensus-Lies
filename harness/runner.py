@@ -105,7 +105,11 @@ def endpoint_identity(provider: Optional[str], base_url: Optional[str]) -> str:
     return "\x00".join([provider or "", _normalize_base_url(base_url)])
 
 
-def run_identity(run: AgentRun, endpoint: str = "") -> str:
+def run_identity(
+    run: AgentRun,
+    endpoint: str = "",
+    replicate_seed: Optional[int] = None,
+) -> str:
     """Canonical string key for AgentRun identity.
 
     Encodes task_id × config × model_role × model_id × seed, which is the
@@ -118,6 +122,15 @@ def run_identity(run: AgentRun, endpoint: str = "") -> str:
     as distinct checkpoint records. When it is "" (the canonical default) the key
     is BYTE-IDENTICAL to the pre-change 5-field value — the endpoint dimension is
     prepended ONLY when non-empty.
+
+    BLOCKER A fix: ``replicate_seed`` is the runner grid (job) seed shared by ALL
+    agents in one multi-agent job (SC/MAD).  When it differs from ``run.seed``
+    (the per-agent seed = base_seed + i), it is appended to the identity so that
+    two agents from DIFFERENT replicates that happen to share a per-agent seed
+    (overlapping ranges when seeds are consecutive) produce DISTINCT identity keys
+    and are both retained.  When ``replicate_seed`` equals ``run.seed`` or is None
+    (single-agent jobs; legacy checkpoints without the field) the identity is
+    byte-identical to the pre-change 5-field value — no checkpoint incompatibility.
     """
     parts = [
         run.task_id,
@@ -126,6 +139,11 @@ def run_identity(run: AgentRun, endpoint: str = "") -> str:
         run.model_id,
         str(run.seed),
     ]
+    # Include replicate_seed ONLY when it differs from per-agent seed.
+    # Single-agent records (replicate_seed == run.seed) and legacy records
+    # (replicate_seed is None) produce identities identical to before.
+    if replicate_seed is not None and replicate_seed != run.seed:
+        parts.append(f"R{replicate_seed}")
     if endpoint:
         parts.insert(0, endpoint)
     return "\x00".join(parts)
@@ -267,7 +285,18 @@ class CheckpointStore:
                         logit_conf=rec.get("logit_conf"),
                         seed=int(rec["seed"]),
                     )
-                    rid = run_identity(run, endpoint=rec.get("endpoint", ""))
+                    # BLOCKER A fix: include replicate_seed (when present and ≠
+                    # per-agent seed) in the identity so agents from DIFFERENT
+                    # replicates that share the same per-agent seed are NOT
+                    # deduplicated.  Legacy records without replicate_seed produce
+                    # the same 5-field identity as before — no incompatibility.
+                    rep_seed_raw = rec.get("replicate_seed")
+                    rep_seed: Optional[int] = int(rep_seed_raw) if rep_seed_raw is not None else None
+                    rid = run_identity(
+                        run,
+                        endpoint=rec.get("endpoint", ""),
+                        replicate_seed=rep_seed,
+                    )
                     if rid not in self._run_ids:
                         self._run_ids.add(rid)
                         self._runs.append(rec)
@@ -314,7 +343,10 @@ class CheckpointStore:
         produce byte-identical records to before — no checkpoint incompatibility
         for existing single-agent checkpoints.
         """
-        rid = run_identity(run, endpoint=self._endpoint)
+        rid = run_identity(run, endpoint=self._endpoint, replicate_seed=(
+            replicate_seed if (replicate_seed is not None and replicate_seed != run.seed)
+            else None
+        ))
         if rid in self._run_ids:
             return  # already stored — idempotent, no duplicate write
         record: Dict[str, Any] = {
@@ -633,6 +665,13 @@ class RunnerConfig:
     rpm: int = DEFAULT_RPM
     max_budget_usd: Optional[float] = None
     max_infra_retries: int = DEFAULT_INFRA_RETRIES
+    #: Per-config keyword arguments forwarded to ``run_task``.  For example
+    #: ``{"sc": {"k": 5}, "homogeneous-MAD": {"n_agents": 5}}``.  Missing
+    #: configs use the ``run_task`` defaults.  BLOCKER C fix: without this the
+    #: runner always calls ``run_task(task, cfg, client)`` with NO kwargs, so
+    #: homogeneous-MAD uses the run_task default of ``n_agents=3`` (§10 requires
+    #: N≥5).
+    config_kwargs: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
@@ -1089,7 +1128,10 @@ class Runner:
         last_exc: Optional[Exception] = None
         for attempt in range(self._cfg.max_infra_retries):
             try:
-                runs = self._run_task(task, cfg_name, client)
+                # BLOCKER C fix: pass per-config kwargs to run_task so
+                # homogeneous-MAD uses n_agents=5 (§10) and SC uses k=5, etc.
+                cfg_kw = (self._cfg.config_kwargs or {}).get(cfg_name, {})
+                runs = self._run_task(task, cfg_name, client, **cfg_kw)
                 labeled: List[Tuple[AgentRun, str]] = []
                 for run in runs:
                     lbl = self._label_run(run, task)

@@ -123,6 +123,7 @@ def _make_runner(
     base_max_rpm: Optional[int] = None,
     provider: Optional[str] = None,
     base_url: Optional[str] = None,
+    config_kwargs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Tuple[Runner, Path]:
     """Build a Runner with offline LLMClient and fake run_task / label_run."""
     from common.config import load_config
@@ -150,6 +151,7 @@ def _make_runner(
         rpm=rpm,
         max_budget_usd=max_budget_usd,
         max_infra_retries=max_infra_retries,
+        config_kwargs=config_kwargs,
     )
 
     def _default_run(task: Task, config: str, client_arg: Any, **kwargs) -> List[AgentRun]:
@@ -2084,3 +2086,220 @@ class TestProviderAwareLiveGuard:
         cfg = load_config()
         assert resolve_provider_config(cfg, provider="github_models")["require_auth"] is True
         assert resolve_provider_config(cfg, provider="copilot_proxy")["require_auth"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOCKER A (round 3): consecutive replicate seeds overlap — all 15 agents survive
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestReplicateSeedDedup:
+    """BLOCKER A: consecutive replicate seeds silently DROP ensemble agents.
+
+    With k=5 SC and replicate seeds [S, S+1, S+2] the per-agent seed ranges
+    [S..S+4], [S+1..S+5], [S+2..S+6] overlap.  Before the fix, ``run_identity``
+    used only the per-agent seed, so agents from different replicates that share
+    a per-agent seed had the SAME identity and the later one was silently skipped.
+
+    After the fix, ``run_identity`` includes ``replicate_seed`` (as "R<seed>") in
+    the identity when it differs from the per-agent seed, making every agent from
+    every replicate unique even with consecutive replicate seeds.
+    """
+
+    def _make_sc_runs(self, task_id: str, replicate_seed: int, k: int = 5) -> List[AgentRun]:
+        """Build k AgentRuns as run_self_consistency would: seed = base + i."""
+        return [
+            AgentRun(
+                task_id=task_id,
+                config="sc",
+                model_role="tested_agents",
+                model_id=MODEL,
+                output="out",
+                label="I0",
+                verbalized_conf=0.5,
+                logit_conf=None,
+                seed=replicate_seed + i,
+            )
+            for i in range(k)
+        ]
+
+    def test_consecutive_replicate_seeds_preserve_all_15_agents(self, tmp_path):
+        """3 replicate seeds × SC k=5 → ALL 15 agent records survive (none dropped).
+
+        This is the primary BLOCKER A regression test.  On the pre-fix code,
+        agents from replicates S+1 and S+2 whose per-agent seed overlaps with
+        replicate S are silently skipped → fewer than 15 records.
+        """
+        cp = tmp_path / "cp.jsonl"
+        store = CheckpointStore(cp)
+        base_seed = 100  # base; consecutive replicates 100, 101, 102
+        k = 5
+
+        for rep_seed in [base_seed, base_seed + 1, base_seed + 2]:
+            runs = self._make_sc_runs("t1", rep_seed, k=k)
+            for run in runs:
+                store.add_run(run, replicate_seed=rep_seed)
+
+        # All 15 agents must survive — none silently dropped by dedup.
+        assert store.n_runs == 15, (
+            f"Expected 15 agent records (3 replicates × k={k}); "
+            f"got {store.n_runs}.  BLOCKER A: replicate_seed identity fix missing."
+        )
+
+    def test_three_replicate_seeds_form_three_distinct_cells(self, tmp_path):
+        """3 replicate seeds × SC k=5 for one task → 3 distinct ensemble cells.
+
+        Each replicate is a separate cell for analysis.  load_runs_tidy reads
+        replicate_seed → each replicate gets its own tidy seed value → 3 cells.
+        """
+        import json as _json
+        from analysis.contrasts import compute_cell_cd
+        from analysis.io import load_runs_tidy
+        from common.schema import Interpretation, Task
+
+        # Build a synthetic checkpoint JSONL with the 15 agent records.
+        cp = tmp_path / "sc_3rep.jsonl"
+        base_seed = 100
+        k = 5
+        records = []
+        for rep_seed in [base_seed, base_seed + 1, base_seed + 2]:
+            for i in range(k):
+                records.append({
+                    "type": "run",
+                    "task_id": "t1",
+                    "config": "sc",
+                    "model_role": "tested_agents",
+                    "model_id": MODEL,
+                    "output": "out",
+                    "label": "I1",
+                    "verbalized_conf": 0.5,
+                    "logit_conf": None,
+                    "seed": rep_seed + i,
+                    "replicate_seed": rep_seed,
+                })
+        cp.write_text(
+            "\n".join(_json.dumps(r) for r in records) + "\n",
+            encoding="utf-8",
+        )
+
+        task = Task(
+            id="t1", domain="code_spec",
+            prompt="p", latent_spec="s",
+            interpretations=[
+                Interpretation(id="I0", is_target=True, gold_check="c0"),
+                Interpretation(id="I1", is_target=False, gold_check="c1"),
+                Interpretation(id="I_perp", is_target=False, gold_check="cp"),
+            ],
+            ambiguity_level=1, key_questions=["q?"], regime="H1_external",
+        )
+        tidy = load_runs_tidy(cp, [task])
+        cells = compute_cell_cd(tidy)
+
+        assert len(cells) == 3, (
+            f"Expected 3 ensemble cells (one per replicate seed); "
+            f"got {len(cells)}.  Check replicate_seed is read by load_runs_tidy."
+        )
+        assert all(cells["n_agents"] == k), (
+            f"Each cell must have {k} agents; got {cells['n_agents'].tolist()}"
+        )
+
+    def test_legacy_single_agent_checkpoint_unchanged(self, tmp_path):
+        """Legacy single-agent records (no replicate_seed field) still dedup
+        correctly and are idempotent — byte-identical behaviour as before.
+
+        A single-agent record (replicate_seed == per-agent seed) DOES NOT get
+        the 'R<replicate>' suffix in its identity.  This preserves backward
+        compatibility with existing checkpoints.
+        """
+        cp = tmp_path / "legacy.jsonl"
+        store = CheckpointStore(cp)
+
+        run = make_run("t1", "single", seed=42, label="I0")
+        # Single-agent call: no replicate_seed argument
+        store.add_run(run)
+        # Idempotent: adding again must be a no-op
+        store.add_run(run)
+        assert store.n_runs == 1, "Idempotent dedup must still work for single-agent records"
+
+        # Reload: still exactly 1 record
+        store2 = CheckpointStore(cp)
+        assert store2.n_runs == 1
+        assert store2.run_done(run)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOCKER C: config_kwargs forwarded to run_task (homogeneous-MAD n_agents=5)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestConfigKwargs:
+    """BLOCKER C: homogeneous-MAD defaults to n_agents=3; §10 requires N≥5.
+
+    The RunnerConfig.config_kwargs field passes per-config kwargs to run_task.
+    Without it the runner always calls run_task with no kwargs → n_agents=3.
+    After the fix, config_kwargs={"homogeneous-MAD": {"n_agents": 5}} produces 5.
+    """
+
+    def test_config_kwargs_forwarded_to_run_task(self, tmp_path):
+        """config_kwargs are passed through _run_job_with_retry to run_task."""
+        received_kwargs: List[Dict[str, Any]] = []
+
+        def capturing_run(task, config, client, **kwargs):
+            received_kwargs.append(dict(kwargs))
+            return [make_run(task.id, config, seed=client.config["seeds"]["global"])]
+
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["sc"],
+            seeds=[42],
+            run_task_fn=capturing_run,
+            config_kwargs={"sc": {"k": 7}},
+        )
+        runner.run()
+        assert received_kwargs == [{"k": 7}], (
+            f"config_kwargs not forwarded: expected [{{'k': 7}}], got {received_kwargs}"
+        )
+
+    def test_homogeneous_mad_produces_n_agents_5(self, tmp_path):
+        """homogeneous-MAD job with n_agents=5 produces ≥5 AgentRuns.
+
+        This is the §10 compliance test: the registered run sets n_agents=5 via
+        config_kwargs; without the fix only 3 agents would be produced.
+        """
+        cp = tmp_path / "cp.jsonl"
+        runner, _ = _make_runner(
+            [make_task("t1", domain="policy_qa")], tmp_path, checkpoint_path=cp,
+            configs=["homogeneous-MAD"],
+            seeds=[42],
+            run_task_fn=real_run_task,
+            client_factory=lambda jc, rb: _RecordingClient(
+                jc, [], cache_dir=str(tmp_path / "cache")
+            ),
+            config_kwargs={"homogeneous-MAD": {"n_agents": 5}},
+        )
+        result = runner.run()
+        assert result["completed"] == 1
+
+        runs = CheckpointStore(cp).all_runs()
+        n_agents_recorded = len([r for r in runs if r.get("config") == "homogeneous-MAD"])
+        assert n_agents_recorded >= 5, (
+            f"homogeneous-MAD with n_agents=5 must produce ≥5 agent records; "
+            f"got {n_agents_recorded}.  BLOCKER C: config_kwargs not forwarded."
+        )
+
+    def test_no_config_kwargs_uses_defaults(self, tmp_path):
+        """Without config_kwargs, run_task still uses its built-in defaults."""
+        received: List[Dict] = []
+
+        def capturing_run(task, config, client, **kwargs):
+            received.append(dict(kwargs))
+            return [make_run(task.id, config, seed=client.config["seeds"]["global"])]
+
+        runner, _ = _make_runner(
+            [make_task("t1")], tmp_path,
+            configs=["sc"],
+            seeds=[42],
+            run_task_fn=capturing_run,
+            # no config_kwargs
+        )
+        runner.run()
+        # No kwargs passed → defaults apply inside run_task
+        assert received == [{}], f"Expected no kwargs; got {received}"

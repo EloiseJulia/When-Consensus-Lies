@@ -611,3 +611,202 @@ def test_full_run_default_seeds_are_3(monkeypatch, capsys):
         assert "seed" not in err.lower(), (
             "Default seeds should be ≥3; the seed-count check must not trigger"
         )
+
+
+# ── 9. BLOCKER D: gate B requires distinct ITEMS, not just cells ─────────────
+
+def test_gate_b_inconclusive_when_two_cells_from_same_item(tmp_path):
+    """Two replicate seeds from ONE item produce 2 cells but 1 distinct item.
+
+    BLOCKER D: gate B must require ≥ MIN_ITEMS_FOR_NULL DISTINCT ITEMS (tasks),
+    not just ≥ MIN_ITEMS_FOR_NULL cells.  Two replicates of the same task are
+    NOT a cross-item shuffle — the shuffle degenerates to a within-item permutation
+    and is not informative.  This condition must be INCONCLUSIVE, not PASS.
+    """
+    from pathlib import Path as _Path
+    from common.config import load_config
+    from harness.runner import Runner, RunnerConfig
+    from common.llm import LLMClient
+
+    cfg = load_config()
+
+    tasks = [_make_task("t1", regime="H1_external", k=1)]
+    cp = str(tmp_path / "cp.jsonl")
+
+    # Two replicate seeds from ONE task.  Stride-1000 so per-agent seeds don't overlap.
+    records: list = []
+    for rep_seed in [42, 1042]:
+        for seed_off in range(5):
+            records.append(
+                _make_run_record(
+                    "t1", "sc", "gpt-5.4", "I1",
+                    seed=rep_seed + seed_off,
+                    replicate_seed=rep_seed,
+                )
+            )
+        records.append({
+            "type": "job_done",
+            "task_id": "t1", "config": "sc",
+            "model_role": "tested_agents", "model_id": "gpt-5.4",
+            "seed": rep_seed,
+        })
+    _write_jsonl(_Path(cp), records)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
+    runner_cfg = RunnerConfig(
+        tasks=tasks, configs=["sc"], seeds=[42, 1042],
+        models=[("tested_agents", "gpt-5.4")],
+        checkpoint_path=_Path(cp), rpm=0,
+    )
+    runner = Runner(runner_cfg, client)
+
+    report = _registered_run.run_pilot_gate(
+        cfg, tasks, checkpoint_path=cp,
+        offline=True, cache_dir=str(tmp_path / "llm_cache"),
+        _runner_override=(runner, client),
+    )
+
+    # 2 cells from the same item → condition is INCONCLUSIVE → gate_b must be False.
+    details = report.get("gate_b_details", [])
+    assert any(d["status"] == "inconclusive" for d in details), (
+        f"Expected INCONCLUSIVE for 2 cells from 1 item; got: {details}"
+    )
+    assert not report["gate_b"], (
+        "gate_b must be False when all conditions are INCONCLUSIVE "
+        "(only 1 distinct item, 2 replicate seeds)"
+    )
+
+
+# ── 10. MAJOR E: gate C fails on partial checkpoint (job_done + 1 agent) ─────
+
+def test_gate_c_fails_when_sc_job_has_only_one_agent_record(tmp_path):
+    """MAJOR E: gate C must FAIL if an SC job has only 1 run record (< k=5).
+
+    A checkpoint with all job_done markers but only ONE surviving run record
+    per SC job is a partial/stale checkpoint.  Gate C must reject it via the
+    cardinality check (MAJOR E fix: each SC cell needs ≥ 5 agents).
+    """
+    from pathlib import Path as _Path
+    from common.config import load_config
+    from harness.runner import Runner, RunnerConfig
+    from common.llm import LLMClient
+
+    cfg = load_config()
+
+    tasks = [_make_task("t1", regime="H1_external", k=1)]
+    cp = str(tmp_path / "cp.jsonl")
+
+    # job_done marker + only 1 agent record (SC needs k=5).
+    records = [
+        _make_run_record("t1", "sc", "gpt-5.4", "I1", seed=42, replicate_seed=42),
+        {
+            "type": "job_done",
+            "task_id": "t1", "config": "sc",
+            "model_role": "tested_agents", "model_id": "gpt-5.4", "seed": 42,
+        },
+    ]
+    _write_jsonl(_Path(cp), records)
+
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
+    runner_cfg = RunnerConfig(
+        tasks=tasks, configs=["sc"], seeds=[42],
+        models=[("tested_agents", "gpt-5.4")],
+        checkpoint_path=_Path(cp), rpm=0,
+    )
+    runner = Runner(runner_cfg, client)
+
+    report = _registered_run.run_pilot_gate(
+        cfg, tasks, checkpoint_path=cp,
+        offline=True, cache_dir=str(tmp_path / "llm_cache"),
+        _runner_override=(runner, client),
+    )
+
+    # 1 agent record for SC job (needs 5) → gate_c_cardinality FAILS → gate_c FAILS.
+    assert not report["gate_c"], (
+        "gate_c must FAIL when an SC job has only 1 surviving agent record (< k=5). "
+        "MAJOR E: cardinality check must catch partial/stale checkpoints."
+    )
+    assert not report["gate_pass"]
+
+
+# ── 11. MAJOR F: pilot batch has ≥2 H1 items at same k≥1 ─────────────────────
+
+def test_select_pilot_tasks_has_two_h1_items_at_k1_or_higher():
+    """MAJOR F: the selected pilot batch must include ≥2 H1_external items at
+    the same k≥1 value so gate B has at least one evaluable underspecified
+    condition (§11 requires the gate on k≥1 items).
+    """
+    from collections import Counter
+
+    # Build a pool with 4 H1 items at k=2 (most) + some k=1, k=3.
+    h1_tasks = (
+        [_make_task(f"h1_k2_{i}", regime="H1_external", k=2) for i in range(4)]
+        + [_make_task("h1_k1", regime="H1_external", k=1)]
+        + [_make_task("h1_k3", regime="H1_external", k=3)]
+    )
+    h2_tasks = [_make_task(f"h2_{i}", regime="H2_derivable", k=1) for i in range(4)]
+    all_tasks = h1_tasks + h2_tasks
+
+    selected = _registered_run.select_pilot_tasks(all_tasks, n_pilot=10)
+
+    h1_selected = [t for t in selected if t.regime == "H1_external"]
+    k_counts = Counter(t.ambiguity_level for t in h1_selected)
+
+    k1_plus_with_two = {k: c for k, c in k_counts.items() if k >= 1 and c >= 2}
+    assert k1_plus_with_two, (
+        f"Selected pilot batch has no k≥1 H1 group with ≥2 items. "
+        f"k_counts={dict(k_counts)}.  "
+        "MAJOR F: select_pilot_tasks must guarantee ≥2 H1 items at some k≥1."
+    )
+
+
+def test_select_pilot_tasks_fallback_when_no_k1_group_in_h1():
+    """When H1 pool has only singletons at every k≥1, fallback to balanced-k."""
+    h1_tasks = [
+        _make_task("h1_k1", regime="H1_external", k=1),
+        _make_task("h1_k2", regime="H1_external", k=2),
+        _make_task("h1_k3", regime="H1_external", k=3),
+    ]
+    selected = _registered_run.select_pilot_tasks(h1_tasks, n_pilot=6)
+    assert len(selected) <= 6
+    assert all(t.regime == "H1_external" for t in selected)
+
+
+# ── 12. MINOR: dry-run test monkeypatches LLMClient.complete ─────────────────
+
+def test_pilot_dry_run_network_call_count_is_zero(monkeypatch, capsys):
+    """MINOR: monkeypatch LLMClient.complete to count invocations; assert 0.
+
+    --pilot --dry-run with RUNNER_LIVE unset must not invoke LLMClient.complete.
+    BLOCKER 3 fix verified: dry_run=True threads to runner.run(dry_run=True).
+    """
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+
+    call_count = [0]
+    from common import llm as _llm_module
+
+    def _no_network(self, *args, **kwargs):
+        call_count[0] += 1
+        raise RuntimeError(
+            "LLMClient.complete was called during --pilot --dry-run! "
+            "BLOCKER 3 regression: dry_run must thread to runner.run(dry_run=True)."
+        )
+
+    monkeypatch.setattr(_llm_module.LLMClient, "complete", _no_network)
+
+    try:
+        _registered_run.main(["--pilot", "--dry-run"])
+    except SystemExit:
+        pass  # Gate FAIL exits 1 — acceptable
+
+    out, _err = capsys.readouterr()
+
+    # Primary: zero network calls.
+    assert call_count[0] == 0, (
+        f"Expected 0 LLMClient.complete calls; got {call_count[0]}. "
+        "dry_run must thread through to runner.run(dry_run=True)."
+    )
+    # Structural: not the live guard path.
+    assert "skipped" not in out.lower(), (
+        "--pilot --dry-run must not print 'skipped' (that is the live guard, not dry-run)"
+    )
