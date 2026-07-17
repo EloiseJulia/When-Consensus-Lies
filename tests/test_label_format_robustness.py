@@ -20,10 +20,8 @@ Guarantees asserted here:
 Fully offline / deterministic (no network, no LLM judge).
 """
 
-import glob
 import json
 import os
-from collections import Counter
 
 import pytest
 
@@ -362,62 +360,47 @@ def test_policy_plain_final_answer_still_labels():
     assert label_run(run, task) == "I0"
 
 
-# ── Cache-backed regression: PINNED exact label multiset (non-tautological) ────
+# ── Committed-fixture regression: PINNED per-entry expected labels ─────────────
 #
-# From the live default-check diagnostic (.llm_cache_default_check), the invoice
-# outputs resolve to these EXACT label multisets. Pinning them detects any future
-# FALSE RECOVERY (a genuinely off-axis output flipping to a real interp lowers the
-# I_perp count and fails the assertion) and any FALSE LOSS. The non-I_perp labels
-# (I4/I6/I7 = partial-default combinatorial matches) are legitimate matches the
-# auditor confirmed; the earlier "all-I_perp" was model-specific, not universal.
-_EXPECTED_INVOICE_LABELS = {
-    "mistral-ai/mistral-small-2503": {"I_perp": 12, "I6": 1, "I7": 5},
-    "deepseek/deepseek-r1":          {"I_perp": 5, "I4": 1},
-    "openai/o4-mini":                {"I_perp": 1, "I4": 5, "I6": 4, "I7": 2},
-    "meta/llama-3.3-70b-instruct":   {"I_perp": 1, "I4": 1, "I6": 1},
-}
+# A small set of REAL model outputs (one I_perp + one non-I_perp per model)
+# captured from the live diagnostic run and committed under
+# tests/fixtures/invoice_label_regression.json.  Each entry carries its
+# expected_label (verified at capture time).
+#
+# Why this is robust and CI-safe:
+#   * No dependency on the gitignored, mutable .llm_cache_default_check directory.
+#   * Runs identically on a fresh checkout with no live cache present.
+#   * Cache additions (new model runs) never affect the pinned entries.
+#
+# Why this still catches regressions:
+#   * Each entry is asserted per-output (EXACT expected label), not just as a
+#     multiset aggregate — a regression that RELABELS any single real output
+#     (e.g. a genuine I_perp flipped to I4 by false recovery, or a genuine I7
+#     dropped to I_perp by false loss) immediately fails the test.
+#   * The fixture includes both off-axis (I_perp) and legitimate-label entries
+#     per model, so neither recovery regressions nor loss regressions can hide.
 
-
-def _find_cache_dir():
-    here = os.path.dirname(os.path.abspath(__file__))
-    for up in (os.path.join(here, ".."), os.path.join(here, "..", "..", "..")):
-        cand = os.path.abspath(os.path.join(up, ".llm_cache_default_check"))
-        if os.path.isdir(cand):
-            return cand
-    return None
-
-
-def _invoice_outputs_by_model():
-    cache_dir = _find_cache_dir()
-    if cache_dir is None:
-        return None
-    by_model = {}
-    for f in glob.glob(os.path.join(cache_dir, "*.json")):
-        try:
-            data = json.load(open(f, encoding="utf-8"))
-        except Exception:
-            continue
-        if "format_invoice_line" in data.get("text", ""):
-            by_model.setdefault(data.get("model", ""), []).append(data["text"])
-    return by_model
+_FIXTURE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "fixtures", "invoice_label_regression.json")
 
 
 def test_cache_regression_invoice_label_multiset_pinned():
-    """Real diagnostic outputs must resolve to the PINNED exact label multisets.
+    """Committed real-output fixtures must resolve to their PINNED per-entry labels.
 
-    This is a strict regression pin (no blanket-accept): any false recovery or
-    false loss changes a count and fails the test.
+    This is a strict regression guard (no blanket-accept): any labeler change that
+    relabels a genuine off-axis output (false recovery) or a genuine correct output
+    (false loss) changes exactly one entry and immediately fails the assertion.
+    CI-safe: uses a committed fixture file, no live cache required.
     """
-    by_model = _invoice_outputs_by_model()
-    if not by_model:
-        pytest.skip("diagnostic cache (.llm_cache_default_check) not present")
+    with open(_FIXTURE_PATH, encoding="utf-8") as fh:
+        fixture = json.load(fh)
     task = _invoice_task()
-    for model, expected in _EXPECTED_INVOICE_LABELS.items():
-        outs = by_model.get(model)
-        assert outs, f"expected cached invoice outputs for {model}"
-        got = Counter(
-            label_run(_make_run(task.id, text, seed=1000 + i), task)
-            for i, text in enumerate(outs)
+    for i, entry in enumerate(fixture):
+        model = entry["model"]
+        expected = entry["expected_label"]
+        text = entry["text"]
+        got = label_run(_make_run(task.id, text, seed=2000 + i), task)
+        assert got == expected, (
+            f"Fixture entry {i} ({model}): expected label={expected!r}, "
+            f"got={got!r}. Labeler regression detected."
         )
-        assert dict(got) == expected, \
-            f"{model}: expected {expected}, got {dict(got)}"
