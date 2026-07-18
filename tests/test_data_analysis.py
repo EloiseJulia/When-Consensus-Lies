@@ -30,6 +30,10 @@ from bench.data_analysis import (
     problem_typical_value,
     problem_avg_price,
     problem_avg_rate,
+    problem_geomean,
+    problem_harmonic,
+    problem_cumulative,
+    problem_tierank,
     problem_active_users,
     problem_activity_report,
 )
@@ -52,7 +56,7 @@ def clear_result_cache():
 # ============================================================================
 
 def test_checkers_exist():
-    """All 12 checker IDs (2 per k=1 family × 4 + 4 for the k=2 family) are present
+    """All 20 checker IDs (2 per k=1 family × 8 + 4 for the k=2 family) are present
     in CHECKERS and REFERENCE_IMPLEMENTATIONS."""
     required_checkers = [
         # data_typical_001 (central_tendency axis, H2_derivable)
@@ -61,6 +65,14 @@ def test_checkers_exist():
         "avgprice_weighted", "avgprice_simple",
         # data_rate_001 (rate_interval axis, H2_derivable)
         "rate_total", "rate_stepmean",
+        # data_geomean_001 (growth_averaging axis, H2_derivable)
+        "geomean_geometric", "geomean_arithmetic",
+        # data_harmonic_001 (speed_averaging axis, H2_derivable)
+        "harmonic_hmean", "harmonic_amean",
+        # data_cumulative_001 (cumulative_interpretation axis, H2_derivable)
+        "cumulative_incremental", "cumulative_direct",
+        # data_tierank_001 (tie_ranking axis, H2_derivable)
+        "tierank_midpoint", "tierank_competition",
         # data_activeusers_001 (active_user_threshold axis, H1_external)
         "active_threshold3", "active_threshold1",
         # data_report_001 (active_user_threshold + avg_rounding axes, H1_external)
@@ -148,8 +160,8 @@ def test_task_generation():
     """Tasks are generated with correct structure (Amendment 03 invariant)."""
     tasks = generate_tasks()
 
-    assert len(tasks) == 12, (
-        f"Expected 12 tasks (8 from four k=1 families + 4 from the k=2 family), "
+    assert len(tasks) == 20, (
+        f"Expected 20 tasks (16 from eight k=1 families + 4 from the k=2 family), "
         f"got {len(tasks)}"
     )
 
@@ -210,18 +222,21 @@ def test_task_regime_valid():
 
 
 def test_regime_distribution():
-    """The domain carries H1_external families plus THREE H2_derivable demonstrators
-    (the median-skew trap + the two harder frontier-calibrated traps); no task is left
-    untagged (None)."""
+    """The domain carries H1_external families plus SEVEN H2_derivable demonstrators
+    (3 original + 4 new topup); no task is left untagged (None)."""
     tasks = generate_tasks()
     regimes = {t.regime for t in tasks}
     assert "H1_external" in regimes, "No H1_external tasks found"
     assert "H2_derivable" in regimes, "Missing the H2_derivable demonstrators"
     assert None not in regimes, "All reconstructed tasks must carry a regime value"
 
-    # The H2_derivable tasks are exactly the three derivable-trap families.
+    # The H2_derivable tasks are exactly the seven derivable-trap families.
     h2_ids = {t.id.rsplit("_k", 1)[0] for t in tasks if t.regime == "H2_derivable"}
-    assert h2_ids == {"data_typical_001", "data_avgprice_001", "data_rate_001"}, \
+    assert h2_ids == {
+        "data_typical_001", "data_avgprice_001", "data_rate_001",
+        "data_geomean_001", "data_harmonic_001", "data_cumulative_001",
+        "data_tierank_001",
+    }, \
         f"Unexpected H2_derivable families: {h2_ids}"
 
 
@@ -232,6 +247,10 @@ def test_target_description_labels_nondefault():
         problem_typical_value(),
         problem_avg_price(),
         problem_avg_rate(),
+        problem_geomean(),
+        problem_harmonic(),
+        problem_cumulative(),
+        problem_tierank(),
         problem_active_users(),
         problem_activity_report(),
     ]
@@ -416,6 +435,261 @@ def test_golden_report_k2_outputs():
 # ============================================================================
 # k=2 independence + distinguishability
 # ============================================================================
+
+def test_golden_geometric_mean():
+    """GOLDEN (H2_derivable): geometric mean of multiplicative growth factors.
+
+    dataset [1.10, 1.50, 1.10]: I0 geometric = 1.815^(1/3) ≈ '1.22';
+    default arithmetic = (1.10+1.50+1.10)/3 = '1.23'. Frozen; MUST NOT drift."""
+    dataset = [1.10, 1.50, 1.10]
+    assert (dataset, "1.22") in TEST_CASES["geomean_geometric"], \
+        "geometric gold '1.22' missing from TEST_CASES"
+    assert (dataset, "1.23") in TEST_CASES["geomean_arithmetic"], \
+        "arithmetic gold '1.23' missing from TEST_CASES"
+    _pin("average_growth", dataset, "1.22", "geomean_geometric")
+    _pin("average_growth", dataset, "1.23", "geomean_arithmetic")
+    assert not CHECKERS["geomean_geometric"].check(
+        REFERENCE_IMPLEMENTATIONS["geomean_arithmetic"]).passed
+    assert not CHECKERS["geomean_arithmetic"].check(
+        REFERENCE_IMPLEMENTATIONS["geomean_geometric"]).passed
+
+
+def test_golden_harmonic_mean():
+    """GOLDEN (H2_derivable): harmonic mean for equal-distance speed segments.
+
+    dataset [60, 30]: I0 harmonic = 2*60*30/(60+30) = '40.00';
+    default arithmetic = (60+30)/2 = '45.00'. Frozen; MUST NOT drift."""
+    dataset = [60, 30]
+    assert (dataset, "40.00") in TEST_CASES["harmonic_hmean"], \
+        "harmonic gold '40.00' missing from TEST_CASES"
+    assert (dataset, "45.00") in TEST_CASES["harmonic_amean"], \
+        "arithmetic gold '45.00' missing from TEST_CASES"
+    _pin("average_speed", dataset, "40.00", "harmonic_hmean")
+    _pin("average_speed", dataset, "45.00", "harmonic_amean")
+    assert not CHECKERS["harmonic_hmean"].check(
+        REFERENCE_IMPLEMENTATIONS["harmonic_amean"]).passed
+    assert not CHECKERS["harmonic_amean"].check(
+        REFERENCE_IMPLEMENTATIONS["harmonic_hmean"]).passed
+
+
+def test_golden_cumulative_incremental():
+    """GOLDEN (H2_derivable): incremental rate from a cumulative column.
+
+    dataset [[0,0],[1,3],[3,9],[6,15]]: I0 incremental = (15-0)/(6-0) = '2.50';
+    default direct mean = (0+3+9+15)/4 = '6.75'. Frozen; MUST NOT drift."""
+    dataset = [[0, 0], [1, 3], [3, 9], [6, 15]]
+    assert (dataset, "2.50") in TEST_CASES["cumulative_incremental"], \
+        "incremental gold '2.50' missing from TEST_CASES"
+    assert (dataset, "6.75") in TEST_CASES["cumulative_direct"], \
+        "direct gold '6.75' missing from TEST_CASES"
+    _pin("avg_new_per_day", dataset, "2.50", "cumulative_incremental")
+    _pin("avg_new_per_day", dataset, "6.75", "cumulative_direct")
+    assert not CHECKERS["cumulative_incremental"].check(
+        REFERENCE_IMPLEMENTATIONS["cumulative_direct"]).passed
+    assert not CHECKERS["cumulative_direct"].check(
+        REFERENCE_IMPLEMENTATIONS["cumulative_incremental"]).passed
+
+
+def test_golden_midpoint_rank():
+    """GOLDEN (H2_derivable): midpoint (average ordinal position) rank for ties.
+
+    dataset [10, 10, 8]: I0 midpoint = [1.5, 1.5, 3.0];
+    default competition = [1.0, 1.0, 3.0]. Frozen; MUST NOT drift."""
+    dataset = [10, 10, 8]
+    assert (dataset, [1.5, 1.5, 3.0]) in TEST_CASES["tierank_midpoint"], \
+        "midpoint gold [1.5,1.5,3.0] missing from TEST_CASES"
+    assert (dataset, [1.0, 1.0, 3.0]) in TEST_CASES["tierank_competition"], \
+        "competition gold [1.0,1.0,3.0] missing from TEST_CASES"
+    _pin("rank_items", dataset, [1.5, 1.5, 3.0], "tierank_midpoint")
+    _pin("rank_items", dataset, [1.0, 1.0, 3.0], "tierank_competition")
+    assert not CHECKERS["tierank_midpoint"].check(
+        REFERENCE_IMPLEMENTATIONS["tierank_competition"]).passed
+    assert not CHECKERS["tierank_competition"].check(
+        REFERENCE_IMPLEMENTATIONS["tierank_midpoint"]).passed
+
+
+def test_geomean_natural_default_is_arithmetic_foil():
+    """REVERSED property (H2_derivable): a model that computes the arithmetic mean of
+    growth factors (ignoring the compounding constraint r**n=product in the prompt)
+    FAILS the geometric target and PASSES only the arithmetic foil."""
+    arith_default = """
+def average_growth(factors):
+    return f"{sum(factors) / len(factors):.2f}"
+"""
+    assert not CHECKERS["geomean_geometric"].check(arith_default).passed, \
+        "Arithmetic default must FAIL the I0 target (I0 = geometric mean / compounding r)"
+    assert CHECKERS["geomean_arithmetic"].check(arith_default).passed, \
+        "Arithmetic default must PASS the I_d foil (I1 = arithmetic mean)"
+
+
+def test_geomean_prompt_core_compounding_constraint():
+    """BLOCKER FIX: the retained prompt_core must state the r**n=product compounding
+    constraint explicitly so I0 is uniquely derivable by algebra, not by external
+    CAGR convention. The geometric-mean NAME lives only in the deletable clause."""
+    spec = problem_geomean()
+    core = spec.prompt_core
+    # The constraint r**n = product(factors) must be in the retained prompt_core
+    assert "r ** n" in core or "r**n" in core, \
+        f"prompt_core must contain 'r ** n' (the compounding constraint): {core!r}"
+    assert "reproduces" in core or "exactly" in core, \
+        f"prompt_core must assert the product-reproduction property: {core!r}"
+    assert "cumulative product" in core or "cumulative" in core, \
+        f"prompt_core must reference the cumulative product: {core!r}"
+    # The word "geometric" must NOT appear in prompt_core (stays in deletable clause)
+    assert "geometric" not in core.lower(), \
+        f"prompt_core must not name the formula 'geometric mean' (that's in the clause): {core!r}"
+    # The deletable clause IS allowed to name it
+    clause_text = " ".join(spec.requirement_classes[0].clauses)
+    assert "geometric" in clause_text.lower(), \
+        f"The deletable clause must name 'geometric mean': {clause_text!r}"
+    # Arithmetic mean must be provably wrong: arith^n ≠ product for the primary dataset
+    import operator
+    from functools import reduce
+    factors = [1.10, 1.50, 1.10]
+    product = reduce(operator.mul, factors, 1.0)
+    arith = sum(factors) / len(factors)
+    arith_cubed = arith ** len(factors)
+    assert abs(arith_cubed - product) > 0.01, \
+        f"Arithmetic mean {arith:.4f} satisfies compounding constraint (should not): " \
+        f"{arith:.4f}^3={arith_cubed:.4f} vs product={product:.4f}"
+
+
+def test_harmonic_natural_default_is_arithmetic_foil():
+    """REVERSED property (H2_derivable): a model that computes the arithmetic mean of
+    speeds (ignoring the equal-distance constraint) FAILS the harmonic target and
+    PASSES only the arithmetic foil."""
+    arith_default = """
+def average_speed(speeds):
+    return f"{sum(speeds) / len(speeds):.2f}"
+"""
+    assert not CHECKERS["harmonic_hmean"].check(arith_default).passed, \
+        "Arithmetic default must FAIL the I0 target (I0 = harmonic mean)"
+    assert CHECKERS["harmonic_amean"].check(arith_default).passed, \
+        "Arithmetic default must PASS the I_d foil (I1 = arithmetic mean)"
+
+
+def test_cumulative_natural_default_is_direct_mean_foil():
+    """REVERSED property (H2_derivable): a model that averages the cumulative column
+    directly (ignoring the running-total label) FAILS the incremental-rate target and
+    PASSES only the direct-mean foil."""
+    direct_default = """
+def avg_new_per_day(entries):
+    cum_values = [cum for day, cum in entries]
+    return f"{sum(cum_values) / len(cum_values):.2f}"
+"""
+    assert not CHECKERS["cumulative_incremental"].check(direct_default).passed, \
+        "Direct-mean default must FAIL the I0 target (I0 = incremental rate)"
+    assert CHECKERS["cumulative_direct"].check(direct_default).passed, \
+        "Direct-mean default must PASS the I_d foil (I1 = direct column mean)"
+
+
+def test_tierank_natural_default_is_competition_foil():
+    """REVERSED property (H2_derivable): a model that assigns competition rank (lowest
+    rank number to all tied items, ignoring 'average ordinal position') FAILS the
+    midpoint target and PASSES only the competition foil."""
+    competition_default = """
+def rank_items(scores):
+    sorted_desc = sorted(scores, reverse=True)
+    return [float(sorted_desc.index(score) + 1) for score in scores]
+"""
+    assert not CHECKERS["tierank_midpoint"].check(competition_default).passed, \
+        "Competition default must FAIL the I0 target (I0 = midpoint rank)"
+    assert CHECKERS["tierank_competition"].check(competition_default).passed, \
+        "Competition default must PASS the I_d foil (I1 = competition rank)"
+
+
+# ============================================================================
+# New H2_derivable families: additional gold pins and distinguishability
+# ============================================================================
+
+def test_geomean_all_test_cases_pinned():
+    """All 3 geomean test-case pairs are pinned (distinct values, tight bounds)."""
+    for dataset, expected in TEST_CASES["geomean_geometric"]:
+        _pin("average_growth", dataset, expected, "geomean_geometric")
+    for dataset, expected in TEST_CASES["geomean_arithmetic"]:
+        _pin("average_growth", dataset, expected, "geomean_arithmetic")
+
+
+def test_harmonic_all_test_cases_pinned():
+    """All 3 harmonic test-case pairs are pinned."""
+    for dataset, expected in TEST_CASES["harmonic_hmean"]:
+        _pin("average_speed", dataset, expected, "harmonic_hmean")
+    for dataset, expected in TEST_CASES["harmonic_amean"]:
+        _pin("average_speed", dataset, expected, "harmonic_amean")
+
+
+def test_cumulative_all_test_cases_pinned():
+    """All 3 cumulative test-case pairs are pinned."""
+    for dataset, expected in TEST_CASES["cumulative_incremental"]:
+        _pin("avg_new_per_day", dataset, expected, "cumulative_incremental")
+    for dataset, expected in TEST_CASES["cumulative_direct"]:
+        _pin("avg_new_per_day", dataset, expected, "cumulative_direct")
+
+
+def test_tierank_all_test_cases_pinned():
+    """All 3 tierank test-case pairs are pinned."""
+    for dataset, expected in TEST_CASES["tierank_midpoint"]:
+        _pin("rank_items", dataset, expected, "tierank_midpoint")
+    for dataset, expected in TEST_CASES["tierank_competition"]:
+        _pin("rank_items", dataset, expected, "tierank_competition")
+
+
+def test_new_h2_families_100pct_distinguishable():
+    """All 4 new H2_derivable family reference pairs are 100% distinguishable."""
+    new_groups = [
+        ["geomean_geometric", "geomean_arithmetic"],
+        ["harmonic_hmean", "harmonic_amean"],
+        ["cumulative_incremental", "cumulative_direct"],
+        ["tierank_midpoint", "tierank_competition"],
+    ]
+    for group in new_groups:
+        for target_id in group:
+            target_code = REFERENCE_IMPLEMENTATIONS[target_id]
+            for checker_id in group:
+                result = CHECKERS[checker_id].check(target_code)
+                if checker_id == target_id:
+                    assert result.passed, \
+                        f"{target_id} reference must pass its own checker {checker_id}: {result.details}"
+                else:
+                    assert not result.passed, \
+                        f"{target_id} reference must NOT pass checker {checker_id}"
+
+
+def test_new_h2_variant_invariants():
+    """Amendment 03 invariants hold for all 8 new H2_derivable variant tasks."""
+    tasks = generate_tasks()
+    new_h2_bases = {
+        "data_geomean_001", "data_harmonic_001",
+        "data_cumulative_001", "data_tierank_001",
+    }
+    new_tasks = [t for t in tasks if t.id.rsplit("_k", 1)[0] in new_h2_bases]
+    assert len(new_tasks) == 8, f"Expected 8 new H2 variants, got {len(new_tasks)}"
+
+    for t in new_tasks:
+        k = t.ambiguity_level
+        assert t.regime == "H2_derivable", f"{t.id}: expected H2_derivable regime"
+        assert len(t.key_questions) == k, \
+            f"{t.id}: key_questions {len(t.key_questions)} != k'={k}"
+        assert len(t.interpretations) == 2 ** k, \
+            f"{t.id}: interpretations {len(t.interpretations)} != 2^{k}"
+        targets = [i for i in t.interpretations if i.is_target]
+        assert len(targets) == 1 and targets[0].id == "I0"
+        if k == 0:
+            assert t.key_questions == []
+        else:
+            combdef = [i for i in t.interpretations if i.gold_check.endswith("__combdef")]
+            assert len(combdef) == 1, f"{t.id}: expected 1 __combdef, got {len(combdef)}"
+            assert not combdef[0].is_target
+
+
+def test_h2_total_variant_count():
+    """H2_derivable variant count reaches the ≥14 target (7 families × 2 variants)."""
+    tasks = generate_tasks()
+    h2_count = sum(1 for t in tasks if t.regime == "H2_derivable")
+    assert h2_count >= 14, f"H2_derivable variant count {h2_count} < 14 target"
+    h2_k1 = sum(1 for t in tasks if t.regime == "H2_derivable" and t.ambiguity_level == 1)
+    assert h2_k1 == 7, f"Expected 7 H2_derivable k=1 variants, got {h2_k1}"
+
 
 def test_k2_axis_independence():
     """The two report axes are INDEPENDENT: active_user_threshold controls ONLY the

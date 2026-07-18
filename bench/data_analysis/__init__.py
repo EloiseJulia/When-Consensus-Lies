@@ -206,27 +206,37 @@ class DataChecker(GoldChecker):
 #     from the underdetermined prompt)
 #
 # Binary convention axes (Amendment 03), each strictly {target, default}:
-#   central_tendency:      target=median          default=arithmetic mean   (H2_derivable)
-#   price_weighting:       target=qty-weighted avg default=simple col mean   (H2_derivable)
-#   rate_interval:         target=Δtotal/Δtime    default=mean of step deltas(H2_derivable)
-#   active_user_threshold: target=>=3 (org KPI)   default=>=1 (any activity)(H1_external)
-#   avg_rounding:          target=round-half-up    default=round-half-even   (H1_external)
+#   central_tendency:          target=median            default=arithmetic mean   (H2_derivable)
+#   price_weighting:           target=qty-weighted avg  default=simple col mean   (H2_derivable)
+#   rate_interval:             target=Δtotal/Δtime      default=mean of step deltas(H2_derivable)
+#   growth_averaging:          target=geometric mean    default=arithmetic mean   (H2_derivable)
+#   speed_averaging:           target=harmonic mean     default=arithmetic mean   (H2_derivable)
+#   cumulative_interpretation: target=incremental rate  default=direct col mean   (H2_derivable)
+#   tie_ranking:               target=midpoint rank     default=competition rank  (H2_derivable)
+#   active_user_threshold:     target=>=3 (org KPI)     default=>=1 (any activity)(H1_external)
+#   avg_rounding:              target=round-half-up     default=round-half-even   (H1_external)
 #
 # HARDER H2 demonstrators (frontier-calibrated, per 2026-07-17-harder-h2-plan.md): the
 # median-skew trap (data_typical_001) is resolved by ALL frontier models (reasoner AND
 # weak), collapsing the reasoner-vs-weak H2 contrast. price_weighting + rate_interval are
 # SUBTLER derivable traps: the disambiguator is PRESENT in the data (quantities /
 # unequal time gaps), so a strong reasoner CAN recover I0, but the derivation requires a
-# genuine reasoning step a weak model skips (it averages the visible column). Both are
-# pure-stdlib executable gold (no numpy/pandas → run under the DataChecker `python -S`
-# sandbox); the live default-check is the empirical arbiter of which actually splits.
+# genuine reasoning step a weak model skips (it averages the visible column). All H2
+# families are pure-stdlib executable gold (no numpy/pandas → run under the DataChecker
+# `python -S` sandbox); the live default-check is the empirical arbiter of which splits.
 #
 # Families:
-#   data_typical_001      k_max=1  axis central_tendency       -> 2 variants (k0,k1)  H2_derivable
-#   data_avgprice_001     k_max=1  axis price_weighting        -> 2 variants (k0,k1)  H2_derivable
-#   data_rate_001         k_max=1  axis rate_interval          -> 2 variants (k0,k1)  H2_derivable
-#   data_activeusers_001  k_max=1  axis active_user_threshold  -> 2 variants (k0,k1)  H1_external
-#   data_report_001       k_max=2  active_user_threshold+avg_rounding -> 4 variants  H1_external
+#   data_typical_001      k_max=1  axis central_tendency          -> 2 variants (k0,k1)  H2_derivable
+#   data_avgprice_001     k_max=1  axis price_weighting           -> 2 variants (k0,k1)  H2_derivable
+#   data_rate_001         k_max=1  axis rate_interval             -> 2 variants (k0,k1)  H2_derivable
+#   data_geomean_001      k_max=1  axis growth_averaging          -> 2 variants (k0,k1)  H2_derivable
+#   data_harmonic_001     k_max=1  axis speed_averaging           -> 2 variants (k0,k1)  H2_derivable
+#   data_cumulative_001   k_max=1  axis cumulative_interpretation -> 2 variants (k0,k1)  H2_derivable
+#   data_tierank_001      k_max=1  axis tie_ranking               -> 2 variants (k0,k1)  H2_derivable
+#   data_activeusers_001  k_max=1  axis active_user_threshold     -> 2 variants (k0,k1)  H1_external
+#   data_report_001       k_max=2  active_user_threshold+avg_rounding -> 4 variants      H1_external
+#
+# H2_derivable variant count: 7 families × 2 = 14 variants (≥ ~14 target).
 #
 # Amended invariant per variant deleting subset S (|S|=k'):
 #   len(key_questions) == k'
@@ -448,6 +458,311 @@ def problem_avg_rate():
     )
 
 
+def problem_geomean():
+    """k=1 family, axis growth_averaging: the equivalent-constant compounding factor.
+
+    H2_derivable (BLOCKER-FIX 2026-07-18): the retained prompt_core explicitly states
+    the COMPOUNDING CONSTRAINT — "compounding r for n years (r ** n) must exactly
+    reproduce the overall cumulative product" — so `r^n = product(factors)`, giving
+    `r = product^(1/n)`. This unique algebraic solution is the geometric mean, derivable
+    by a careful solver from the retained constraint ALONE without naming "geometric
+    mean" or invoking external CAGR convention. The deletable clause names the formula
+    and warns against arithmetic mean. Without that clause, the compounding constraint in
+    prompt_core is still unambiguous and uniquely determines I0.
+
+    WHY I0 is UNIQUELY DERIVABLE (not H1-external): the retained prompt_core says
+    "r ** n exactly reproduces the overall cumulative product". For [1.10,1.50,1.10]:
+    product = 1.815. The unique r satisfying r^3 = 1.815 is r = 1.815^(1/3) ≈ 1.22.
+    The arithmetic mean (1.23) is PROVABLY WRONG under this constraint: 1.23^3 ≈ 1.861
+    ≠ 1.815. No external convention or domain knowledge is needed — only algebra on the
+    stated constraint.
+    WHY I1 is the DEFAULT foil: a model that reads "average growth factor" but skips the
+    compounding constraint computes sum/n = 1.23. It is both (a) the naive default, and
+    (b) provably wrong under the retained constraint.
+    PURE STDLIB: `**` operator + f-string only; runs under `python -S` sandbox.
+
+    1 req class -> 2^1=2 interps: I0 (geometric, target) + I1 (arithmetic, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_geomean_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `average_growth(factors)` that returns the single constant "
+            "annual growth factor r — as a string rounded to 2 decimal places — such that "
+            "compounding r for n years (r ** n) exactly reproduces the overall cumulative "
+            "product of all n given annual growth factors. Each value is a multiplicative "
+            "annual growth factor (ratio of new value to old value): [1.10, 1.50, 1.10]."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="growth_averaging",
+                description="Formula name and foil exclusion for the compounding-equivalent factor",
+                clauses=[
+                    "The formula is r = (product of all n factors) ** (1 / n) — the "
+                    "geometric mean. This is distinct from the arithmetic mean "
+                    "(sum of factors / n), which does NOT satisfy the r ** n = product "
+                    "compounding constraint. Answer to 2 decimals."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: the UNIQUE r satisfying r ** n = product(factors) "
+                    "(target = geometric mean). The compounding constraint in the retained "
+                    "prompt_core is the derivable disambiguator — no external knowledge "
+                    "required. [1.10,1.50,1.10]: 1.815^(1/3) -> '1.22'."
+                ),
+                is_target=True,
+                gold_check="geomean_geometric",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: arithmetic MEAN of growth factors "
+                    "(ignores compounding constraint; provably WRONG: 1.23^3 ≈ 1.861 ≠ "
+                    "1.815). [1.10,1.50,1.10] -> (1.10+1.50+1.10)/3 = '1.23'."
+                ),
+                is_target=False,
+                gold_check="geomean_arithmetic",
+                opened_by="growth_averaging",
+            ),
+        ],
+        key_questions=[
+            "Should the returned factor r satisfy r ** n = product(factors) (geometric "
+            "mean), or should it be the arithmetic mean sum(factors)/n?",
+        ],
+    )
+
+
+def problem_harmonic():
+    """k=1 family, axis speed_averaging: harmonic mean for equal-distance segments.
+
+    H2_derivable: the prompt_core states "the traveler covers the SAME distance at each
+    of the listed speeds". From this equal-distance constraint + basic distance=speed×time
+    algebra (both present in the retained prompt), a careful reader derives:
+      avg_speed = total_distance / total_time = 2d / (d/v1 + d/v2)
+                = 2*v1*v2 / (v1+v2)  (the harmonic mean for 2 speeds;
+                  n / Σ(1/v_i) in general)
+    No external convention is needed — only the stated equal-distance property +
+    arithmetic. The natural default (arithmetic mean of the speed values) is the WRONG foil.
+
+    WHY H2 (not H1): the disambiguator ("SAME distance") is in the retained prompt_core.
+    The harmonic-mean derivation follows from distance=speed×time, which is implicit
+    in the domain (speed/distance are in the prompt) and requires no lookup table.
+    WHY weak model defaults to arithmetic: models see "average speed" and compute sum/n.
+    PURE STDLIB: sum, generator, f-string; runs under `python -S` sandbox.
+
+    1 req class -> 2^1=2 interps: I0 (harmonic, target) + I1 (arithmetic, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_harmonic_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `average_speed(speeds)` that returns the average speed "
+            "in km/h as a string rounded to 2 decimal places. The traveler covers the "
+            "SAME distance at each of the listed speeds (one equal-length segment per "
+            "speed value): [60, 30]."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="speed_averaging",
+                description="Which mean is correct for equal-distance speed segments",
+                clauses=[
+                    "Because the same distance is covered at each speed, the correct "
+                    "average is total_distance / total_time = n / sum(1/speed_i) "
+                    "(the harmonic mean), NOT the arithmetic mean sum/n. "
+                    "Answer to 2 decimals."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: HARMONIC mean as the average speed (target). "
+                    "Equal-distance constraint in retained prompt -> "
+                    "total_distance/total_time = n/sum(1/v_i). "
+                    "[60,30] -> 2/(1/60+1/30) = 3600/90 = '40.00'."
+                ),
+                is_target=True,
+                gold_check="harmonic_hmean",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: arithmetic MEAN of speed values "
+                    "(ignores equal-distance constraint, genuinely WRONG). "
+                    "[60,30] -> (60+30)/2 = '45.00'."
+                ),
+                is_target=False,
+                gold_check="harmonic_amean",
+                opened_by="speed_averaging",
+            ),
+        ],
+        key_questions=[
+            "Should the average speed for equal-distance segments use the harmonic mean "
+            "(total distance / total time = n / sum(1/v_i)) or the arithmetic mean (sum/n)?",
+        ],
+    )
+
+
+def problem_cumulative():
+    """k=1 family, axis cumulative_interpretation: per-day rate from a cumulative column.
+
+    H2_derivable: the prompt_core explicitly labels the column as a "running total of all
+    registrations since day 0" (a cumulative total). A careful reader infers that "average
+    new registrations per day" = (last_cumulative - first_cumulative) / (last_day -
+    first_day) — the total incremental growth divided by elapsed time. The WRONG foil
+    (direct mean of the cumulative values) treats running totals as independent
+    observations, misusing the semantics that are visible in the retained prompt.
+    No external knowledge needed; "running total" is the retained disambiguator.
+
+    WHY H2 (not H1): "running total since day 0" in the prompt_core is the in-context
+    cue. Deriving "per-day new = Δcumulative/Δtime" requires only reading the column
+    label carefully, not external statistical convention.
+    WHY weak model defaults to column-mean: models compute average of the visible
+    numbers in the column without noticing the cumulative semantics.
+    PURE STDLIB: indexing, arithmetic, f-string; runs under `python -S` sandbox.
+
+    1 req class -> 2^1=2 interps: I0 (incremental, target) + I1 (direct, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_cumulative_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `avg_new_per_day(entries)` that returns the average "
+            "number of new registrations per day as a string rounded to 2 decimal "
+            "places. Each entry is a [day, cumulative_total] pair, where "
+            "cumulative_total is the running total of all registrations since day 0: "
+            "[[0, 0], [1, 3], [3, 9], [6, 15]]."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="cumulative_interpretation",
+                description="How to compute a per-day rate from a cumulative column",
+                clauses=[
+                    "Because the column is a running total (cumulative), the average "
+                    "new registrations per day is (last_cumulative - first_cumulative) "
+                    "/ (last_day - first_day). Do NOT average the cumulative column "
+                    "values directly — that misuses the running-total semantics. "
+                    "Answer to 2 decimals."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: incremental rate = (last_cum - first_cum) / (last_day - "
+                    "first_day) (target). 'Running total since day 0' in retained prompt "
+                    "is the derivable disambiguator. "
+                    "[[0,0],[1,3],[3,9],[6,15]] -> (15-0)/(6-0) = '2.50'."
+                ),
+                is_target=True,
+                gold_check="cumulative_incremental",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: direct mean of the cumulative "
+                    "column values (misuses running-total semantics, genuinely WRONG). "
+                    "[[0,0],[1,3],[3,9],[6,15]] -> (0+3+9+15)/4 = '6.75'."
+                ),
+                is_target=False,
+                gold_check="cumulative_direct",
+                opened_by="cumulative_interpretation",
+            ),
+        ],
+        key_questions=[
+            "Should 'average new registrations per day' use (last_cum - first_cum) / "
+            "(last_day - first_day), or the direct mean of the cumulative column values?",
+        ],
+    )
+
+
+def problem_tierank():
+    """k=1 family, axis tie_ranking: midpoint (average ordinal position) rank for ties.
+
+    H2_derivable: the prompt_core provides two in-context disambiguators:
+    (1) "returns a list of FLOAT ranks" — competition rank always produces integers;
+        the float return type signals that non-integer values (e.g. 1.5) are expected.
+    (2) "rank is the item's AVERAGE ordinal position among equally-scored items" —
+        'average ordinal position' unambiguously means the arithmetic mean of the
+        occupied ordinal slots, i.e. the midpoint rank. No external convention is needed;
+        the formula is spelled out in plain English in the retained prompt.
+    A careful reader applies both cues; a weak model defaults to competition rank
+    (assign the lowest rank number to all tied items).
+
+    WHY H2 (not H1): "average ordinal position" in the retained prompt_core explicitly
+    describes the midpoint formula in plain words — this is a derivable in-context cue,
+    not a convention name lookup (like "use fractional ranking" would be).
+    WHY weak model defaults: competition rank is the most common tie-breaking default
+    (ties get rank 1, 1, 3) and models implement it without reading "average ordinal
+    position" carefully.
+    PURE STDLIB: enumerate, sorted, sum; runs under `python -S` sandbox.
+
+    1 req class -> 2^1=2 interps: I0 (midpoint, target) + I1 (competition, [combined-default]).
+    """
+    return FullSpec(
+        domain="data_analysis",
+        task_id="data_tierank_001",
+        regime="H2_derivable",
+        prompt_core=(
+            "Write a function `rank_items(scores)` that returns a list of float ranks "
+            "for each score, where rank 1 = highest score. The rank of each item is its "
+            "AVERAGE ordinal position among equally-scored items (tied items share the "
+            "same float rank value). Higher scores receive lower rank numbers: [10, 10, 8]."
+        ),
+        requirement_classes=[
+            RequirementClass(
+                id="tie_ranking",
+                description="Concrete formula for the rank of tied items",
+                clauses=[
+                    "For tied items, assign each the MIDPOINT of the ordinal positions "
+                    "they collectively occupy: e.g. two items tied for positions 1 and 2 "
+                    "each receive rank 1.5; three items tied for positions 1-3 each "
+                    "receive rank 2.0. Return ranks as a list of floats."
+                ],
+            ),
+        ],
+        interpretations=[
+            InterpretationBranch(
+                id="I0",
+                description=(
+                    "NON-default: MIDPOINT (average ordinal position) rank for tied items "
+                    "(target). Both 'float ranks' and 'AVERAGE ordinal position' in the "
+                    "retained prompt are derivable cues. "
+                    "[10,10,8] -> [1.5, 1.5, 3.0]."
+                ),
+                is_target=True,
+                gold_check="tierank_midpoint",
+            ),
+            InterpretationBranch(
+                id="I1",
+                description=(
+                    "MODEL DEFAULT [combined-default]: COMPETITION rank — all tied items "
+                    "receive the lowest/first rank number (ignores 'average ordinal "
+                    "position', genuinely WRONG). "
+                    "[10,10,8] -> [1.0, 1.0, 3.0]."
+                ),
+                is_target=False,
+                gold_check="tierank_competition",
+                opened_by="tie_ranking",
+            ),
+        ],
+        key_questions=[
+            "Should tied items receive the MIDPOINT of their shared ordinal positions "
+            "(e.g. 1.5 for a 2-way tie at positions 1-2) or the minimum/competition "
+            "rank (e.g. 1.0 for all tied-first items)?",
+        ],
+    )
+
+
 def problem_active_users():
     """k=1 family, axis active_user_threshold: org-specific KPI activity threshold.
 
@@ -652,6 +967,64 @@ def avg_rate(series):
     return f"{sum(deltas) / len(deltas):.2f}"
 """,
 
+    # -- data_geomean_001 (growth_averaging axis, H2_derivable) ------------------
+    # I0: geometric mean = product^(1/n); I1: arithmetic mean = sum/n.
+    "geomean_geometric": """
+def average_growth(factors):
+    n = len(factors)
+    product = 1.0
+    for f in factors:
+        product *= f
+    return f"{product ** (1 / n):.2f}"
+""",
+    "geomean_arithmetic": """
+def average_growth(factors):
+    return f"{sum(factors) / len(factors):.2f}"
+""",
+
+    # -- data_harmonic_001 (speed_averaging axis, H2_derivable) ------------------
+    # I0: harmonic mean = n / sum(1/v_i); I1: arithmetic mean = sum/n.
+    "harmonic_hmean": """
+def average_speed(speeds):
+    n = len(speeds)
+    return f"{n / sum(1 / s for s in speeds):.2f}"
+""",
+    "harmonic_amean": """
+def average_speed(speeds):
+    return f"{sum(speeds) / len(speeds):.2f}"
+""",
+
+    # -- data_cumulative_001 (cumulative_interpretation axis, H2_derivable) ------
+    # I0: (last_cum - first_cum) / (last_day - first_day); I1: mean of col values.
+    "cumulative_incremental": """
+def avg_new_per_day(entries):
+    first_day, first_cum = entries[0]
+    last_day, last_cum = entries[-1]
+    return f"{(last_cum - first_cum) / (last_day - first_day):.2f}"
+""",
+    "cumulative_direct": """
+def avg_new_per_day(entries):
+    cum_values = [cum for day, cum in entries]
+    return f"{sum(cum_values) / len(cum_values):.2f}"
+""",
+
+    # -- data_tierank_001 (tie_ranking axis, H2_derivable) -----------------------
+    # I0: midpoint (avg ordinal position) for ties; I1: competition (first/lowest).
+    "tierank_midpoint": """
+def rank_items(scores):
+    sorted_desc = sorted(scores, reverse=True)
+    result = []
+    for score in scores:
+        positions = [i + 1 for i, s in enumerate(sorted_desc) if s == score]
+        result.append(sum(positions) / len(positions))
+    return result
+""",
+    "tierank_competition": """
+def rank_items(scores):
+    sorted_desc = sorted(scores, reverse=True)
+    return [float(sorted_desc.index(score) + 1) for score in scores]
+""",
+
     # -- data_activeusers_001 (active_user_threshold axis) --------------------
     "active_threshold3": """
 def count_active(sessions):
@@ -745,6 +1118,70 @@ TEST_CASES = {
         ([[0, 0], [5, 50], [6, 50]], "25.00"),
     ],
 
+    # -- data_geomean_001 --------------------------------------------------------
+    # Datasets where geometric mean ≠ arithmetic mean (3 cases, all distinct).
+    # A [1.10,1.50,1.10]: product=1.815 -> geom=1.815^(1/3)≈1.22; arith=3.70/3≈1.23
+    # B [1.10,2.00,1.10]: product=2.42  -> geom=2.42^(1/3)≈1.34;  arith=4.20/3=1.40
+    # C [1.25,2.00,1.25]: product=3.125 -> geom=3.125^(1/3)≈1.46; arith=4.50/3=1.50
+    "geomean_geometric": [
+        ([1.10, 1.50, 1.10], "1.22"),
+        ([1.10, 2.00, 1.10], "1.34"),
+        ([1.25, 2.00, 1.25], "1.46"),
+    ],
+    "geomean_arithmetic": [
+        ([1.10, 1.50, 1.10], "1.23"),
+        ([1.10, 2.00, 1.10], "1.40"),
+        ([1.25, 2.00, 1.25], "1.50"),
+    ],
+
+    # -- data_harmonic_001 -------------------------------------------------------
+    # Equal-distance segments: harmonic ≠ arithmetic for all datasets.
+    # A [60,30]:  h=2*60*30/90=40.00;   a=(60+30)/2=45.00
+    # B [40,60]:  h=2*40*60/100=48.00;  a=(40+60)/2=50.00
+    # C [10,90]:  h=2*10*90/100=18.00;  a=(10+90)/2=50.00
+    "harmonic_hmean": [
+        ([60, 30], "40.00"),
+        ([40, 60], "48.00"),
+        ([10, 90], "18.00"),
+    ],
+    "harmonic_amean": [
+        ([60, 30], "45.00"),
+        ([40, 60], "50.00"),
+        ([10, 90], "50.00"),
+    ],
+
+    # -- data_cumulative_001 -----------------------------------------------------
+    # Cumulative columns: incremental rate ≠ direct mean for all datasets.
+    # A [[0,0],[1,3],[3,9],[6,15]]:  incr=(15-0)/(6-0)=2.50;  direct=(0+3+9+15)/4=6.75
+    # B [[0,10],[2,16],[5,25]]:      incr=(25-10)/(5-0)=3.00;  direct=(10+16+25)/3=17.00
+    # C [[0,0],[4,20],[10,50]]:      incr=50/10=5.00;           direct=(0+20+50)/3=23.33
+    "cumulative_incremental": [
+        ([[0, 0], [1, 3], [3, 9], [6, 15]], "2.50"),
+        ([[0, 10], [2, 16], [5, 25]], "3.00"),
+        ([[0, 0], [4, 20], [10, 50]], "5.00"),
+    ],
+    "cumulative_direct": [
+        ([[0, 0], [1, 3], [3, 9], [6, 15]], "6.75"),
+        ([[0, 10], [2, 16], [5, 25]], "17.00"),
+        ([[0, 0], [4, 20], [10, 50]], "23.33"),
+    ],
+
+    # -- data_tierank_001 --------------------------------------------------------
+    # Tied scores: midpoint rank ≠ competition rank for all datasets.
+    # A [10,10,8]:      midpoint=[1.5,1.5,3.0];     competition=[1.0,1.0,3.0]
+    # B [5,5,5,1]:      midpoint=[2.0,2.0,2.0,4.0]; competition=[1.0,1.0,1.0,4.0]
+    # C [100,50,50,25]: midpoint=[1.0,2.5,2.5,4.0]; competition=[1.0,2.0,2.0,4.0]
+    "tierank_midpoint": [
+        ([10, 10, 8], [1.5, 1.5, 3.0]),
+        ([5, 5, 5, 1], [2.0, 2.0, 2.0, 4.0]),
+        ([100, 50, 50, 25], [1.0, 2.5, 2.5, 4.0]),
+    ],
+    "tierank_competition": [
+        ([10, 10, 8], [1.0, 1.0, 3.0]),
+        ([5, 5, 5, 1], [1.0, 1.0, 1.0, 4.0]),
+        ([100, 50, 50, 25], [1.0, 2.0, 2.0, 4.0]),
+    ],
+
     # -- data_activeusers_001 -------------------------------------------------
     # Datasets where count>=3 != count>=1 so the two checkers are disjoint.
     "active_threshold3": [
@@ -796,6 +1233,18 @@ ENTRYPOINTS = {
     # k=1 family: unequal-interval rate of change (H2_derivable)
     "rate_total":           "avg_rate",
     "rate_stepmean":        "avg_rate",
+    # k=1 family: geometric mean of multiplicative factors (H2_derivable)
+    "geomean_geometric":    "average_growth",
+    "geomean_arithmetic":   "average_growth",
+    # k=1 family: harmonic mean for equal-distance speed segments (H2_derivable)
+    "harmonic_hmean":       "average_speed",
+    "harmonic_amean":       "average_speed",
+    # k=1 family: incremental rate from cumulative column (H2_derivable)
+    "cumulative_incremental": "avg_new_per_day",
+    "cumulative_direct":    "avg_new_per_day",
+    # k=1 family: midpoint rank for tied items (H2_derivable)
+    "tierank_midpoint":     "rank_items",
+    "tierank_competition":  "rank_items",
     # k=1 family: active-user threshold
     "active_threshold3":    "count_active",
     "active_threshold1":    "count_active",
@@ -819,7 +1268,7 @@ for _check_id, _test_cases in TEST_CASES.items():
 # ============================================================================
 
 def generate_tasks() -> List[Task]:
-    """Generate all 12 data_analysis tasks (Amendment 03 combinatorial invariant).
+    """Generate all 20 data_analysis tasks (Amendment 03 combinatorial invariant).
 
     Amended invariant per variant (enforced by post-generation assertion):
         len(key_questions) == k'       (deleted-axis count)
@@ -828,13 +1277,13 @@ def generate_tasks() -> List[Task]:
         k0 control: prompt==latent_spec, 1 interp, empty key_questions.
 
     Task count:
-        4 k=1 families x 2 variants  =  8
-        1 k=2 family   x 4 variants  =  4
-        Total                        = 12
+        8 k=1 families x 2 variants  = 16  (7 H2_derivable + 1 H1_external)
+        1 k=2 family   x 4 variants  =  4  (H1_external)
+        Total                        = 20
 
-    The 4 k=1 families are 3 H2_derivable (central_tendency, price_weighting,
-    rate_interval) + 1 H1_external (active_user_threshold); the k=2 family is
-    H1_external (active_user_threshold x avg_rounding).
+    H2_derivable families: central_tendency, price_weighting, rate_interval,
+    growth_averaging, speed_averaging, cumulative_interpretation, tie_ranking.
+    H1_external families: active_user_threshold, active_user_threshold×avg_rounding.
     """
     tasks = []
 
@@ -851,6 +1300,22 @@ def generate_tasks() -> List[Task]:
         (problem_avg_rate(), [
             ("_k0", []),
             ("_k1_rate_interval", ["rate_interval"]),
+        ]),
+        (problem_geomean(), [
+            ("_k0", []),
+            ("_k1_growth_averaging", ["growth_averaging"]),
+        ]),
+        (problem_harmonic(), [
+            ("_k0", []),
+            ("_k1_speed_averaging", ["speed_averaging"]),
+        ]),
+        (problem_cumulative(), [
+            ("_k0", []),
+            ("_k1_cumulative_interpretation", ["cumulative_interpretation"]),
+        ]),
+        (problem_tierank(), [
+            ("_k0", []),
+            ("_k1_tie_ranking", ["tie_ranking"]),
         ]),
         (problem_active_users(), [
             ("_k0", []),
@@ -1034,6 +1499,99 @@ def count_active(sessions):
             """
 def count_active(sessions):
     return sum(sessions)
+""",
+        ]
+
+    elif task_id_base == "data_geomean_001":
+        return [
+            # Product alone (no root): returns full product, not the mean; matches 0
+            """
+def average_growth(factors):
+    product = 1.0
+    for f in factors:
+        product *= f
+    return f"{product:.2f}"
+""",
+            # Harmonic mean (wrong formula for growth factors); matches 0
+            """
+def average_growth(factors):
+    n = len(factors)
+    return f"{n / sum(1 / f for f in factors):.2f}"
+""",
+            # Arithmetic mean without 2-decimal format (format mismatch); matches 0
+            """
+def average_growth(factors):
+    return str(sum(factors) / len(factors))
+""",
+        ]
+
+    elif task_id_base == "data_harmonic_001":
+        return [
+            # Geometric mean (different wrong formula); matches 0
+            """
+def average_speed(speeds):
+    n = len(speeds)
+    product = 1.0
+    for s in speeds:
+        product *= s
+    return f"{product ** (1 / n):.2f}"
+""",
+            # Root-mean-square (yet another wrong formula); matches 0
+            """
+def average_speed(speeds):
+    n = len(speeds)
+    return f"{(sum(s ** 2 for s in speeds) / n) ** 0.5:.2f}"
+""",
+            # Minimum speed (totally wrong); matches 0
+            """
+def average_speed(speeds):
+    return f"{min(speeds):.2f}"
+""",
+        ]
+
+    elif task_id_base == "data_cumulative_001":
+        return [
+            # Mean of consecutive differences (not divided by elapsed time); matches 0
+            """
+def avg_new_per_day(entries):
+    diffs = [entries[i + 1][1] - entries[i][1] for i in range(len(entries) - 1)]
+    return f"{sum(diffs) / len(diffs):.2f}"
+""",
+            # Total new divided by number of steps (wrong denominator); matches 0
+            """
+def avg_new_per_day(entries):
+    total_new = entries[-1][1] - entries[0][1]
+    return f"{total_new / (len(entries) - 1):.2f}"
+""",
+            # Last cumulative value only (not a rate at all); matches 0
+            """
+def avg_new_per_day(entries):
+    return f"{entries[-1][1]:.2f}"
+""",
+        ]
+
+    elif task_id_base == "data_tierank_001":
+        return [
+            # Dense rank (1,1,2 for [10,10,8]) — different from both midpoint and competition
+            """
+def rank_items(scores):
+    unique_sorted = sorted(set(scores), reverse=True)
+    return [float(unique_sorted.index(s) + 1) for s in scores]
+""",
+            # Ordinal rank (1,2,3 — no shared ranks at all); matches 0
+            """
+def rank_items(scores):
+    order = sorted(range(len(scores)), key=lambda i: -scores[i])
+    result = [0.0] * len(scores)
+    for rank, idx in enumerate(order, 1):
+        result[idx] = float(rank)
+    return result
+""",
+            # Reversed rank (higher score = higher rank number, ascending); matches 0
+            """
+def rank_items(scores):
+    sorted_asc = sorted(scores)
+    return [float(sorted_asc.index(s) + 1) for s in scores]
 """,
         ]
 
