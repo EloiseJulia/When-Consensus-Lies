@@ -58,9 +58,9 @@ criterion; no result peeking drives their design (they are deterministic, execut
 SUPPORT/REFUTE rule. This amendment only supplies the cross-constructed data R2 was always meant to run on.
 
 ## 7. Sign-off
-- [ ] Owner @EloiseJulia approves the R2-B construction design (Anthropic claude-opus-4.8 second
+- [x] Owner @EloiseJulia approves the R2-B construction design (Anthropic claude-opus-4.8 second
       constructor; ~9–12 H1 items; cross-family cells = non-Anthropic tested; executable-gold; additive
-      constructor_family).
-- [ ] Owner acknowledges R2 results are reported honestly whatever they are.
+      constructor_family). — 2026-07-18
+- [x] Owner acknowledges R2 results are reported honestly whatever they are. — 2026-07-18
 
-Amendment status: **DRAFT — owner signs before the R2 subset run counts.** See DECISION-LOG.
+Amendment status: **SIGNED (owner @EloiseJulia, 2026-07-18).** See DECISION-LOG row 69.
