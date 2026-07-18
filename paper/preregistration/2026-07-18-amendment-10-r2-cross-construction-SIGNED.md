@@ -29,8 +29,11 @@ reference). This is the genuine cross-constructor control.
 
 ## 3. Construction protocol (executable-gold, H1_external)
 - **Generator:** `claude-opus-4.8` (via the local proxy) GENERATES the item semantics — the ambiguous
-  scenario, the single deleted OUTSIDE-knowledge disambiguator (H1_external), the NATURAL-DEFAULT target
-  interpretation I0 a reasonable unaware solver would pick, and the enumerated foils on that axis.
+  scenario, the single deleted OUTSIDE-knowledge disambiguator (H1_external), the enumerated foils, and —
+  per the FROZEN Amendment-01 target-reversal convention — the polarity: TARGET I0 = the interpretation
+  requiring the EXTERNAL/hidden convention (NOT the natural default), and the FOIL(s) = the NATURAL DEFAULT
+  a reasonable unaware solver produces. An unaware model lands on the FOIL → cd_primary (modal share over
+  non-target foils) is high → the trap. (See the Correction note at the end of this amendment.)
 - **Wrapping:** a construction sub-agent implements each generated spec in the existing bench format
   (deterministic executable-gold `check()`, unique-I0 fairness, Amdt-03 combinatorial invariants where
   k>1, `regime="H1_external"`, and the NEW immutable field `constructor_family="anthropic/claude-opus-4.8"`).
@@ -64,3 +67,13 @@ SUPPORT/REFUTE rule. This amendment only supplies the cross-constructed data R2 
 - [x] Owner acknowledges R2 results are reported honestly whatever they are. — 2026-07-18
 
 Amendment status: **SIGNED (owner @EloiseJulia, 2026-07-18).** See DECISION-LOG row 69.
+
+## Correction note (2026-07-19, non-substantive — aligns text to frozen A01)
+As-signed §3 mis-described the trap polarity as "NATURAL-DEFAULT target I0" — this contradicted the FROZEN
+Amendment-01 target-reversal convention (verified against main item `code_quarter_001`: TARGET I0 = the
+external/hidden-convention interpretation, e.g. fiscal-April; FOIL = the natural default an unaware solver
+writes, e.g. calendar). The implemented R2 items follow the CORRECT (A01) polarity. This note corrects the
+amendment TEXT to match A01 and the implementation; it changes NO design choice (A01's polarity was always
+frozen), the metric, the R2 rule, or the constructor family. A GPT cross-family audit surfaced the
+mis-description; the owner is notified for transparency (governance: no silent change to a signed doc).
+DECISION-LOG row 70.
