@@ -171,8 +171,9 @@ def test_io_constructor_family_derivation(tmp_path):
     """include_constructor_family=True populates the column from the id prefix."""
     from analysis.io import load_runs_tidy, _derive_constructor_family
 
+    # Canonical Anthropic family string (matches config.yaml / decision_rules namespace).
     assert _derive_constructor_family("r2xf_code_intdiv_001_k1_integer_division") == \
-        "anthropic/claude-opus-4.8"
+        "anthropic"
     assert _derive_constructor_family("policy_overtime_001_k1") == "mai-code"
 
     ckpt = tmp_path / "ckpt.jsonl"
@@ -182,8 +183,45 @@ def test_io_constructor_family_derivation(tmp_path):
     df = load_runs_tidy(ckpt, tasks, include_constructor_family=True)
     assert "constructor_family" in df.columns
     fam = dict(zip(df["task"], df["constructor_family"]))
-    assert fam["r2xf_policy_days_001_k1_day_count"] == "anthropic/claude-opus-4.8"
+    assert fam["r2xf_policy_days_001_k1_day_count"] == "anthropic"
     assert fam["policy_tip_001_k1"] == "mai-code"
+
+
+def test_r2xf_anthropic_tested_is_same_family(tmp_path):
+    """An Anthropic-tested r2xf_ row has constructor_family == tested family (SAME).
+
+    Guards the BLOCKER fix: 'anthropic' == 'anthropic' must hold so that
+    decision_rules._r2_construction_ci correctly EXCLUDES the row from the
+    cross-family subset (it is same-family, not cross-family).
+    """
+    from analysis.io import load_runs_tidy, _derive_constructor_family
+
+    r2_task_id = "r2xf_policy_days_001_k1_day_count"
+    constructor_fam = _derive_constructor_family(r2_task_id)
+    # Canonical Anthropic tested-model family (from config.yaml).
+    tested_fam = "anthropic"
+    assert constructor_fam == tested_fam, (
+        f"Anthropic-tested r2xf_ cell must be SAME-family: "
+        f"constructor={constructor_fam!r} vs tested={tested_fam!r}"
+    )
+
+
+def test_r2xf_openai_tested_is_cross_family(tmp_path):
+    """An OpenAI-tested r2xf_ row has constructor_family != tested family (CROSS).
+
+    Guards the core R2 control: when tested by gpt-* (family='openai'),
+    the Anthropic-constructed r2xf_ items are genuinely cross-family, so the
+    convergent-delusion effect on that subset is attribution-clean.
+    """
+    from analysis.io import _derive_constructor_family
+
+    r2_task_id = "r2xf_code_intdiv_001_k1_integer_division"
+    constructor_fam = _derive_constructor_family(r2_task_id)
+    tested_fam = "openai"
+    assert constructor_fam != tested_fam, (
+        f"OpenAI-tested r2xf_ cell must be CROSS-family: "
+        f"constructor={constructor_fam!r} vs tested={tested_fam!r}"
+    )
 
 
 def test_io_default_is_byte_identical(tmp_path):
@@ -208,3 +246,47 @@ def test_io_default_is_byte_identical(tmp_path):
     df_flag = load_runs_tidy(ckpt, tasks, include_constructor_family=True)
     for col in expected_cols:
         assert list(df_flag[col]) == list(df_default[col]), f"column {col} changed"
+
+
+# ── bench/r2_xf collision guard (Amendment 10) ───────────────────────────────
+
+def test_register_into_host_domains_fail_closed():
+    """_register_into_host_domains raises on a real host-id collision (fail-closed).
+
+    Guards the MINOR fix: a genuine collision (a host checker already owns the id
+    with a DIFFERENT object) must raise RuntimeError, not silently overwrite.
+    """
+    from bench.r2_xf import CHECKERS, CHECK_SPECS
+
+    import bench.code_spec as _code
+
+    # Pick the first code-domain r2xf checker to stage a fake collision.
+    code_cids = [cid for cid, spec in CHECK_SPECS.items() if spec["kind"] == "code"]
+    assert code_cids, "need at least one code-domain r2xf item"
+    cid = code_cids[0]
+
+    # Temporarily inject a foreign (different) object under the same id.
+    import types
+    foreign_checker = types.SimpleNamespace(check=lambda x: x)
+    original = _code.CHECKERS.pop(cid, None)  # remove the real r2xf entry if present
+    _code.CHECKERS[cid] = foreign_checker      # inject imposter
+
+    try:
+        with pytest.raises(RuntimeError, match="collides with a host checker id"):
+            # Re-invoke the registration function; it must detect the imposter.
+            from bench.r2_xf import _register_into_host_domains
+            _register_into_host_domains()
+    finally:
+        # Restore host registry to a clean state.
+        if original is not None:
+            _code.CHECKERS[cid] = original
+        else:
+            _code.CHECKERS.pop(cid, None)
+
+
+def test_register_into_host_domains_idempotent():
+    """Re-importing (identical object) does NOT raise (idempotent re-registration)."""
+    # bench.r2_xf is already imported; calling _register_into_host_domains again
+    # should be a no-op because checkers[cid] is CHECKERS[cid] for every r2xf id.
+    from bench.r2_xf import _register_into_host_domains
+    _register_into_host_domains()  # must not raise

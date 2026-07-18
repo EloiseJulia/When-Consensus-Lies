@@ -111,7 +111,13 @@ _CONSTRUCTOR_FAMILY = "constructor_family"
 # mai-code (the original constructor). Kept as a single source of truth so
 # analysis/decision_rules.CONSTRUCTOR_COL is populated for evaluate_r2.
 _R2XF_TASK_PREFIX = "r2xf_"
-_R2XF_CONSTRUCTOR_FAMILY = "anthropic/claude-opus-4.8"
+# Canonical family namespace — MUST match config.yaml's family field for Anthropic
+# models (e.g. "anthropic" for claude-opus-4.8, claude-sonnet-4.6, etc.) so that
+# decision_rules._r2_construction_ci's direct-equality comparison correctly
+# classifies Anthropic-tested r2xf_ cells as SAME-family (not cross-family).
+# The specific constructor model is recorded separately for provenance only.
+_R2XF_CONSTRUCTOR_FAMILY = "anthropic"
+_R2XF_CONSTRUCTOR_MODEL = "claude-opus-4.8"   # provenance only; not used in comparisons
 _DEFAULT_CONSTRUCTOR_FAMILY = "mai-code"
 
 

@@ -271,8 +271,10 @@ def _register_into_host_domains() -> None:
     }
     for cid, spec in CHECK_SPECS.items():
         checkers, references = host[spec["kind"]]
-        # Never clobber a host id (all r2xf_ ids are disjoint; assert to be safe).
-        if cid in checkers and cid not in CHECKERS:
+        # Fail-closed: raise on ANY pre-existing host id UNLESS it is already
+        # the identical registered R2 checker (idempotent re-import is fine;
+        # a real host-id collision would silently corrupt labeling otherwise).
+        if cid in checkers and checkers[cid] is not CHECKERS[cid]:
             raise RuntimeError(f"r2_xf id {cid!r} collides with a host checker id")
         checkers[cid] = CHECKERS[cid]
         references[cid] = REFERENCE_CANDIDATES[cid]
