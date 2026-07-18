@@ -158,6 +158,11 @@ _DOMAIN_LOADERS = {
     "code_spec":      lambda: __import__("bench.code_spec",    fromlist=["generate_tasks"]).generate_tasks(),
     "data_analysis":  lambda: __import__("bench.data_analysis", fromlist=["generate_tasks"]).generate_tasks(),
     "policy_qa":      lambda: __import__("bench.policy_qa",    fromlist=["generate_tasks"]).generate_tasks(),
+    # Amendment 10 (R2 cross-family construction): Anthropic claude-opus-4.8-
+    # constructed H1_external subset. ADDITIVE — intentionally NOT in
+    # _ALL_DOMAIN_NAMES so it never enters the default confirmatory grid; it is
+    # run explicitly via `--domains r2_xf` as a separate R2 partition.
+    "r2_xf":          lambda: __import__("bench.r2_xf",        fromlist=["generate_tasks"]).generate_tasks(),
 }
 
 

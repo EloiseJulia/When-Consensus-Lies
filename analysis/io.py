@@ -100,6 +100,38 @@ _AMBIGUITY_K = COLS["ambiguity_k"]  # "ambiguity_k"
 _MODEL = "model"               # extra column: raw model_id
 # A09 additive: opt-in output column for abstention analysis (P2).
 _OUTPUT = "output"             # AgentRun.output raw string
+# Amendment-10 additive: opt-in constructor_family column for the R2 cross-family
+# construction control. Derived from the task_id prefix (NOT from a schema field),
+# so common/schema.py stays frozen and existing callers are byte-identical.
+_CONSTRUCTOR_FAMILY = "constructor_family"
+
+# Amendment-10 constructor-family provenance (task-id -> constructing model family).
+# The R2 subset (bench/r2_xf, task ids prefixed "r2xf_") was constructed by the
+# Anthropic claude-opus-4.8 family; every other benchmark item was constructed by
+# mai-code (the original constructor). Kept as a single source of truth so
+# analysis/decision_rules.CONSTRUCTOR_COL is populated for evaluate_r2.
+_R2XF_TASK_PREFIX = "r2xf_"
+# Canonical family namespace — MUST match config.yaml's family field for Anthropic
+# models (e.g. "anthropic" for claude-opus-4.8, claude-sonnet-4.6, etc.) so that
+# decision_rules._r2_construction_ci's direct-equality comparison correctly
+# classifies Anthropic-tested r2xf_ cells as SAME-family (not cross-family).
+# The specific constructor model is recorded separately for provenance only.
+_R2XF_CONSTRUCTOR_FAMILY = "anthropic"
+_R2XF_CONSTRUCTOR_MODEL = "claude-opus-4.8"   # provenance only; not used in comparisons
+_DEFAULT_CONSTRUCTOR_FAMILY = "mai-code"
+
+
+def _derive_constructor_family(task_id: str) -> str:
+    """Derive the constructing model family from a task_id (Amendment 10).
+
+    Items in the R2 cross-family subset carry the ``r2xf_`` id prefix and were
+    constructed by ``anthropic/claude-opus-4.8``; all other items were
+    constructed by ``mai-code``. This is a pure id-prefix mapping — it reads no
+    schema field, so it never alters existing columns/identities.
+    """
+    if task_id.startswith(_R2XF_TASK_PREFIX):
+        return _R2XF_CONSTRUCTOR_FAMILY
+    return _DEFAULT_CONSTRUCTOR_FAMILY
 
 
 def _derive_model_class(
@@ -133,6 +165,7 @@ def load_runs_tidy(
     model_class_map: Optional[Dict[str, str]] = None,
     expected_endpoint: Optional[str] = None,
     include_output: bool = False,
+    include_constructor_family: bool = False,
 ) -> pd.DataFrame:
     """Load an AgentRun-JSONL checkpoint into a tidy agent-level DataFrame.
 
@@ -163,11 +196,19 @@ def load_runs_tidy(
         include_output: If True, add an ``output`` column carrying the raw
             AgentRun.output string (for Amendment-09 P2 abstention analysis).
             Default False — existing callers are byte-identical (no new column).
+        include_constructor_family: If True, add a ``constructor_family`` column
+            derived from the task_id prefix (Amendment 10 R2 control): ``r2xf_``
+            → ``"anthropic/claude-opus-4.8"``, everything else → ``"mai-code"``.
+            Default False — existing callers are byte-identical (no new column).
+            Enable it to populate ``decision_rules.CONSTRUCTOR_COL`` for
+            ``evaluate_r2`` on the cross-family R2 partition.
 
     Returns:
         tidy DataFrame with one row per labeled AgentRun, columns:
             task, method, model_class, seed, label, target, regime, ambiguity_k, model
         When ``include_output=True``, an additional ``output`` column is appended.
+        When ``include_constructor_family=True``, a ``constructor_family`` column
+        is appended (Amendment-10 R2 control).
         An empty DataFrame with the correct columns when the file is missing,
         empty, or contains no valid labeled run records.
 
@@ -197,6 +238,8 @@ def load_runs_tidy(
             _REGIME, _AMBIGUITY_K, _MODEL]
     if include_output:
         cols = cols + [_OUTPUT]
+    if include_constructor_family:
+        cols = cols + [_CONSTRUCTOR_FAMILY]
     rows: List[Dict] = []
 
     if not checkpoint_path.exists():
@@ -267,6 +310,8 @@ def load_runs_tidy(
         }
         if include_output:
             row[_OUTPUT] = rec.get("output", "")
+        if include_constructor_family:
+            row[_CONSTRUCTOR_FAMILY] = _derive_constructor_family(task_id)
         rows.append(row)
 
     if not rows:
