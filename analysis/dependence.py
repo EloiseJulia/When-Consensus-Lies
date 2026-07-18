@@ -173,6 +173,83 @@ def kappa(labels: List[str], categories: Sequence[str]) -> float:
     return fleiss_kappa(labels, categories)
 
 
+def fleiss_kappa_multi(
+    ratings: List[List[str]],
+    categories: Sequence[str],
+) -> float:
+    """Multi-subject Fleiss' κ: N items as subjects, agents as raters.
+
+    Estimand: chance-corrected inter-rater agreement across N items, where
+    marginal category probabilities are estimated from ALL items pooled (not
+    per-item). This avoids the per-cell degeneracy of estimating P_e from a
+    single subject's label counts (which algebraically forces κ = −1/(n−1)
+    for any non-unanimous single-item cell).
+
+    Grouping: call with all items belonging to the SAME experimental group
+    (e.g. same method × model_class × seed), so each item is one subject and
+    each agent column is one rater.
+
+    Formula (Fleiss 1971, multi-subject):
+        n_ij  = count of agents assigning category j to item i
+        p_j   = Σ_i n_ij / Σ_i n_i          (pooled marginal across all items)
+        P_i   = Σ_j n_ij(n_ij−1) / [n_i(n_i−1)]  (per-item observed agreement)
+        P̄_o  = (1/N) Σ_i P_i                (mean observed agreement)
+        P̄_e  = Σ_j p_j²                     (expected agreement under independence)
+        κ     = (P̄_o − P̄_e) / (1 − P̄_e)
+
+    Returns NaN when valid N (items with ≥2 raters) < 2, fewer than 2
+    categories are present, or P̄_e = 1.
+
+    Args:
+        ratings: List of per-item label lists. ``ratings[i]`` is the list of
+            all agent labels for item i (i.e. one cell in the item × agents
+            matrix, with items as subjects).
+        categories: The full interpretation set (bounds the denominator).
+
+    Returns:
+        Float κ in (−∞, 1], or NaN for degenerate inputs.
+    """
+    cats = list(categories)
+    k = len(cats)
+    if k < 2:
+        return float("nan")
+    cat_idx = {c: j for j, c in enumerate(cats)}
+
+    total_ratings = 0
+    cat_totals = [0] * k
+    P_o_sum = 0.0
+    valid_N = 0
+
+    for row in ratings:
+        ni = len(row)
+        if ni < 2:
+            continue
+        valid_N += 1
+        n_ij = [0] * k
+        for lbl in row:
+            j = cat_idx.get(lbl, -1)
+            if j >= 0:
+                n_ij[j] += 1
+        for j in range(k):
+            cat_totals[j] += n_ij[j]
+        total_ratings += ni
+        P_i = sum(nij * (nij - 1) for nij in n_ij) / (ni * (ni - 1))
+        P_o_sum += P_i
+
+    if valid_N < 2 or total_ratings == 0:
+        return float("nan")
+
+    P_o = P_o_sum / valid_N
+    p_j = [c / total_ratings for c in cat_totals]
+    P_e = sum(pj ** 2 for pj in p_j)
+
+    if abs(1.0 - P_e) < 1e-12:
+        # All raters agree on the same category across all items.
+        return 1.0 if abs(P_o - 1.0) < 1e-12 else float("nan")
+
+    return (P_o - P_e) / (1.0 - P_e)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. ICC(1) of wrong-indicator across cells
 # ─────────────────────────────────────────────────────────────────────────────
@@ -486,6 +563,8 @@ def compute_dependence_table(
     group_cols = cell_cols + [c for c in carry if c not in cell_cols]
 
     cell_rows: List[Dict] = []
+    _cell_labels_list: List[List[str]] = []  # parallel: raw labels per cell (for group kappa)
+    _cell_cats_list: List[List[str]] = []    # parallel: categories per cell (for group kappa)
     for key, group in tidy.groupby(group_cols, dropna=False, sort=False):
         if not isinstance(key, tuple):
             key = (key,)
@@ -497,7 +576,7 @@ def compute_dependence_table(
         row["cd_primary"] = cd_primary(labels, target)
         row["pairwise_wrong_agreement"] = pairwise_wrong_agreement(labels, target)
 
-        # Derive or look up interpretation set for kappa.
+        # Derive or look up interpretation set (used below for group kappa).
         task_id = row.get(_ITEM, "")
         if interpretation_sets and task_id in interpretation_sets:
             cats = interpretation_sets[task_id]
@@ -505,8 +584,26 @@ def compute_dependence_table(
             # Infer from unique labels present in ALL rows for this item.
             item_rows = tidy[tidy[_ITEM] == task_id] if _ITEM in tidy.columns else group
             cats = sorted(item_rows[_LABEL].dropna().unique().tolist())
-        row["kappa"] = kappa(labels, cats)
+        # kappa is filled below at group level (multi-subject Fleiss' κ)
+        _cell_labels_list.append(labels)
+        _cell_cats_list.append(cats)
         cell_rows.append(row)
+
+    # ── Multi-subject Fleiss' κ per (method × model_class × seed) group ───────
+    # Each item in the group is one subject; agents are raters.  Pooling items
+    # avoids the single-subject degeneracy (per-cell κ = −1/(n−1) for any
+    # non-unanimous cell) and gives a valid cross-item agreement estimate.
+    _kappa_key_cols = [c for c in [_METHOD, _MODEL_CLASS, _SEED] if c in tidy.columns]
+    _kappa_idx: Dict[tuple, List[int]] = {}
+    for _i, _row in enumerate(cell_rows):
+        _gk = tuple(_row.get(c) for c in _kappa_key_cols)
+        _kappa_idx.setdefault(_gk, []).append(_i)
+    for _gk, _idxs in _kappa_idx.items():
+        _ratings = [_cell_labels_list[_i] for _i in _idxs]
+        _cats_group = sorted({cat for _i in _idxs for cat in _cell_cats_list[_i]})
+        _kv = fleiss_kappa_multi(_ratings, _cats_group)
+        for _i in _idxs:
+            cell_rows[_i]["kappa"] = _kv
 
     cell_df = pd.DataFrame(cell_rows)
 
@@ -524,12 +621,15 @@ def compute_dependence_table(
             regime_tidy = tidy
             regime_cells = cell_df
 
-        # Per-item cell_labels for ICC: group by item within the regime.
-        if _ITEM in regime_tidy.columns and _TARGET in regime_tidy.columns:
-            item_groups = regime_tidy.groupby(_ITEM, sort=False)
+        # Per-cell ICC: group by the FROZEN four-column cell key so that distinct
+        # (method, model_class, seed) cells are NOT merged into one task cluster.
+        # Grouping by task alone would mix cells across methods/seeds, inflating
+        # within-cluster variance and deflating ICC.
+        if all(c in regime_tidy.columns for c in [_TARGET]):
+            _icc_key = [c for c in _CELL_COLS if c in regime_tidy.columns]
             cell_label_groups: List[List[str]] = []
             item_targets: List[str] = []
-            for _, ig in item_groups:
+            for _, ig in regime_tidy.groupby(_icc_key, sort=False):
                 cell_label_groups.append(list(ig[_LABEL]))
                 item_targets.append(str(ig[_TARGET].iloc[0]))
             # Compute ICC with a shared target only when all items have the same target.
@@ -558,8 +658,11 @@ def compute_dependence_table(
             else float("nan")
         )
 
+        # Pass the FULL tidy table so that per-model marginals are estimated
+        # across the full run (all regimes).  The regime filter is applied
+        # inside independence_counterfactual via the ``regime`` argument.
         cf = independence_counterfactual(
-            regime_tidy, n_bootstrap=n_bootstrap, seed=seed
+            tidy, regime=reg, n_bootstrap=n_bootstrap, seed=seed
         )
 
         regime_summary[str(reg)] = {

@@ -19,6 +19,7 @@ from analysis.dependence import (
     compute_dependence_table,
     effective_ensemble_size,
     fleiss_kappa,
+    fleiss_kappa_multi,
     icc_wrong_indicator,
     independence_counterfactual,
     kappa,
@@ -177,6 +178,105 @@ class TestFleissKappa:
         labels = ["I0", "I0", "I1"]
         cats = ["I0", "I1"]
         assert kappa(labels, cats) == pytest.approx(fleiss_kappa(labels, cats))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2b. fleiss_kappa_multi — multi-subject Fleiss' κ (Fix 1 golden tests)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestFleissKappaMulti:
+    """Golden tests for the multi-subject Fleiss' κ.
+
+    These tests MUST distinguish genuinely different agreement levels; the test
+    would FAIL if κ collapsed to a constant (e.g. −1/(n−1)).
+    """
+
+    def test_all_items_unanimous_kappa_one(self):
+        """All items: every agent agrees on the same label → κ = 1."""
+        # P̄_e = 1 (all mass on one category) → handled by the P_e=1 branch → 1.0
+        ratings = [["I1", "I1", "I1"]] * 5
+        cats = ["I0", "I1", "I2"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert val == pytest.approx(1.0)
+
+    def test_agreement_at_chance_kappa_zero(self):
+        """P̄_o = P̄_e → κ = 0 (observed equals chance agreement).
+
+        Construction: 4 items, 2 raters, 2 categories.
+        Items 1-2: both agree; items 3-4: both disagree.
+        → P̄_o = 0.5; marginals p_I0 = p_I1 = 0.5 → P̄_e = 0.5 → κ = 0.
+        """
+        ratings = [
+            ["I0", "I0"],  # agree
+            ["I1", "I1"],  # agree
+            ["I0", "I1"],  # disagree
+            ["I1", "I0"],  # disagree
+        ]
+        cats = ["I0", "I1"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert val == pytest.approx(0.0)
+
+    def test_systematic_disagreement_kappa_negative(self):
+        """Each item: every agent picks a DIFFERENT label → κ < 0."""
+        # P_i = 0 for each item (no within-item pairs agree)
+        # P̄_e = 1/3 (3 categories, uniform marginals) → κ = −0.5
+        ratings = [["I0", "I1", "I2"]] * 5
+        cats = ["I0", "I1", "I2"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert not math.isnan(val)
+        assert val < 0
+        assert val == pytest.approx(-0.5)
+
+    def test_single_item_returns_nan(self):
+        """N = 1 subject is degenerate → NaN (need N ≥ 2)."""
+        assert math.isnan(fleiss_kappa_multi([["I0", "I1", "I0"]], ["I0", "I1"]))
+
+    def test_empty_ratings_returns_nan(self):
+        assert math.isnan(fleiss_kappa_multi([], ["I0", "I1"]))
+
+    def test_too_few_categories_returns_nan(self):
+        assert math.isnan(fleiss_kappa_multi([["I0", "I0"], ["I0", "I0"]], ["I0"]))
+
+    def test_high_agreement_kappa_near_one(self):
+        """Mostly unanimous items with balanced categories → κ substantially above 0.
+
+        Use 5 unanimous-I1 + 5 unanimous-I0 + 1 split item.
+        P̄_o = 10/11 ≈ 0.909; balanced marginals → P̄_e = 0.5;
+        κ = 2·(10/11 − 0.5) = 9/11 ≈ 0.818.
+        """
+        ratings = (
+            [["I1", "I1"]] * 5 +   # 5 unanimous I1
+            [["I0", "I0"]] * 5 +   # 5 unanimous I0
+            [["I0", "I1"]]          # 1 split → P_i = 0
+        )
+        cats = ["I0", "I1"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert not math.isnan(val)
+        assert val == pytest.approx(9 / 11, abs=1e-9)
+        assert val > 0.7
+
+    def test_different_agreement_levels_distinguished(self):
+        """κ_high > κ_low: high agreement must give higher κ than low agreement."""
+        # High agreement: all items unanimous
+        ratings_high = [["I1", "I1", "I1"]] * 4 + [["I0", "I0", "I0"]] * 1
+        # Low agreement: all items have split votes
+        ratings_low = [["I0", "I1", "I2"]] * 5
+        cats = ["I0", "I1", "I2"]
+        kappa_high = fleiss_kappa_multi(ratings_high, cats)
+        kappa_low = fleiss_kappa_multi(ratings_low, cats)
+        assert kappa_high > kappa_low
+
+    def test_ragged_items_skipped(self):
+        """Items with only 1 rater are skipped (need ≥ 2 raters per item)."""
+        ratings = [
+            ["I1"],            # only 1 rater → skip
+            ["I0", "I0"],      # 2 raters, agree
+            ["I1", "I1"],      # 2 raters, agree
+        ]
+        cats = ["I0", "I1"]
+        val = fleiss_kappa_multi(ratings, cats)
+        # After skipping the single-rater item, N = 2, both agree → κ = 1.0
+        assert val == pytest.approx(1.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -447,3 +547,63 @@ class TestComputeDependenceTable:
         # Both rows should be in ONE cell (n_agents = 2).
         assert len(cell_df) == 1
         assert int(cell_df.iloc[0]["n_agents"]) == 2
+
+    def test_frozen_cells_unanimous_icc_one(self):
+        """Auditor's ICC test: each frozen cell internally unanimous → ICC ≈ 1.0.
+
+        The buggy groupby-task code merged distinct methods into one cluster,
+        creating artificial within-cluster variance → ICC returned −0.333.
+        After the fix (groupby frozen cell key), MS_W = 0 → ICC = 1.0.
+        """
+        rows = []
+        for task in ["T1", "T2"]:
+            # Cell (task, sc, r, 1): both agents wrong → indicators [1, 1]
+            for j in range(2):
+                rows.append({"task": task, "method": "sc", "model_class": "r", "seed": 1,
+                             "label": "I1", "target": "I0", "regime": "H1_external",
+                             "ambiguity_k": 1, "model": f"m{j}"})
+            # Cell (task, mc, r, 1): both agents correct → indicators [0, 0]
+            for j in range(2):
+                rows.append({"task": task, "method": "mc", "model_class": "r", "seed": 1,
+                             "label": "I0", "target": "I0", "regime": "H1_external",
+                             "ambiguity_k": 1, "model": f"m{j}"})
+        tidy = pd.DataFrame(rows)
+        _, regime_summary = compute_dependence_table(tidy, n_bootstrap=10)
+        icc_val = regime_summary["H1_external"]["icc"]
+        # Each frozen cell is internally unanimous → MS_W = 0 → ICC = 1.0
+        assert not math.isnan(icc_val)
+        assert icc_val == pytest.approx(1.0)
+
+    def test_full_run_scoped_marginals_h1_delta(self):
+        """Auditor's counterfactual test: full-run marginals give positive H1 delta.
+
+        Setup: models always wrong in H1, always correct in H2.
+        - Full-run marginal per model: ~50% wrong.
+        - Under independence with 50% wrong marginal, observed H1 CD > counterfactual.
+        - delta > 0 substantially (≈ 0.5).
+        Bug: passing regime_tidy (H1 only) to independence_counterfactual gives
+        marginals of 100% wrong → counterfactual = observed → delta ≈ 0.
+        """
+        rows = []
+        for i in range(5):
+            for j in range(5):
+                # H1: all 5 agents wrong (convergent delusion)
+                rows.append({
+                    "task": f"TH1_{i}", "method": "sc", "model_class": "r", "seed": 1,
+                    "label": "I1", "target": "I0",
+                    "regime": "H1_external", "ambiguity_k": 1, "model": f"m{j}",
+                })
+                # H2: all 5 agents correct
+                rows.append({
+                    "task": f"TH2_{i}", "method": "sc", "model_class": "r", "seed": 1,
+                    "label": "I0", "target": "I0",
+                    "regime": "H2_derivable", "ambiguity_k": 1, "model": f"m{j}",
+                })
+        tidy = pd.DataFrame(rows)
+        _, regime_summary = compute_dependence_table(tidy, n_bootstrap=300, seed=0)
+        delta_h1 = regime_summary["H1_external"]["delta"]
+        # With full-run marginals each model is 50% wrong; under independence
+        # H1 counterfactual CD < 1.0 → delta > 0 substantially.
+        # With regime-filtered (buggy) marginals: delta ≈ 0.
+        assert not math.isnan(delta_h1)
+        assert delta_h1 > 0.3

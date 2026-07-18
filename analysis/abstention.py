@@ -147,14 +147,22 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
         _p(r"\bit['']s\s+(?:not\s+)?(?:clear|obvious)\s+(?:which|what|whether)\b"),
     ]),
 
-    # 7. Hedged assumption — partial commitment with explicit assumption announcement.
+    # 7. Hedged assumption — agent explicitly names what it ASSUMES about the
+    #    referent/question, signalling unresolved interpretation ambiguity.
+    #    A committed answer that merely states an analytical assumption and then
+    #    gives a final interpretation is NOT an abstention (abstained=False).
+    #    These patterns therefore require the assumption to be explicitly about
+    #    WHICH interpretation / what "you mean" / what "you're asking" — not
+    #    any general methodological assumption.
     (SIGNAL_ASSUMING, [
         _p(r"\b(?:assuming|i['']ll\s+assume|i['']m\s+assuming|let\s+me\s+assume)\b"
            r".{0,80}(?:you\s+mean|you['']re\s+asking|this\s+refers\s+to)\b"),
         _p(r"\bassuming\s+(?:that\s+)?(?:by|you\s+mean|this\s+is\s+about)\b"),
-        _p(r"\bi\s+(?:will|shall|am\s+going\s+to)\s+assume\b"),
-        _p(r"\b(?:for\s+the\s+purposes?\s+of\s+this\s+(?:answer|response)|"
-           r"in\s+the\s+absence\s+of\s+more\s+context)\b"),
+        _p(r"\bi\s+(?:will|shall|am\s+going\s+to)\s+assume\b.{0,80}"
+           r"(?:you\s+(?:mean|are\s+asking|are\s+referring)|"
+           r"the\s+question\s+(?:refers|is\s+about))\b"),
+        _p(r"\bin\s+the\s+absence\s+of\s+(?:more|additional|further)\s+"
+           r"(?:context|information)\b"),
     ]),
 ]
 

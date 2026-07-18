@@ -212,6 +212,29 @@ class TestDetectAbstentionNegative:
         # "I determine" (positive confident assertion) should not fire cannot_determine
         assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
 
+    def test_committed_answer_with_stated_assumption_not_abstained(self):
+        """Auditor example 1: analytical assumption + committed answer → abstained=False.
+
+        'I will assume [methodological premise]. The answer is X.' must not be
+        classified as abstention — the agent commits to a final interpretation.
+        """
+        out = "I will assume the standard definition applies here. The answer is I1."
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_for_purposes_of_answer_not_abstained(self):
+        """Auditor example 2: 'For the purposes of this answer' preamble → abstained=False.
+
+        A committed answer that frames its context with 'For the purposes of
+        this answer, I'm using definition A' and then gives a final result must
+        classify as CONFIDENT_COMMIT, not as abstention.
+        """
+        out = "For the purposes of this answer, I'm using definition A. The result is I2."
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. detect_abstention — output schema
