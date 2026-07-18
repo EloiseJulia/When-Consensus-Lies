@@ -43,6 +43,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import random
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -139,6 +140,15 @@ CACHE_DIR_PILOT = ".llm_cache_pilot_gate"
 RPM_DEFAULT = 30
 MAX_TOKENS_PER_CALL = 12288  # raised for frontier reasoners
 
+# R1b margin (Amendment 07): observed CD must exceed the uniform-interpretation
+# null by this many percentage points to trigger R1b PASS.
+# Rationale: 15 pp sits well below the typical signal (CD_real ≈ 0.6–1.0,
+# CD_unif ≈ 0.35–0.50 for 2–4 interpretations → margin ≈ 0.1–0.65) while
+# being large enough to absorb Monte Carlo noise (SD of CD_unif estimate at
+# n_perm=200 is ≈ 0.016 for 5 agents × 2 interps).  Pre-registered in
+# Amendment 07 (2026-07-17).
+R1B_MARGIN: float = 0.15
+
 
 # ── Domain loading (D2) ──────────────────────────────────────────────────────
 
@@ -199,6 +209,53 @@ def _select_balanced_k(tasks: List[Any], n: int) -> List[Any]:
     return result
 
 
+# ── Bootstrap CI helpers (Amendment 07 — item-level bootstrap for R1a/R1b) ──
+
+def _bootstrap_ci(
+    samples: List[float],
+    n_boot: int = 2000,
+    seed: int = 42,
+) -> Tuple[float, float]:
+    """Bootstrap 95% CI for mean(samples), resampling with replacement.
+
+    Returns (lower_2.5pct, upper_97.5pct). Returns (-inf, +inf) for empty input.
+    Uses random.Random for determinism.
+    """
+    if not samples:
+        return (float("-inf"), float("inf"))
+    rng = random.Random(seed)
+    n = len(samples)
+    boot_means = sorted(
+        sum(rng.choices(samples, k=n)) / n for _ in range(n_boot)
+    )
+    lo_idx = max(0, int(n_boot * 0.025) - 1)
+    hi_idx = min(n_boot - 1, int(n_boot * 0.975))
+    return boot_means[lo_idx], boot_means[hi_idx]
+
+
+def _bootstrap_ci_diff(
+    group_a: List[float],
+    group_b: List[float],
+    n_boot: int = 2000,
+    seed: int = 42,
+) -> Tuple[float, float]:
+    """Bootstrap 95% CI for mean(A) − mean(B), resampling A and B independently.
+
+    Returns (lower_2.5pct, upper_97.5pct). Returns (-inf, +inf) if either group empty.
+    """
+    if not group_a or not group_b:
+        return (float("-inf"), float("inf"))
+    rng = random.Random(seed)
+    n_a, n_b = len(group_a), len(group_b)
+    diffs = sorted(
+        sum(rng.choices(group_a, k=n_a)) / n_a - sum(rng.choices(group_b, k=n_b)) / n_b
+        for _ in range(n_boot)
+    )
+    lo_idx = max(0, int(n_boot * 0.025) - 1)
+    hi_idx = min(n_boot - 1, int(n_boot * 0.975))
+    return diffs[lo_idx], diffs[hi_idx]
+
+
 def select_pilot_tasks(
     all_tasks: List[Any],
     n_pilot: int = PILOT_MAX_ITEMS,
@@ -208,11 +265,10 @@ def select_pilot_tasks(
     Both halves are drawn with balanced ambiguity_level (k) values so the gate
     exercises both regime classes and multiple k levels.
 
-    MAJOR F fix: the batch MUST include ≥2 H1_external items that share a k≥1
-    value so gate B can evaluate the shuffle null on underspecified items (§11
-    requires the gate on k≥1 items; a condition with only 1 item is INCONCLUSIVE
-    per MIN_ITEMS_FOR_NULL).  When the input H1_external pool has such a group,
-    we prioritise picking ≥2 items from it before filling the rest with balanced k.
+    MAJOR F fix: the batch MUST include ≥2 H1_external k=0 CONTROL items (for
+    R1a bootstrap CI, Amendment 07) AND ≥2 H1_external k≥1 items (for R1a/R1b
+    gates).  Both groups need ≥2 items to compute item-level bootstrap CIs.
+    RAISES ValueError if the pool cannot satisfy either guarantee.
 
     When one regime is sparse (fewer than half), the other regime backfills to
     maximise the batch size up to n_pilot.
@@ -223,16 +279,17 @@ def select_pilot_tasks(
 
     Returns:
         List of at most n_pilot tasks, balanced across regimes and k values,
-        with ≥2 H1_external items at the same k≥1 (when the pool permits).
+        with ≥2 H1 k=0 controls AND ≥2 H1 k≥1 items (Amendment 07 bootstrap
+        CI requirement).
     """
     h1 = [t for t in all_tasks if t.regime == "H1_external"]
     h2 = [t for t in all_tasks if t.regime == "H2_derivable"]
 
     half = min(n_pilot // 2, len(h1))
 
-    # MAJOR F fix: guarantee ≥2 H1 items sharing a k≥1 value so gate B has
-    # at least one evaluable underspecified condition.
-    selected_h1 = _select_h1_with_k1_guarantee(h1, half)
+    # Amendment 07: guarantee ≥2 k=0 controls AND ≥2 k≥1 items so R1a bootstrap
+    # CI is computable and R1b has enough items.
+    selected_h1 = _select_h1_with_k0_and_k1_guarantee(h1, half)
 
     rest = min(n_pilot - len(selected_h1), len(h2))
     selected_h2 = _select_h2_with_k1_guarantee(h2, rest)
@@ -349,6 +406,69 @@ def _select_h2_with_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
     else:
         # H2 soft: no valid k≥1 group — fall back to balanced selection without error.
         return _select_balanced_k(tasks, n)
+
+
+def _select_h1_with_k0_and_k1_guarantee(tasks: List[Any], n: int) -> List[Any]:
+    """Select up to n H1_external tasks guaranteeing ≥2 k=0 AND ≥2 k≥1 items.
+
+    Required for Amendment 07 R1a bootstrap CI: R1a compares k=0 vs k≥1 items;
+    both groups need ≥2 items for a computable bootstrap CI.
+
+    Raises ValueError if:
+      - pool has < 2 k=0 H1 controls, OR
+      - pool has no k≥1 group with ≥2 items, OR
+      - n < 4 (can't fit 2+2 minimum)
+    """
+    k0_pool = [t for t in tasks if t.ambiguity_level == 0]
+    if len(k0_pool) < 2:
+        by_k_diag: Dict[int, int] = {}
+        for t in tasks:
+            by_k_diag[t.ambiguity_level] = by_k_diag.get(t.ambiguity_level, 0) + 1
+        raise ValueError(
+            f"Pilot H1 pool has {len(k0_pool)} k=0 control item(s); "
+            "≥2 required for R1a bootstrap CI (Amendment 07). "
+            "Ensure the bench includes ≥2 fully-specified (k=0) H1_external "
+            "control tasks. "
+            f"H1 pool: {len(tasks)} items; "
+            f"k distribution: {dict(sorted(by_k_diag.items()))}"
+        )
+
+    by_k: Dict[int, List[Any]] = {}
+    for t in tasks:
+        by_k.setdefault(t.ambiguity_level, []).append(t)
+    k1_groups = [(k, ts) for k, ts in by_k.items() if k >= 1 and len(ts) >= 2]
+
+    if not k1_groups:
+        raise ValueError(
+            "Pilot H1 pool has no k≥1 ambiguity group with ≥2 items. "
+            "§11 gates A and B require ≥2 H1 items sharing a k≥1 condition so "
+            "the R1a/R1b bootstrap CIs are computable. "
+            f"H1 pool: {len(tasks)} items; k distribution: "
+            f"{dict(sorted((k, len(ts)) for k, ts in by_k.items()))}."
+        )
+
+    if len(tasks) <= n:
+        return list(tasks)
+
+    if n < 4:
+        raise ValueError(
+            f"Cannot guarantee ≥2 k=0 AND ≥2 k≥1 H1 items with n={n} < 4 slots. "
+            "Increase PILOT_MAX_ITEMS or the H1 half-budget."
+        )
+
+    # Seed with 2 k=0 controls.
+    k0_seeded = k0_pool[:2]
+    already_ids = {t.id for t in k0_seeded}
+
+    # Seed with 2 k≥1 from the group with most items (maximises k coverage).
+    best_k, best_ts = max(k1_groups, key=lambda x: len(x[1]))
+    k1_seeded = [t for t in best_ts if t.id not in already_ids][:2]
+    already_ids.update(t.id for t in k1_seeded)
+
+    # Fill remaining slots with balanced k.
+    remaining = [t for t in tasks if t.id not in already_ids]
+    fill = _select_balanced_k(remaining, n - len(k0_seeded) - len(k1_seeded))
+    return k0_seeded + k1_seeded + fill
 
 
 # ── Runner and analysis helpers ──────────────────────────────────────────────
@@ -478,7 +598,8 @@ def run_pilot_gate(
     from analysis.cd import cd_primary as _cd_primary_fn
     from analysis.contrasts import COLS, compute_cell_cd
     from analysis.io import FRONTIER_MODEL_CLASS_MAP, load_runs_tidy
-    from analysis.nulls import NULL_CD_TOLERANCE, MIN_ITEMS_FOR_NULL, cd_primary_shuffle_null
+    from analysis.nulls import NULL_CD_TOLERANCE, MIN_ITEMS_FOR_NULL, cd_primary_shuffle_null, uniform_interpretation_null
+    from harness.nulls import label_shuffle_null as _frozen_label_shuffle_null
     from harness.runner import endpoint_identity as _endpoint_identity, POOL_CONFIGS
 
     if len(tasks) > n_pilot:
@@ -614,22 +735,148 @@ def run_pilot_gate(
             real_cd = float(h1_cells["cd_primary"].mean())
     gate_a = real_cd > 0.0
 
-    # k=0 CONTROL diagnostic (CD should be ≈0 for fully-specified items; NOT used
-    # for PASS/FAIL — reported as an internal-validity check only).
+    # k=0 CONTROL diagnostic (CD should be ≈0 for fully-specified items).
+    # Also drives R1a gate (Amendment 07): requires CD_k0 ≈ 0 for R1a PASS.
     k0_control_cd = 0.0
+    _has_k0 = False
+    _k0c = None
     if len(h1_k0_df) > 0:
-        k0_cells = compute_cell_cd(h1_k0_df)
-        if len(k0_cells) > 0:
-            k0_control_cd = float(k0_cells["cd_primary"].mean())
+        _k0c = compute_cell_cd(h1_k0_df)
+        if len(_k0c) > 0:
+            k0_control_cd = float(_k0c["cd_primary"].mean())
+            _has_k0 = True
 
-    # ── Gate (b): per-condition cd_primary shuffle null ≈ 0 (BLOCKER 2 fix) ───
-    # Uses cd_primary_shuffle_null (NOT the frozen label_shuffle_null which calls
-    # false_consensus_rate) so real and null metrics are consistent.
-    # BLOCKER fix: gate B uses ONLY k≥1 cells (h1_k1plus_df), same as gate A.
-    gate_b = False
+    # Per-item mean CD for k=0 and k≥1 groups (needed for bootstrap CIs).
+    _items_k0_cds: List[float] = (
+        _k0c.groupby(item_col)["cd_primary"].mean().tolist()
+        if _k0c is not None and len(_k0c) > 0
+        else []
+    )
+    _items_k1_cds: List[float] = (
+        h1_cells.groupby(item_col)["cd_primary"].mean().tolist()
+        if h1_cells is not None and len(h1_cells) > 0
+        else []
+    )
+    _n_k0_items = len(_items_k0_cds)
+    _n_k1_items = len(_items_k1_cds)
+
+    # ── R1a: k=0 control contrast (Amendment 07 — replaces label-shuffle gate) ──
+    # PASS: CD_k0 ≤ NULL_CD_TOLERANCE (point) AND bootstrap 95% CI of
+    #       (mean CD_k≥1 − mean CD_k0) lower bound > 0 (CI excludes 0, positive).
+    # INCONCLUSIVE: < 2 items on either side (CI non-computable).
+    # FAIL: CD_k0 > tolerance (point check fails) OR CI lower ≤ 0.
+    _has_k1plus = h1_cells is not None and len(h1_cells) > 0
+    _r1a_ci_lo = float("-inf")
+    _r1a_ci_hi = float("inf")
+
+    if _n_k0_items < 2 or _n_k1_items < 2:
+        _r1a_status = "inconclusive"
+    elif k0_control_cd > NULL_CD_TOLERANCE:
+        # k=0 items already show convergence — the setup is contaminated; FAIL.
+        _r1a_status = "fail"
+    else:
+        # Bootstrap 95% CI of (mean CD_k≥1) − (mean CD_k0), items as units.
+        _r1a_ci_lo, _r1a_ci_hi = _bootstrap_ci_diff(
+            _items_k1_cds, _items_k0_cds, n_boot=2000, seed=42
+        )
+        _r1a_status = "pass" if _r1a_ci_lo > 0 else "fail"
+    gate_r1a = (_r1a_status == "pass")
+
+    # ── R1b: uniform-interpretation null (Amendment 07) ──────────────────────
+    # Per-item: diff_i = obs_cd_i − uniform_cd_i (item-aware null, no marginal bias).
+    # PASS: bootstrap 95% CI lower bound of mean(diff_i) > 0.
+    # INCONCLUSIVE: < 2 k≥1 items (CI non-computable).
+    # R1B_MARGIN = 0.15 is an effect-size DIAGNOSTIC only; the CI drives PASS.
+    task_interp_map: Dict[str, List[str]] = {
+        t.id: [i.id for i in t.interpretations if i.id != "I_perp"]
+        for t in tasks
+    }
+    uniform_null_cd = 0.0
+    _r1b_status = "inconclusive"
+    _r1b_ci_lo = float("-inf")
+    _r1b_ci_hi = float("inf")
+    _items_diffs_r1b: List[float] = []
+
+    if _n_k1_items >= 2:
+        _r1b_target = str(h1_k1plus_df[target_col].mode().iloc[0])
+        _unif_cds_per_item: List[float] = []
+
+        for _iid in h1_cells[item_col].unique():
+            _obs_cd_i = float(
+                h1_cells[h1_cells[item_col] == _iid]["cd_primary"].mean()
+            )
+            _item_df = h1_k1plus_df[h1_k1plus_df[item_col] == _iid]
+            _item_cells_labels = [
+                list(_grp[label_col])
+                for _, _grp in _item_df.groupby(
+                    [method_col, model_class_col, seed_col], dropna=False
+                )
+            ]
+            _interp_ids_i = task_interp_map.get(str(_iid), ["I0", "I1"])
+            _unif_cd_i = uniform_interpretation_null(
+                _item_cells_labels,
+                [_interp_ids_i] * len(_item_cells_labels),
+                _r1b_target,
+                n_perm=200,
+                seed=42,
+            )
+            _unif_cds_per_item.append(_unif_cd_i)
+            _items_diffs_r1b.append(_obs_cd_i - _unif_cd_i)
+
+        if _unif_cds_per_item:
+            uniform_null_cd = sum(_unif_cds_per_item) / len(_unif_cds_per_item)
+
+        if len(_items_diffs_r1b) >= 2:
+            _r1b_ci_lo, _r1b_ci_hi = _bootstrap_ci(
+                _items_diffs_r1b, n_boot=2000, seed=42
+            )
+            _r1b_status = "pass" if _r1b_ci_lo > 0 else "fail"
+        else:
+            _r1b_status = "inconclusive"
+    gate_r1b = (_r1b_status == "pass")
+
+    # ── gate_b = R1a AND R1b (Amendment 07 — replaces label-shuffle gate) ────
+    gate_b = gate_r1a and gate_r1b
+
+    # ── gate_b_details: R1a + R1b per-gate audit trail ────────────────────────
+    gate_b_details: List[Dict] = [
+        {
+            "gate": "r1a",
+            "status": _r1a_status,
+            "k0_cd": k0_control_cd,
+            "k1plus_cd": real_cd,
+            "n_items_k0": _n_k0_items,
+            "n_items_k1plus": _n_k1_items,
+            "ci_lo": _r1a_ci_lo,
+            "ci_hi": _r1a_ci_hi,
+            "tol": NULL_CD_TOLERANCE,
+            "note": "bootstrap 95% CI of (CD_k≥1 − CD_k0) lower bound > 0; CD_k0 ≤ tol (point check)",
+        },
+        {
+            "gate": "r1b",
+            "status": _r1b_status,
+            "real_cd": real_cd,
+            "uniform_cd": uniform_null_cd,
+            "n_items_k1plus": _n_k1_items,
+            "ci_lo": _r1b_ci_lo,
+            "ci_hi": _r1b_ci_hi,
+            "margin_required": R1B_MARGIN,
+            "note": "bootstrap 95% CI of mean(obs_cd − uniform_cd) lower bound > 0; margin is effect-size diagnostic",
+        },
+    ]
+
+    # ── Shuffle null: DIAGNOSTIC ONLY (Amendment 07 — demoted from gate) ─────
+    # cd_primary_shuffle_null is still computed per-condition for reporting but
+    # NO LONGER drives PASS/FAIL.  null_cd ≈ real_cd is the EXPECTED signature
+    # of a shared-prior phenomenon (marginal bias toward the same wrong default),
+    # not a "thesis not supported" verdict — Amendment 07 §1.
+    # MAJOR 2 (Amdt 07 §2 R1-diag): ALSO compute the FROZEN label_shuffle_null
+    # (false_consensus_rate based) per condition — reported separately as the
+    # "frozen R1 diagnostic".  Neither drives PASS/FAIL.
     null_cd = 0.0
     null_cd_vals: List[float] = []
-    gate_b_details: List[Dict] = []
+    null_cd_frozen_vals: List[float] = []
+    shuffle_null_details: List[Dict] = []
 
     if h1_cells is not None and len(h1_cells) > 0:
         for (method, mc, ambi_k), cond_cells in h1_cells.groupby(
@@ -641,12 +888,15 @@ def run_pilot_gate(
             # BLOCKER D fix: require ≥ MIN_ITEMS_FOR_NULL DISTINCT ITEMS (tasks).
             n_distinct_items = cond_cells[item_col].nunique()
             if n_distinct_items < MIN_ITEMS_FOR_NULL:
-                gate_b_details.append({
+                shuffle_null_details.append({
                     "method": method, "model_class": mc, "ambiguity_k": ambi_k,
                     "n_cells": n_cells,
                     "n_distinct_items": n_distinct_items,
-                    "status": "inconclusive",
-                    "real_cd": cond_real_cd, "null_cd": None,
+                    "real_cd": cond_real_cd,
+                    "null_cd_cd_primary": None,
+                    "null_cd_frozen_fcr": None,
+                    "null_cd": None,  # backward compat
+                    "note": "shared-prior diagnostic (null≈real EXPECTED — Amdt 07): inconclusive",
                 })
                 continue
 
@@ -666,25 +916,35 @@ def run_pilot_gate(
             ]
 
             # cd_primary-consistent null (NOT false_consensus_rate).
+            # DIAGNOSTIC ONLY — Amdt 07: null≈real is EXPECTED for shared-prior.
             cond_null_cd = cd_primary_shuffle_null(
                 cells_labels, target=target, n_perm=200, seed=42
             )
             null_cd_vals.append(cond_null_cd)
 
-            cond_pass = cond_real_cd > 0.0 and cond_null_cd <= NULL_CD_TOLERANCE
-            if cond_pass:
-                gate_b = True
+            # FROZEN label_shuffle_null (false_consensus_rate based — Amdt 07 §2).
+            # Computed and reported separately; does NOT drive PASS/FAIL.
+            cond_frozen_null_cd = _frozen_label_shuffle_null(
+                cells_labels, target=target, n_perm=200, seed=42
+            )
+            null_cd_frozen_vals.append(cond_frozen_null_cd)
 
-            gate_b_details.append({
+            shuffle_null_details.append({
                 "method": method, "model_class": mc, "ambiguity_k": ambi_k,
                 "n_cells": n_cells,
                 "n_distinct_items": n_distinct_items,
-                "status": "pass" if cond_pass else "fail",
                 "real_cd": cond_real_cd,
-                "null_cd": cond_null_cd,
+                "null_cd_cd_primary": cond_null_cd,
+                "null_cd_frozen_fcr": cond_frozen_null_cd,
+                "null_cd": cond_null_cd,  # backward compat alias for null_cd_cd_primary
+                "note": "shared-prior diagnostic (null≈real EXPECTED — Amdt 07)",
             })
 
     null_cd = sum(null_cd_vals) / len(null_cd_vals) if null_cd_vals else 0.0
+    null_cd_frozen = (
+        sum(null_cd_frozen_vals) / len(null_cd_frozen_vals)
+        if null_cd_frozen_vals else 0.0
+    )
 
     gate_pass = gate_a and gate_b and gate_c
     iperp_rate = float((tidy_df[label_col] == "I_perp").mean()) if gate_c_nonempty else 0.0
@@ -693,18 +953,23 @@ def run_pilot_gate(
         "gate_pass": gate_pass,
         "gate_a": gate_a,
         "gate_b": gate_b,
+        "gate_r1a": gate_r1a,
+        "gate_r1b": gate_r1b,
         "gate_c": gate_c,
         "real_cd": real_cd,
         "k0_control_cd": k0_control_cd,   # diagnostic: CD of k=0 controls (should ≈0)
-        "null_cd": null_cd,
-        "null_metric": "cd_primary",   # audit: confirms metric used for null
+        "null_cd": null_cd,                # cd_primary shuffle null (DIAGNOSTIC — Amdt 07)
+        "null_cd_frozen": null_cd_frozen,  # FROZEN label_shuffle_null (false_consensus_rate) — Amdt 07 §2
+        "null_metric": "cd_primary",       # audit: confirms metric used for null
+        "uniform_null_cd": uniform_null_cd, # R1b: uniform interpretation null
         "iperp_rate": iperp_rate,
         "n_items": len(tasks),
         "n_runs": len(tidy_df),
         "total_cost_usd": total_cost,
         "run_result": run_result,
         "conditions": conditions,
-        "gate_b_details": gate_b_details,  # per-condition gate_b audit trail
+        "gate_b_details": gate_b_details,        # R1a + R1b audit trail (Amdt 07)
+        "shuffle_null_details": shuffle_null_details,  # per-condition shuffle diagnostic
     }
 
 
@@ -812,12 +1077,51 @@ def main(argv=None) -> None:
         )
 
         print("\n" + "=" * 72)
-        print("§11 GATE RESULTS:")
-        print(f"  (a) cd_primary > 0 on H1_external:  {'PASS' if report['gate_a'] else 'FAIL'}")
+        print("§11 GATE RESULTS (Amendment 07 — R1a+R1b replace label-shuffle gate):")
+        print(f"  (a) cd_primary > 0 on H1_external k≥1:  {'PASS' if report['gate_a'] else 'FAIL'}")
         print(f"      real_cd = {report['real_cd']:.4f}")
-        print(f"  (b) cd_primary shuffle null ≤ tol:  {'PASS' if report['gate_b'] else 'FAIL'}")
-        print(f"      null_cd = {report['null_cd']:.4f}  null_metric = {report['null_metric']}")
-        print(f"  (c) pipeline integration:            {'PASS' if report['gate_c'] else 'FAIL'}")
+        # ── R1a/R1b gate details ─────────────────────────────────────────────
+        _r1a_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1a"), {})
+        _r1b_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1b"), {})
+        print(f"  (b) R1 robustness gates (Amendment 07):")
+        print(f"      R1a k=0-control contrast:         {_r1a_det.get('status', 'n/a').upper()}")
+        print(
+            f"          CD_k0={report['k0_control_cd']:.4f}  "
+            f"CD_k≥1={report['real_cd']:.4f}  "
+            f"tol={_r1a_det.get('tol', 0.10)}  "
+            f"n_k0={_r1a_det.get('n_items_k0', 'n/a')}  "
+            f"n_k1plus={_r1a_det.get('n_items_k1plus', 'n/a')}"
+        )
+        _r1a_ci_lo = _r1a_det.get('ci_lo', float('-inf'))
+        _r1a_ci_hi = _r1a_det.get('ci_hi', float('inf'))
+        print(
+            f"          bootstrap 95% CI (CD_k≥1−CD_k0): "
+            f"[{_r1a_ci_lo:.4f}, {_r1a_ci_hi:.4f}]"
+        )
+        print(f"      R1b uniform-interpretation null:  {_r1b_det.get('status', 'n/a').upper()}")
+        _r1b_ci_lo = _r1b_det.get('ci_lo', float('-inf'))
+        _r1b_ci_hi = _r1b_det.get('ci_hi', float('inf'))
+        print(
+            f"          real_cd={report['real_cd']:.4f}  "
+            f"uniform_cd={report['uniform_null_cd']:.4f}  "
+            f"margin_diag={_r1b_det.get('margin_required', R1B_MARGIN):.2f}  "
+            f"n_k1plus={_r1b_det.get('n_items_k1plus', 'n/a')}"
+        )
+        print(
+            f"          bootstrap 95% CI (obs−uniform): "
+            f"[{_r1b_ci_lo:.4f}, {_r1b_ci_hi:.4f}]"
+        )
+        print(f"      gate_b (R1a AND R1b):              {'PASS' if report['gate_b'] else 'FAIL'}")
+        print(f"  [DIAG — Amdt 07] label-shuffle nulls (null≈real EXPECTED for shared-prior):")
+        print(
+            f"      cd_primary shuffle:  null_cd={report['null_cd']:.4f}  "
+            f"null_metric={report['null_metric']}  (shared-prior diagnostic — not a gate)"
+        )
+        print(
+            f"      frozen fcr shuffle:  null_cd_frozen={report['null_cd_frozen']:.4f}  "
+            f"[frozen R1 label-shuffle (false_consensus_rate) — shared-prior diagnostic, Amdt 07]"
+        )
+        print(f"  (c) pipeline integration:             {'PASS' if report['gate_c'] else 'FAIL'}")
         print(f"      n_runs = {report['n_runs']}")
         print()
         print(f"  I_perp rate (all runs): {report['iperp_rate']:.3f}")
@@ -829,14 +1133,18 @@ def main(argv=None) -> None:
                     f"    regime={cond['regime']}  method={cond['method']}  "
                     f"n={cond['n_runs']}  iperp={cond['iperp_rate']:.3f}"
                 )
-        if report.get("gate_b_details"):
-            print("\n  Per-condition gate_b (cd_primary shuffle null):")
-            for det in report["gate_b_details"]:
-                null_str = f"{det['null_cd']:.4f}" if det["null_cd"] is not None else "n/a"
+        if report.get("shuffle_null_details"):
+            print("\n  [DIAGNOSTIC] Per-condition label-shuffle nulls (Amdt 07 — shared-prior):")
+            for det in report["shuffle_null_details"]:
+                cdp_str = f"{det['null_cd_cd_primary']:.4f}" if det.get("null_cd_cd_primary") is not None else "n/a"
+                fcr_str = f"{det['null_cd_frozen_fcr']:.4f}" if det.get("null_cd_frozen_fcr") is not None else "n/a"
                 print(
                     f"    {det['method']}|{det['model_class']}|k={det['ambiguity_k']}  "
-                    f"n_cells={det['n_cells']}  status={det['status']}  "
-                    f"real_cd={det['real_cd']:.4f}  null_cd={null_str}"
+                    f"n_cells={det['n_cells']}  "
+                    f"real_cd={det['real_cd']:.4f}  "
+                    f"null_cd(cd_primary)={cdp_str}  "
+                    f"null_cd(frozen_fcr)={fcr_str}  "
+                    f"[shared-prior diagnostic — not a gate]"
                 )
         print()
         verdict = "PASS" if report["gate_pass"] else "FAIL"

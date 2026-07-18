@@ -144,6 +144,7 @@ def test_dry_run_does_not_require_runner_live(monkeypatch, capsys):
 def test_select_pilot_tasks_balances_regimes():
     tasks = (
         [_make_task(f"h1_{i}", regime="H1_external", k=(i % 3) + 1) for i in range(10)]
+        + [_make_task(f"h1_k0_{i}", regime="H1_external", k=0) for i in range(2)]
         + [_make_task(f"h2_{i}", regime="H2_derivable", k=(i % 3) + 1) for i in range(10)]
     )
     selected = _registered_run.select_pilot_tasks(tasks, n_pilot=8)
@@ -158,21 +159,24 @@ def test_select_pilot_tasks_mixed_k():
     """A pool with k=1,2,3 items (each singleton) cannot guarantee ≥2 at same k≥1 → raises.
 
     BLOCKER: the selector MUST raise ValueError when no k≥1 group has ≥2 items.
-    Use a pool large enough that the k≥1 k=1 GROUP specifically has ≥2 items.
+    We include ≥2 k=0 controls (satisfying the Amendment 07 k=0 guarantee) but
+    keep each k≥1 level as a singleton → raises for k≥1.
     """
     tasks = (
         [_make_task(f"h1_k{k}", regime="H1_external", k=k) for k in [1, 2, 3]]
+        + [_make_task(f"h1_k0_{i}", regime="H1_external", k=0) for i in range(2)]
         + [_make_task(f"h2_k{k}", regime="H2_derivable", k=k) for k in [1, 2, 3]]
     )
-    # H1 pool: h1_k1 (1 item), h1_k2 (1 item), h1_k3 (1 item) → no k≥1 group with ≥2 items.
+    # H1 pool: k=0 (2), k=1 (1), k=2 (1), k=3 (1) → no k≥1 group with ≥2 items.
     with pytest.raises(ValueError, match="k≥1"):
         _registered_run.select_pilot_tasks(tasks, n_pilot=6)
 
 
 def test_select_pilot_tasks_mixed_k_enough_pool():
-    """A pool with 2+ items at k=1 succeeds and returns mixed k values."""
+    """A pool with 2+ items at k=1 and ≥2 k=0 controls succeeds and returns mixed k values."""
     tasks = (
-        [_make_task(f"h1_k1_{i}", regime="H1_external", k=1) for i in range(3)]
+        [_make_task(f"h1_k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        + [_make_task(f"h1_k1_{i}", regime="H1_external", k=1) for i in range(3)]
         + [_make_task(f"h1_k2_{i}", regime="H1_external", k=2) for i in range(2)]
         + [_make_task(f"h2_k{k}", regime="H2_derivable", k=k) for k in [1, 2, 3]]
     )
@@ -182,22 +186,33 @@ def test_select_pilot_tasks_mixed_k_enough_pool():
 
 
 def test_select_pilot_tasks_respects_cap():
-    tasks = [_make_task(f"t{i}", regime="H1_external") for i in range(20)]
+    tasks = (
+        [_make_task(f"t_k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        + [_make_task(f"t{i}", regime="H1_external") for i in range(20)]
+    )
     selected = _registered_run.select_pilot_tasks(tasks, n_pilot=8)
     assert len(selected) <= 8
 
 
 def test_select_pilot_tasks_with_few_tasks():
-    """A pool with only 1 H1 item cannot guarantee ≥2 k≥1 items → raises."""
-    tasks = [_make_task("t1", regime="H1_external"), _make_task("t2", regime="H2_derivable")]
+    """A pool with only 1 H1 k≥1 item (and ≥2 k=0 controls) cannot guarantee ≥2 k≥1 → raises."""
+    tasks = [
+        _make_task("t1", regime="H1_external", k=1),       # only 1 k≥1 H1 item
+        _make_task("t1_k0_0", regime="H1_external", k=0),  # k=0 control #1
+        _make_task("t1_k0_1", regime="H1_external", k=0),  # k=0 control #2
+        _make_task("t2", regime="H2_derivable"),
+    ]
     with pytest.raises(ValueError, match="k≥1"):
         _registered_run.select_pilot_tasks(tasks, n_pilot=10)
 
 
 def test_select_pilot_tasks_only_h1():
-    tasks = [_make_task(f"t{i}", regime="H1_external") for i in range(5)]
+    tasks = (
+        [_make_task(f"t{i}", regime="H1_external") for i in range(5)]
+        + [_make_task(f"t_k0_{i}", regime="H1_external", k=0) for i in range(2)]
+    )
     selected = _registered_run.select_pilot_tasks(tasks, n_pilot=8)
-    assert len(selected) == 5  # all available
+    assert len(selected) == 7  # all 7 available (5 k=1 + 2 k=0 ≤ n_pilot=8)
 
 
 # ── 3. run_pilot_gate on synthetic checkpoint: gate logic ────────────────────
@@ -753,12 +768,15 @@ def test_select_pilot_tasks_has_two_h1_items_at_k1_or_higher():
     """MAJOR F: the selected pilot batch must include ≥2 H1_external items at
     the same k≥1 value so gate B has at least one evaluable underspecified
     condition (§11 requires the gate on k≥1 items).
+
+    Amendment 07: also requires ≥2 k=0 controls for R1a bootstrap CI.
     """
     from collections import Counter
 
-    # Build a pool with 4 H1 items at k=2 (most) + some k=1, k=3.
+    # Build a pool with 4 H1 items at k=2 (most) + some k=1, k=3 + ≥2 k=0 controls.
     h1_tasks = (
-        [_make_task(f"h1_k2_{i}", regime="H1_external", k=2) for i in range(4)]
+        [_make_task(f"h1_k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        + [_make_task(f"h1_k2_{i}", regime="H1_external", k=2) for i in range(4)]
         + [_make_task("h1_k1", regime="H1_external", k=1)]
         + [_make_task("h1_k3", regime="H1_external", k=3)]
     )
@@ -781,15 +799,15 @@ def test_select_pilot_tasks_has_two_h1_items_at_k1_or_higher():
 def test_select_pilot_tasks_raises_when_no_k1_group_has_two_items():
     """BLOCKER: selector raises ValueError when every k≥1 group has only 1 item.
 
-    The old code fell back to balanced-k selection, silently returning a batch
-    where gate B would be INCONCLUSIVE for all conditions (no ≥2-item k≥1 group).
-    §11 requires the pilot gate on underspecified items — a batch that can never
-    satisfy this is invalid.  The selector must FAIL LOUDLY instead.
+    Amendment 07: includes ≥2 k=0 controls (satisfying that guarantee) but
+    keeps each k≥1 level as a singleton → raises for k≥1.
     """
     h1_tasks = [
         _make_task("h1_k1", regime="H1_external", k=1),
         _make_task("h1_k2", regime="H1_external", k=2),
         _make_task("h1_k3", regime="H1_external", k=3),
+        _make_task("h1_k0_0", regime="H1_external", k=0),
+        _make_task("h1_k0_1", regime="H1_external", k=0),
     ]
     with pytest.raises(ValueError, match="k≥1"):
         _registered_run.select_pilot_tasks(h1_tasks, n_pilot=6)
