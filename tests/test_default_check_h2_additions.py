@@ -257,5 +257,106 @@ def test_main_skips_without_flag(monkeypatch, capsys):
     assert "skip" in out.lower()
 
 
+# ── D. Reasoner-only verdict screen (MAJOR audit fix) ────────────────────────
+# These tests lock the invariant: print_family_verdicts MUST use ONLY
+# model_class == "reasoner" rows. rho_baseline, weak, and heterogeneous rows
+# MUST NOT influence the verdict.
+
+def _make_row(task_id: str, model_class: str, resolve_rate: float, cd: float = 0.2,
+              i_perp: float = 0.0) -> dict:
+    """Helper: minimal synthetic report row for verdict tests."""
+    return {
+        "task_id": task_id,
+        "model_class": model_class,
+        "resolve_rate_to_I0": resolve_rate,
+        "cd_enumerated": cd,
+        "i_perp_rate": i_perp,
+    }
+
+
+_GEO_K1 = "data_geomean_001_k1_growth_averaging"
+_HARM_K1 = "data_harmonic_001_k1_speed_averaging"
+_CUM_K1 = "data_cumulative_001_k1_cumulative_interpretation"
+_TIER_K1 = "data_tierank_001_k1_tie_ranking"
+
+
+def test_verdict_mistaggged_when_reasoner_rate_low_despite_rho_baseline_lifting(capsys):
+    """MAJOR fix: reasoner k1 rows [1,0,0] (rate 0.333) + rho_baseline rate 1.0
+    must yield MIS-TAGGED for that family (non-reasoner rows excluded)."""
+    # geo family: 3 reasoner rows with rates [1, 0, 0] => avg 0.333 → MIS-TAGGED
+    # Plus one rho_baseline row with rate 1.0 that must NOT lift the verdict.
+    report = {
+        "rows": [
+            _make_row(_GEO_K1, "reasoner", 1.0, cd=0.2),
+            _make_row(_GEO_K1, "reasoner", 0.0, cd=0.2),
+            _make_row(_GEO_K1, "reasoner", 0.0, cd=0.2),
+            _make_row(_GEO_K1, "rho_baseline", 1.0, cd=0.0),  # must be excluded
+            # other families get no rows → INSUFFICIENT-DATA (tested separately)
+        ]
+    }
+    h2add.print_family_verdicts(report)
+    out = capsys.readouterr().out
+    assert "-> MIS-TAGGED" in out, f"Expected MIS-TAGGED verdict but got:\n{out}"
+    assert "-> RESOLVES" not in out, (
+        f"-> RESOLVES must not appear when reasoner rate is 0.333:\n{out}"
+    )
+
+
+def test_verdict_insufficient_data_when_no_reasoner_k1_rows(capsys):
+    """MAJOR fix: a family with NO reasoner k1 rows must report INSUFFICIENT-DATA,
+    not RESOLVES or a silent fallback to weak/rho_baseline/heterogeneous rows."""
+    # Only non-reasoner rows for all families — no reasoner at all.
+    report = {
+        "rows": [
+            _make_row(_GEO_K1, "rho_baseline", 1.0, cd=0.0),
+            _make_row(_GEO_K1, "weak", 1.0, cd=0.0),
+            _make_row(_GEO_K1, "heterogeneous", 1.0, cd=0.0),
+            _make_row(_HARM_K1, "weak", 1.0, cd=0.0),
+        ]
+    }
+    h2add.print_family_verdicts(report)
+    out = capsys.readouterr().out
+    assert "INSUFFICIENT-DATA" in out, f"Expected INSUFFICIENT-DATA but got:\n{out}"
+    assert "-> RESOLVES" not in out, (
+        f"-> RESOLVES must not appear when there are no reasoner rows:\n{out}"
+    )
+
+
+def test_verdict_resolves_when_reasoner_rows_clearly_resolve(capsys):
+    """Positive path: when all reasoner k1 rows clearly pass the threshold,
+    the verdict must be RESOLVES."""
+    report = {
+        "rows": [
+            _make_row(_GEO_K1, "reasoner", 1.0, cd=0.1),
+            _make_row(_GEO_K1, "reasoner", 1.0, cd=0.1),
+            _make_row(_GEO_K1, "reasoner", 1.0, cd=0.1),
+            # other families: no rows → INSUFFICIENT-DATA (irrelevant to geo verdict)
+        ]
+    }
+    h2add.print_family_verdicts(report)
+    out = capsys.readouterr().out
+    # The geo family line must contain -> RESOLVES
+    geo_lines = [l for l in out.splitlines() if "data_geomean_001" in l]
+    assert geo_lines, f"No line for data_geomean_001 in output:\n{out}"
+    assert "-> RESOLVES" in geo_lines[0], f"Expected -> RESOLVES in geo line: {geo_lines[0]}"
+    assert "MIS-TAGGED" not in geo_lines[0], f"MIS-TAGGED must not appear: {geo_lines[0]}"
+
+
+def test_verdict_weak_rows_do_not_count_as_resolves(capsys):
+    """Weak-model rows with high resolve rate must NOT produce RESOLVES."""
+    report = {
+        "rows": [
+            _make_row(_GEO_K1, "weak", 1.0, cd=0.0),
+            _make_row(_GEO_K1, "weak", 1.0, cd=0.0),
+        ]
+    }
+    h2add.print_family_verdicts(report)
+    out = capsys.readouterr().out
+    assert "INSUFFICIENT-DATA" in out, (
+        f"Expected INSUFFICIENT-DATA (no reasoner rows) but got:\n{out}"
+    )
+    assert "-> RESOLVES" not in out
+
+
 # ── import json needed in test body ──────────────────────────────────────────
 import json  # noqa: E402  (used in test_write_h2add_report_creates_files)

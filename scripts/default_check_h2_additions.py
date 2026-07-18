@@ -133,32 +133,33 @@ def _family_name(task_id: str) -> str:
 def print_family_verdicts(report: Dict[str, Any]) -> None:
     """Print one verdict line per k1 family.
 
-    RESOLVES iff (reasoner-class) resolve_rate_to_I0 >= 0.5 AND cd_enumerated <= 0.5.
+    RESOLVES iff (reasoner-class k1 rows only) resolve_rate_to_I0 >= 0.5 AND
+    cd_enumerated <= 0.5.  rho_baseline, weak, and heterogeneous rows are EXCLUDED
+    from this screen — including them could falsely lift a failing family to RESOLVES.
     This is a DIAGNOSTIC SCREEN only (exploratory, not pre-registered).
     """
-    # Collect reasoner-class rows for k1 task ids.
+    # Collect ONLY model_class == "reasoner" rows for k1 task ids.
+    # rho_baseline / weak / heterogeneous / other are intentionally excluded.
     reasoner_k1: Dict[str, List[Dict[str, Any]]] = {}
     for row in report.get("rows", []):
         tid = row.get("task_id", "")
         if tid not in H2ADD_K1_IDS:
             continue
-        if row.get("model_class") not in ("reasoner", "rho_baseline"):
+        if row.get("model_class") != "reasoner":
             continue
         reasoner_k1.setdefault(tid, []).append(row)
 
     print("")
-    print("H2ADD FAMILY VERDICTS (reasoner-class rows, diagnostic screen only):")
+    print("H2ADD FAMILY VERDICTS (reasoner-class rows only, diagnostic screen only):")
     print("  Threshold: RESOLVES iff resolve_rate_to_I0 >= 0.5 AND cd_enumerated <= 0.5")
     for k1_id in H2ADD_K1_IDS:
         family = _family_name(k1_id)
         rows = reasoner_k1.get(k1_id, [])
         if not rows:
-            # Fall back to any ensemble row for this task if no reasoner rows exist yet
-            rows = [r for r in report.get("rows", []) if r.get("task_id") == k1_id]
-        if not rows:
-            print(f"FAMILY {family} k1: (no rows) -> INSUFFICIENT DATA")
+            # No reasoner k1 rows — do NOT fall back to weak/rho_baseline/heterogeneous.
+            print(f"FAMILY {family} k1: -> INSUFFICIENT-DATA (no reasoner k1 rows)")
             continue
-        # Average over all matching rows.
+        # Average over all matching reasoner-class rows.
         rr = sum(r["resolve_rate_to_I0"] for r in rows) / len(rows)
         cd = sum(r["cd_enumerated"] for r in rows) / len(rows)
         ip = sum(r["i_perp_rate"] for r in rows) / len(rows)
