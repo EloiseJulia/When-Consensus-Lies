@@ -16,9 +16,9 @@ at ceiling. Per §10 the pilot calibrates N.
 Reconstructed reversed benchmark (Amdt 01/02/03), regime-tagged and empirically default-checked:
 - code_spec: 20 items (H1_external), k∈{0,1,2,3}
 - policy_qa: 14 items (H1_external), k∈{0,1,2}
-- data_analysis: 12 existing + **[N_new from the H2 top-up]** new H2_derivable items → H1_external 6 +
-  H2_derivable **[≥~14 target]**.
-- **Totals (to finalize): H1_external = 40 · H2_derivable = [≥~14].** [Fill exact counts post-top-up.]
+- data_analysis: 20 items = 6 H1_external + **14 H2_derivable** (7 families × 2 variants: typical, avgprice,
+  rate, geomean, harmonic, cumulative, tierank) — H2 top-up MERGED (PR #32, decision-log row 61).
+- **Totals: H1_external = 40 · H2_derivable = 14 · GRAND TOTAL = 54 task variants.**
 No further item changes after sign-off.
 
 ## 2. Config grid & replication (FROZEN at sign-off)
