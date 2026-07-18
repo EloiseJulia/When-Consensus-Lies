@@ -345,17 +345,32 @@ def effective_ensemble_size(n: int, rho_bar: float) -> float:
     n_eff → 1, i.e. the ensemble provides no more information than a single
     agent (fake redundancy). When ρ̄ → 0 (independent agents) n_eff → n.
 
+    **Degenerate case (negative / maximal-dispersion correlation):** when
+    ρ̄ ≤ −1/(n−1), the denominator (1 + (n−1)·ρ̄) is ≤ 0. n_eff is designed
+    to capture *redundancy collapse* (ρ→1 ⇒ n_eff→1); a negative or
+    maximally-dispersed correlation means NO collapse is occurring — agents
+    are anti-correlated or perfectly spread across answers. In this regime
+    n_eff ≥ n (no information is lost to redundancy). We return float(n) (no
+    redundancy loss) rather than a negative or ±∞ value, which would be
+    scientifically meaningless.  This prevents ZeroDivisionError for valid
+    cells such as [I0, I1] with 2 agents (ICC = −1).
+
     Args:
         n: Number of agents in the ensemble cell.
         rho_bar: Estimated mean pairwise correlation of the wrong-indicator
             (typically the ICC value from :func:`icc_wrong_indicator`).
 
     Returns:
-        Float n_eff ≥ 1. Returns n unchanged for n ≤ 1 (degenerate).
+        Float n_eff ≥ 1. Returns n unchanged for n ≤ 1 (degenerate) or
+        when ρ̄ ≤ −1/(n−1) (maximal-dispersion case — no redundancy loss).
     """
     if n <= 1:
         return float(n)
-    return n / (1.0 + (n - 1) * rho_bar)
+    denom = 1.0 + (n - 1) * rho_bar
+    if denom <= 0.0:
+        # ρ̄ ≤ −1/(n−1): maximally dispersed — no redundancy collapse, n_eff = n.
+        return float(n)
+    return n / denom
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -575,9 +590,18 @@ def compute_dependence_table(
         if interpretation_sets and task_id in interpretation_sets:
             cats = interpretation_sets[task_id]
         else:
-            # Infer from unique labels present in ALL rows for this item.
+            # Infer from unique labels present in ALL rows for this item,
+            # EXCLUDING I_perp and any non-interpretation sentinel labels so that
+            # the inferred-category path matches the explicit interpretation_sets path.
+            # Including I_perp inflates the category count, biases marginals, and
+            # forces kappa to reflect abstention noise instead of agreement over the
+            # enumerated interpretation set (consistent with A04 treating I_perp as
+            # ineligible).
             item_rows = tidy[tidy[_ITEM] == task_id] if _ITEM in tidy.columns else group
-            cats = sorted(item_rows[_LABEL].dropna().unique().tolist())
+            cats = sorted(
+                lbl for lbl in item_rows[_LABEL].dropna().unique()
+                if lbl != IPERP
+            )
         # kappa is filled below at group level (multi-subject Fleiss' κ)
         _cell_labels_list.append(labels)
         _cell_cats_list.append(cats)

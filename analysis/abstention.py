@@ -71,6 +71,31 @@ def _p(pattern: str) -> re.Pattern:
     return re.compile(pattern, re.IGNORECASE)
 
 
+# ── Named patterns that need a "resolution override" guard (Finding 3, round-3 audit) ──
+# These two patterns over-fire on committed outputs that happen to contain the phrase
+# but then RESOLVE it with a definitive answer. They are referenced by identity in
+# detect_abstention so that only these specific patterns (not the whole signal category)
+# are subject to the resolution guard. Residual edge-cases are resolved by the
+# pre-registered human-validation sample (Amendment 09 §2).
+_PAT_WHICH_INTERP_INTENDED = _p(r"\bwhich\s+interpretation\s+is\s+intended\b")
+_PAT_DO_NOT_KNOW_WHICH = _p(r"\b(?:do\s+not|don['']t)\s+know\s+which\b")
+
+#: Patterns guarded by the committed-resolution override in detect_abstention.
+_RESOLUTION_GUARDED_PATTERNS: frozenset = frozenset({
+    _PAT_WHICH_INTERP_INTENDED,
+    _PAT_DO_NOT_KNOW_WHICH,
+})
+
+#: When any of _RESOLUTION_GUARDED_PATTERNS matches, check whether the output also
+#: contains a committed-answer resolution. If so, the abstention signal is skipped.
+_RESOLUTION_GUARD_PAT: re.Pattern = re.compile(
+    r"\b(?:clearly\s+states?|unambiguously\s+(?:requires?|states?|demands?|indicates?))\b"
+    r"|\bthe\s+answer\s+is\s+I\w+"
+    r"|\bso\s+the\s+answer\s+is\b",
+    re.IGNORECASE,
+)
+
+
 #: Documented, editable rule list for the abstention detector.
 #:
 #: Rule categories (in priority order):
@@ -101,7 +126,7 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
         _p(r"\b(?:it\s+is\s+)?(?:unknowable|indeterminate|undecidable)\b"),
         _p(r"\bcannot\s+be\s+(?:determined|known|inferred|concluded)\b"),
         # "do not know which" / "don't know which" — epistemic about the referent.
-        _p(r"\b(?:do\s+not|don['']t)\s+know\s+which\b"),
+        _PAT_DO_NOT_KNOW_WHICH,
     ]),
 
     # 3. Insufficient information / needs more context
@@ -129,7 +154,7 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
         _p(r"\bplease\s+(?:clarify|specify|indicate)\s+(?:which|what|whether)\b"),
         _p(r"\bare\s+you\s+(?:referring|asking)\s+(?:to|about)\b.{0,40}\?"),
         # "which interpretation is intended" surfaces interpretation ambiguity.
-        _p(r"\bwhich\s+interpretation\s+is\s+intended\b"),
+        _PAT_WHICH_INTERP_INTENDED,
     ]),
 
     # 5. Trailing clarifying question (the output ends with a "?" question about
@@ -214,6 +239,17 @@ def detect_abstention(output: str) -> Dict[str, object]:
         for pat in patterns:
             m = pat.search(output)
             if m:
+                # Guard: if this is one of the two known over-firing patterns and
+                # the output also contains a committed-answer resolution, skip the
+                # match. The two guarded patterns fire on phrases that can describe
+                # a resolved situation ("clearly states which interpretation is
+                # intended: the first one, so the answer is I1") or carry incidental
+                # uncertainty about a non-interpretation referent ("do not know which
+                # benchmark is faster, but the specification unambiguously requires I1").
+                # Residual edge-cases are resolved by the pre-registered
+                # human-validation sample (Amendment 09 §2). Do NOT add an LLM here.
+                if pat in _RESOLUTION_GUARDED_PATTERNS and _RESOLUTION_GUARD_PAT.search(output):
+                    continue
                 return {
                     "abstained": True,
                     "signal": signal,

@@ -549,3 +549,86 @@ class TestNoLlmCall:
         t1 = abstention_table(tidy)
         t2 = abstention_table(tidy)
         assert t1.equals(t2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Auditor regression — round-3 Finding 3 (over-firing committed outputs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuditorRegressionRound3Finding3:
+    """Regression suite for GPT round-3 MINOR finding (rule precision).
+
+    Two committed outputs were wrongly flagged abstained=True. This class adds
+    tests to prevent regression. The genuine-abstention cases from the round-2
+    regression suite must still pass.
+
+    New COMMITTED cases (must be abstained=False):
+      A. "The documentation clearly states which interpretation is intended:
+         the first one, so the answer is I1."
+      B. "I do not know which benchmark is faster, but the specification
+         unambiguously requires I1."
+
+    Preserved GENUINE-ABSTENTION cases (must be abstained=True):
+      C. "I do not know which interpretation is intended." (alone)
+      D. "It is unclear which interpretation is intended by this prompt."
+      E. "Please provide more context before I answer this question."
+    """
+
+    def test_committed_clearly_states_which_interpretation(self):
+        """'clearly states which interpretation is intended: ... the answer is I1' - False.
+
+        The phrase 'which interpretation is intended' appears but is RESOLVED
+        by 'clearly states' + 'the answer is I1'. Must not fire abstention.
+        """
+        out = (
+            "The documentation clearly states which interpretation is intended: "
+            "the first one, so the answer is I1."
+        )
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed output with resolved referent, "
+            f"got signal={r['signal']!r}, evidence={r['evidence']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_committed_do_not_know_which_benchmark_but_unambiguously(self):
+        """'do not know which benchmark is faster, but ... unambiguously requires I1' - False.
+
+        'do not know which' refers to benchmarks, not interpretation; the output
+        resolves with 'unambiguously requires I1'. Must not fire abstention.
+        """
+        out = (
+            "I do not know which benchmark is faster, but the specification "
+            "unambiguously requires I1."
+        )
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed output with incidental 'do not know which', "
+            f"got signal={r['signal']!r}, evidence={r['evidence']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_genuine_do_not_know_which_interpretation_intended_stays_true(self):
+        """'I do not know which interpretation is intended.' alone - abstained=True."""
+        out = "I do not know which interpretation is intended."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Genuine abstention must stay True, got signal={r['signal']!r}"
+        )
+
+    def test_genuine_which_interpretation_intended_stays_true(self):
+        """'which interpretation is intended' without resolution - abstained=True."""
+        out = "It is unclear which interpretation is intended by this prompt."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Genuine 'which interpretation is intended' must stay True, "
+            f"got signal={r['signal']!r}"
+        )
+
+    def test_genuine_please_provide_more_context_stays_true(self):
+        """'Please provide more context before I answer.' - abstained=True."""
+        out = "Please provide more context before I answer this question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"'Please provide more context' must stay True, got signal={r['signal']!r}"
+        )

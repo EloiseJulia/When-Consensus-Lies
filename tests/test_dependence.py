@@ -597,3 +597,116 @@ class TestComputeDependenceTable:
         # With regime-filtered (buggy) marginals: delta ≈ 0.
         assert not math.isnan(delta_h1)
         assert delta_h1 > 0.3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Auditor regression — round-3 Findings 1 & 2
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuditorRegressionRound3:
+    """Regression suite for GPT round-3 audit findings.
+
+    Finding 1 (MAJOR): inferred kappa categories must exclude I_perp.
+    Finding 2 (MAJOR): negative ICC must not crash n_eff / compute_dependence_table.
+    """
+
+    # ── Finding 1: inferred-category kappa excludes I_perp ───────────────────
+
+    def test_mixed_probe_inferred_kappa_equals_one(self):
+        """Inferred-category path must match the explicit path: κ=1.0 for a mixed probe.
+
+        Setup: 2 items in the same group (method/model_class/seed).
+          - T1: agents give ["I1","I1","I_perp"] — two agree on I1, one abstains.
+          - T2: agents give ["I0","I0","I_perp"] — two agree on I0, one abstains.
+
+        Explicit path (interpretation_sets with categories ["I0","I1"]):
+          I_perp excluded by caller → all in-category agents agree → κ=1.0.
+
+        Inferred path (no interpretation_sets, BEFORE fix):
+          T1 infers cats ["I1","I_perp"], T2 infers ["I0","I_perp"];
+          union = ["I0","I1","I_perp"]; I_perp marginal inflates P_e → κ=0.0.
+
+        Inferred path (AFTER fix, I_perp excluded from inferred cats):
+          T1 infers ["I1"], T2 infers ["I0"]; union = ["I0","I1"];
+          in-category agreement = 1.0 → κ=1.0.
+        """
+        rows = []
+        for label in ["I1", "I1", IPERP]:
+            rows.append({"task": "T1", "method": "sc", "model_class": "r", "seed": 1,
+                         "label": label, "target": "I0", "regime": "H1_external",
+                         "ambiguity_k": 1, "model": f"m_{label}_T1"})
+        for label in ["I0", "I0", IPERP]:
+            rows.append({"task": "T2", "method": "sc", "model_class": "r", "seed": 1,
+                         "label": label, "target": "I0", "regime": "H1_external",
+                         "ambiguity_k": 1, "model": f"m_{label}_T2"})
+        tidy = pd.DataFrame(rows)
+
+        # Inferred path (no interpretation_sets supplied).
+        cell_df_inferred, _ = compute_dependence_table(tidy, n_bootstrap=10)
+        kappa_inferred = float(cell_df_inferred["kappa"].iloc[0])
+
+        # Explicit path (I_perp excluded by caller; categories = ["I0","I1"]).
+        explicit_sets = {"T1": ["I0", "I1"], "T2": ["I0", "I1"]}
+        cell_df_explicit, _ = compute_dependence_table(
+            tidy, interpretation_sets=explicit_sets, n_bootstrap=10
+        )
+        kappa_explicit = float(cell_df_explicit["kappa"].iloc[0])
+
+        assert kappa_explicit == pytest.approx(1.0), (
+            f"Explicit path must give κ=1.0, got {kappa_explicit}"
+        )
+        assert kappa_inferred == pytest.approx(1.0), (
+            f"Inferred path must give κ=1.0 (I_perp excluded from cats), "
+            f"got {kappa_inferred}"
+        )
+
+    # ── Finding 2: negative ICC must not crash n_eff ──────────────────────────
+
+    def test_negative_icc_no_crash_two_agents(self):
+        """Auditor regression: [I0,I1] cells with 2 agents → ICC=−1, must not crash.
+
+        With perfectly anti-correlated wrong indicators (one right, one wrong per
+        cell) ICC = −1. Under the old code n_eff = n / (1 + 1*(−1)) = n/0 →
+        ZeroDivisionError. After the fix: denominator ≤ 0 → n_eff = n (no
+        redundancy collapse; dispersed agents provide maximal information).
+        """
+        rows = []
+        for task in ["T1", "T2", "T3", "T4"]:
+            rows.append({"task": task, "method": "sc", "model_class": "r", "seed": 1,
+                         "label": "I0", "target": "I0", "regime": "H1_external",
+                         "ambiguity_k": 1, "model": "m0"})
+            rows.append({"task": task, "method": "sc", "model_class": "r", "seed": 1,
+                         "label": "I1", "target": "I0", "regime": "H1_external",
+                         "ambiguity_k": 1, "model": "m1"})
+        tidy = pd.DataFrame(rows)
+
+        # Must NOT raise.
+        cell_df, regime_summary = compute_dependence_table(tidy, n_bootstrap=10)
+
+        assert isinstance(cell_df, pd.DataFrame)
+        assert "H1_external" in regime_summary
+
+        n_eff = regime_summary["H1_external"]["n_eff_mean"]
+        # n_eff must be a finite number ≥ 1 (not NaN, not ±∞, not a crash).
+        assert not math.isnan(n_eff), "n_eff must not be NaN for negative-ICC case"
+        assert math.isfinite(n_eff), "n_eff must be finite for negative-ICC case"
+        assert n_eff >= 1.0, "n_eff must be ≥ 1 when ICC ≤ −1/(n−1)"
+
+    def test_effective_ensemble_size_negative_rho_no_crash(self):
+        """effective_ensemble_size must not crash for ρ̄ = −1 (denominator = 0)."""
+        result = effective_ensemble_size(2, -1.0)
+        assert math.isfinite(result)
+        assert result >= 1.0
+
+    def test_effective_ensemble_size_below_floor(self):
+        """ρ̄ < −1/(n−1) → denominator < 0 → returns n (no redundancy loss)."""
+        # n=3, −1/(n−1) = −0.5; rho_bar = −0.8 < −0.5 → n_eff = 3
+        result = effective_ensemble_size(3, -0.8)
+        assert result == pytest.approx(3.0)
+
+    def test_effective_ensemble_size_at_floor(self):
+        """ρ̄ exactly = −1/(n−1) → denominator = 0 → returns n."""
+        n = 5
+        rho_floor = -1.0 / (n - 1)
+        result = effective_ensemble_size(n, rho_floor)
+        assert result == pytest.approx(float(n))
