@@ -604,3 +604,75 @@ def test_load_runs_tidy_legacy_no_endpoint_loads_as_default(tmp_path):
     # Wrong endpoint returns empty.
     df3 = load_runs_tidy(cp, [task], expected_endpoint="copilot_proxy\x00http://x/v1")
     assert len(df3) == 0
+
+
+# ── 9. A09 backward-compatibility: include_output parameter ─────────────────
+# Called out prominently for the cross-family auditor:
+#   load_runs_tidy gained include_output=False (default) in Amendment 09. All
+#   existing callers that do not pass this keyword receive IDENTICAL output —
+#   same columns, same values, same dtypes. Only callers that opt in with
+#   include_output=True get the additional 'output' column.
+
+class TestIncludeOutput:
+    """Amendment-09 additive change: existing callers are byte-identical."""
+
+    def test_default_columns_unchanged(self, tmp_path):
+        """Without include_output, emitted columns are exactly _REQUIRED_COLS."""
+        cp = tmp_path / "cp.jsonl"
+        task = _make_task("t1")
+        _write_jsonl(cp, [_make_run_record("t1", "sc", "gpt-5.4", "I0")])
+        df = load_runs_tidy(cp, [task])
+        assert list(df.columns) == _REQUIRED_COLS, (
+            f"Default columns changed. Expected {_REQUIRED_COLS}, got {list(df.columns)}"
+        )
+        assert "output" not in df.columns
+
+    def test_include_output_false_same_as_default(self, tmp_path):
+        """Explicit include_output=False gives the same result as no keyword."""
+        cp = tmp_path / "cp.jsonl"
+        task = _make_task("t1")
+        _write_jsonl(cp, [_make_run_record("t1", "sc", "gpt-5.4", "I0")])
+        df_default = load_runs_tidy(cp, [task])
+        df_explicit = load_runs_tidy(cp, [task], include_output=False)
+        assert list(df_default.columns) == list(df_explicit.columns)
+        assert df_default.equals(df_explicit)
+
+    def test_include_output_true_adds_output_column(self, tmp_path):
+        """include_output=True appends an 'output' column after the existing ones."""
+        cp = tmp_path / "cp.jsonl"
+        task = _make_task("t1")
+        _write_jsonl(cp, [_make_run_record("t1", "sc", "gpt-5.4", "I0")])
+        df = load_runs_tidy(cp, [task], include_output=True)
+        assert "output" in df.columns
+        # All _REQUIRED_COLS still present and in their original positions.
+        for col in _REQUIRED_COLS:
+            assert col in df.columns
+        assert list(df.columns) == _REQUIRED_COLS + ["output"]
+
+    def test_output_column_value_matches_record(self, tmp_path):
+        """The output column carries the AgentRun.output string verbatim."""
+        cp = tmp_path / "cp.jsonl"
+        task = _make_task("t1")
+        rec = _make_run_record("t1", "sc", "gpt-5.4", "I0")
+        rec["output"] = "My custom output string with details."
+        _write_jsonl(cp, [rec])
+        df = load_runs_tidy(cp, [task], include_output=True)
+        assert df.iloc[0]["output"] == "My custom output string with details."
+
+    def test_output_column_defaults_to_empty_when_missing(self, tmp_path):
+        """If the record lacks an 'output' field, the column gets an empty string."""
+        cp = tmp_path / "cp.jsonl"
+        task = _make_task("t1")
+        rec = _make_run_record("t1", "sc", "gpt-5.4", "I0")
+        del rec["output"]
+        _write_jsonl(cp, [rec])
+        df = load_runs_tidy(cp, [task], include_output=True)
+        assert df.iloc[0]["output"] == ""
+
+    def test_missing_checkpoint_include_output_returns_correct_cols(self, tmp_path):
+        """Empty DataFrame with include_output=True includes the 'output' column."""
+        df = load_runs_tidy(tmp_path / "none.jsonl", [_make_task("t1")],
+                            include_output=True)
+        assert len(df) == 0
+        assert "output" in df.columns
+        assert list(df.columns) == _REQUIRED_COLS + ["output"]

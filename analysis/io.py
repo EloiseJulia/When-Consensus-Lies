@@ -17,6 +17,11 @@ Columns emitted (matching analysis.contrasts.COLS):
     ambiguity_k  — Task.ambiguity_level (1 | 2 | 3)
     model        — AgentRun.model_id (extra; carries full slug for diagnostics)
 
+Amendment-09 additive column (opt-in, backward-compatible):
+    output       — AgentRun.output raw string (only when include_output=True is
+                   passed to load_runs_tidy; absent by default so existing callers
+                   are byte-identical). Required by analysis/abstention.py (P2).
+
 BLOCKER 1 FIX — replicate_seed vs per-agent seed:
   An analysis "cell" = ONE ensemble replicate = ONE runner JOB.  An SC job with
   k=5 produces k agents all belonging to ONE cell.  harness/run.py assigns each
@@ -93,6 +98,8 @@ _TARGET = COLS["target"]       # "target"
 _REGIME = COLS["regime"]       # "regime"
 _AMBIGUITY_K = COLS["ambiguity_k"]  # "ambiguity_k"
 _MODEL = "model"               # extra column: raw model_id
+# A09 additive: opt-in output column for abstention analysis (P2).
+_OUTPUT = "output"             # AgentRun.output raw string
 
 
 def _derive_model_class(
@@ -125,6 +132,7 @@ def load_runs_tidy(
     *,
     model_class_map: Optional[Dict[str, str]] = None,
     expected_endpoint: Optional[str] = None,
+    include_output: bool = False,
 ) -> pd.DataFrame:
     """Load an AgentRun-JSONL checkpoint into a tidy agent-level DataFrame.
 
@@ -152,10 +160,14 @@ def load_runs_tidy(
             disambiguate.  Records with no ``endpoint`` field belong to the default
             namespace (empty string ``""``), which is backward-compatible with
             checkpoints written before endpoint namespacing was added.
+        include_output: If True, add an ``output`` column carrying the raw
+            AgentRun.output string (for Amendment-09 P2 abstention analysis).
+            Default False — existing callers are byte-identical (no new column).
 
     Returns:
         tidy DataFrame with one row per labeled AgentRun, columns:
             task, method, model_class, seed, label, target, regime, ambiguity_k, model
+        When ``include_output=True``, an additional ``output`` column is appended.
         An empty DataFrame with the correct columns when the file is missing,
         empty, or contains no valid labeled run records.
 
@@ -183,6 +195,8 @@ def load_runs_tidy(
 
     cols = [_ITEM, _METHOD, _MODEL_CLASS, _SEED, _LABEL, _TARGET,
             _REGIME, _AMBIGUITY_K, _MODEL]
+    if include_output:
+        cols = cols + [_OUTPUT]
     rows: List[Dict] = []
 
     if not checkpoint_path.exists():
@@ -240,7 +254,7 @@ def load_runs_tidy(
         # to per-agent seed for legacy single-agent records where both are equal.
         seed = int(rec.get("replicate_seed", rec.get("seed", 0)))
         mc = _derive_model_class(config_name, model_id, model_class_map)
-        rows.append({
+        row = {
             _ITEM: task_id,
             _METHOD: config_name,
             _MODEL_CLASS: mc,
@@ -250,7 +264,10 @@ def load_runs_tidy(
             _REGIME: regime,
             _AMBIGUITY_K: ambiguity_level,
             _MODEL: model_id,
-        })
+        }
+        if include_output:
+            row[_OUTPUT] = rec.get("output", "")
+        rows.append(row)
 
     if not rows:
         return pd.DataFrame(columns=cols)
