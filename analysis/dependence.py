@@ -180,29 +180,35 @@ def fleiss_kappa_multi(
         P̄_e  = Σ_j p_j²                     (expected agreement under independence)
         κ     = (P̄_o − P̄_e) / (1 − P̄_e)
 
-    **Out-of-category ratings (e.g. I_perp)**: labels absent from ``categories``
-    are excluded from BOTH the category counts AND the per-item denominator
-    (n_i = number of IN-CATEGORY ratings). Items whose in-category rating count
-    falls below 2 are dropped as subjects. If no valid subjects remain, the
-    function returns NaN (κ is UNDEFINED, not 0.0). Rationale: κ measures
-    agreement over the enumerated interpretation set; I_perp is noise, not an
-    interpretation, so it does not contribute to the agreement computation
-    (consistent with A04 treating I_perp as ineligible).
+    **I_perp is ALWAYS excluded** (unconditionally, regardless of whether it
+    appears in the caller-supplied ``categories``). I_perp is noise, not an
+    enumerated interpretation; including it as a rater category inflates P̄_e
+    and produces inconsistent κ values depending on how callers spell
+    ``categories``. Stripping it here makes the explicit-``interpretation_sets``
+    path and the inferred path identical (consistent with A04 treating I_perp
+    as ineligible). Other labels absent from the effective ``categories`` list
+    (after I_perp removal) are excluded from BOTH the category counts AND the
+    per-item denominator (n_i = number of IN-CATEGORY ratings). Items whose
+    in-category rating count falls below 2 are dropped as subjects. If no valid
+    subjects remain, the function returns NaN (κ is UNDEFINED, not 0.0).
 
     Returns NaN when valid N (items with ≥2 in-category raters) < 2, fewer than
-    2 categories are present, or P̄_e = 1.
+    2 categories remain after I_perp removal, or P̄_e = 1.
 
     Args:
         ratings: List of per-item label lists. ``ratings[i]`` is the list of
             all agent labels for item i (i.e. one cell in the item × agents
             matrix, with items as subjects).
         categories: The full interpretation set (bounds the denominator).
-            Labels absent from this sequence are treated as out-of-category.
+            ``IPERP`` is always stripped from this list before use; other
+            labels absent from the list are treated as out-of-category.
 
     Returns:
         Float κ in (−∞, 1], or NaN for degenerate inputs.
     """
-    cats = list(categories)
+    # Always remove I_perp — it is noise, not an interpretation category.
+    # This makes the explicit-categories path identical to the inferred path.
+    cats = [c for c in categories if c != IPERP]
     k = len(cats)
     if k < 2:
         return float("nan")

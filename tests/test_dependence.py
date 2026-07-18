@@ -267,6 +267,32 @@ class TestFleissKappaMulti:
         assert not math.isnan(val)
         assert val == pytest.approx(1.0)
 
+    # ── Round-4 audit regression: explicit I_perp in categories is ignored ───
+
+    def test_iperp_in_explicit_categories_ignored_same_kappa(self):
+        """Audit round-4 MAJOR: κ must be identical whether I_perp is in categories or not.
+
+        Mixed probe (auditor's evidence): items with some I_perp labels.
+        - Item 1: [I0, I0]  → unanimous I0
+        - Item 2: [I1, I1]  → unanimous I1
+        Both items: P_i=1.0; balanced marginals → P̄_e=0.5 → κ=1.0.
+
+        Passing categories=["I0","I1"] or categories=["I0","I1","I_perp"] MUST
+        return the same κ (IPERP is stripped unconditionally before building
+        the count matrix).
+        """
+        ratings = [["I0", "I0"], ["I1", "I1"]]
+        cats_without = ["I0", "I1"]
+        cats_with = ["I0", "I1", IPERP]
+        kappa_without = fleiss_kappa_multi(ratings, cats_without)
+        kappa_with = fleiss_kappa_multi(ratings, cats_with)
+        assert not math.isnan(kappa_without), "κ without I_perp must not be NaN"
+        assert not math.isnan(kappa_with), "κ with I_perp in categories must not be NaN"
+        assert kappa_without == pytest.approx(1.0), f"Expected κ=1.0 without I_perp, got {kappa_without!r}"
+        assert kappa_with == pytest.approx(kappa_without), (
+            f"κ differs when I_perp is in categories: {kappa_with!r} vs {kappa_without!r}"
+        )
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
