@@ -1,0 +1,634 @@
+"""Tests for analysis/abstention.py — A09 P2 rule-based abstention detector.
+
+Golden hand cases per the plan spec §3 and Amendment 09 §2.
+All tests are deterministic (no LLM, no network).
+"""
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from analysis.abstention import (
+    ABSTENTION_RULES,
+    SIGNAL_AMBIGUITY_FLAG,
+    SIGNAL_ASSUMING,
+    SIGNAL_CANNOT_DETERMINE,
+    SIGNAL_CLARIFICATION_QUESTION,
+    SIGNAL_CONFIDENT_COMMIT,
+    SIGNAL_EXPLICIT_ABSTENTION,
+    SIGNAL_NEED_MORE_INFO,
+    SIGNAL_WHICH_MEAN,
+    abstention_table,
+    detect_abstention,
+    export_validation_sample,
+    future_classifier_hook,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tidy_with_output(outputs, regimes=None, model_classes=None) -> pd.DataFrame:
+    n = len(outputs)
+    regimes = regimes or (["H1_external"] * n)
+    model_classes = model_classes or (["reasoning"] * n)
+    return pd.DataFrame({
+        "task": [f"T{i}" for i in range(n)],
+        "method": ["sc"] * n,
+        "model_class": model_classes,
+        "seed": [1] * n,
+        "label": ["I1"] * n,
+        "target": ["I0"] * n,
+        "regime": regimes,
+        "ambiguity_k": [1] * n,
+        "model": [f"m{i}" for i in range(n)],
+        "output": outputs,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. detect_abstention — positive (should detect abstention)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDetectAbstentionPositive:
+
+    def test_cannot_determine(self):
+        out = "Based on the information provided, I cannot determine which specification applies."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_CANNOT_DETERMINE
+        assert len(r["evidence"]) > 0
+
+    def test_cant_determine_contraction(self):
+        out = "I can't determine the correct answer without more context."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_CANNOT_DETERMINE
+
+    def test_impossible_to_know(self):
+        out = "It is impossible to know which interpretation is intended here."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_CANNOT_DETERMINE
+
+    def test_need_more_information(self):
+        out = "I need more information to provide a definitive answer."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_NEED_MORE_INFO
+
+    def test_insufficient_context(self):
+        out = "There is insufficient context to resolve this ambiguity."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_NEED_MORE_INFO
+
+    def test_which_did_you_mean(self):
+        out = "I can't tell which specification did you mean — A or B?"
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        # Should match WHICH_MEAN (or CANNOT_DETERMINE first) — either signals abstention
+        assert r["signal"] in (SIGNAL_WHICH_MEAN, SIGNAL_CANNOT_DETERMINE, SIGNAL_CLARIFICATION_QUESTION)
+
+    def test_explicit_clarification_which(self):
+        out = "Could you please clarify which version of the API you are referring to?"
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] in (SIGNAL_WHICH_MEAN, SIGNAL_CLARIFICATION_QUESTION)
+
+    def test_trailing_clarification_question(self):
+        out = "This could refer to multiple things. Which one do you mean?"
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+
+    def test_ambiguous_flag(self):
+        out = "This question is ambiguous and multiple valid interpretations are possible."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] in (SIGNAL_AMBIGUITY_FLAG,)
+
+    def test_ambiguous_the_question_is_ambiguous(self):
+        out = "The question is ambiguous — it could mean either X or Y."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+
+    def test_assuming_hedge(self):
+        out = "I'll assume you mean the first interpretation and proceed accordingly."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_ASSUMING
+
+    def test_explicit_abstention_refuse(self):
+        out = "I refuse to answer this question as stated."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_EXPLICIT_ABSTENTION
+
+    def test_i_abstain(self):
+        out = "I abstain from providing an answer given the ambiguity."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_EXPLICIT_ABSTENTION
+
+    def test_cannot_be_determined(self):
+        out = "The correct interpretation cannot be determined from the available evidence."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_CANNOT_DETERMINE
+
+    def test_i_dont_have_enough_context(self):
+        out = "I don't have enough context to answer this with confidence."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_NEED_MORE_INFO
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. detect_abstention — negative (should NOT detect abstention)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDetectAbstentionNegative:
+
+    def test_confident_wrong_answer(self):
+        """A confidently wrong output must NOT be classified as abstention."""
+        out = "The function should use the recursive algorithm I2."
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+        assert r["evidence"] == ""
+
+    def test_confident_correct_answer(self):
+        out = "The correct interpretation is I0: use the iterative approach."
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_no_hedging_long_output(self):
+        out = (
+            "After careful analysis, the specification clearly indicates that the "
+            "function must handle the edge case using the first interpretation. "
+            "This is consistent with the documented behavior in version 2.0."
+        )
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_empty_string(self):
+        r = detect_abstention("")
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_none_input(self):
+        r = detect_abstention(None)  # type: ignore[arg-type]
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_deterministic_same_output(self):
+        """Same input always produces same output (determinism)."""
+        out = "The correct answer is I1 because of the spec definition."
+        r1 = detect_abstention(out)
+        r2 = detect_abstention(out)
+        assert r1 == r2
+
+    def test_non_abstaining_question_ending(self):
+        """Output ending with a rhetorical question is not necessarily abstention."""
+        out = "I select interpretation I2. Isn't that what the spec says?"
+        # This may or may not trigger — but it should not be a confident wrong
+        # that gets a false positive for high-confidence signals.
+        r = detect_abstention(out)
+        # The key assertion: if abstained, it must have a non-empty evidence.
+        if r["abstained"]:
+            assert len(r["evidence"]) > 0
+
+    def test_word_determine_in_positive_context(self):
+        """The word 'determine' in a confident context should NOT trigger."""
+        out = "After analysis I determine that interpretation I1 is correct."
+        r = detect_abstention(out)
+        # "I determine" (positive confident assertion) should not fire cannot_determine
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_committed_answer_with_stated_assumption_not_abstained(self):
+        """Auditor example 1: analytical assumption + committed answer → abstained=False.
+
+        'I will assume [methodological premise]. The answer is X.' must not be
+        classified as abstention — the agent commits to a final interpretation.
+        """
+        out = "I will assume the standard definition applies here. The answer is I1."
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_for_purposes_of_answer_not_abstained(self):
+        """Auditor example 2: 'For the purposes of this answer' preamble → abstained=False.
+
+        A committed answer that frames its context with 'For the purposes of
+        this answer, I'm using definition A' and then gives a final result must
+        classify as CONFIDENT_COMMIT, not as abstention.
+        """
+        out = "For the purposes of this answer, I'm using definition A. The result is I2."
+        r = detect_abstention(out)
+        assert r["abstained"] is False
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. detect_abstention — output schema
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDetectAbstentionSchema:
+
+    def test_returns_dict_with_required_keys(self):
+        r = detect_abstention("cannot determine the answer")
+        assert set(r.keys()) >= {"abstained", "signal", "evidence"}
+
+    def test_abstained_is_bool(self):
+        r = detect_abstention("I need more information")
+        assert isinstance(r["abstained"], bool)
+
+    def test_signal_is_str(self):
+        r = detect_abstention("clearly the answer is I1")
+        assert isinstance(r["signal"], str)
+
+    def test_evidence_is_str(self):
+        r = detect_abstention("I cannot determine the answer")
+        assert isinstance(r["evidence"], str)
+
+    def test_confident_commit_has_empty_evidence(self):
+        r = detect_abstention("The answer is I1.")
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+        assert r["evidence"] == ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. ABSTENTION_RULES structure
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAbstentionRules:
+
+    def test_rules_is_list(self):
+        assert isinstance(ABSTENTION_RULES, list)
+        assert len(ABSTENTION_RULES) >= 4
+
+    def test_each_rule_has_signal_and_patterns(self):
+        for entry in ABSTENTION_RULES:
+            signal, patterns = entry
+            assert isinstance(signal, str)
+            assert isinstance(patterns, list)
+            assert len(patterns) >= 1
+
+    def test_all_signal_constants_present(self):
+        signals = {e[0] for e in ABSTENTION_RULES}
+        for expected in [
+            SIGNAL_CANNOT_DETERMINE, SIGNAL_NEED_MORE_INFO, SIGNAL_WHICH_MEAN,
+            SIGNAL_AMBIGUITY_FLAG, SIGNAL_ASSUMING, SIGNAL_EXPLICIT_ABSTENTION,
+        ]:
+            assert expected in signals, f"Missing rule category: {expected}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. abstention_table
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAbstentionTable:
+
+    def test_basic_table(self):
+        outputs = [
+            "I cannot determine the answer.",
+            "The answer is clearly I1.",
+            "I need more information.",
+            "The answer is I2.",
+        ]
+        regimes = ["H1_external", "H1_external", "H2_derivable", "H2_derivable"]
+        model_classes = ["reasoning", "reasoning", "weak", "weak"]
+        tidy = _tidy_with_output(outputs, regimes, model_classes)
+        table = abstention_table(tidy)
+        assert isinstance(table, pd.DataFrame)
+        assert "abstention_rate" in table.columns
+        assert "n_agents" in table.columns
+        assert "regime" in table.columns
+        assert "model_class" in table.columns
+
+    def test_all_abstained(self):
+        outputs = ["I cannot determine.", "Need more information.", "I cannot tell."]
+        tidy = _tidy_with_output(outputs)
+        table = abstention_table(tidy)
+        grand = table[table["regime"] == "ALL"]
+        assert float(grand.iloc[0]["abstention_rate"]) == pytest.approx(1.0)
+
+    def test_none_abstained(self):
+        outputs = ["Answer is I1.", "Answer is I2.", "Answer is I0."]
+        tidy = _tidy_with_output(outputs)
+        table = abstention_table(tidy)
+        grand = table[table["regime"] == "ALL"]
+        assert float(grand.iloc[0]["abstention_rate"]) == pytest.approx(0.0)
+
+    def test_grand_total_row_present(self):
+        tidy = _tidy_with_output(["Answer is I1.", "I cannot determine."])
+        table = abstention_table(tidy)
+        assert "ALL" in table["regime"].values
+
+    def test_raises_without_output_column(self):
+        tidy = pd.DataFrame({"task": ["T1"], "label": ["I1"]})
+        with pytest.raises(ValueError, match="output"):
+            abstention_table(tidy)
+
+    def test_h1_external_lower_abstention_prediction(self):
+        """Silent-failure scenario: agents abstain on H2 but commit on H1."""
+        outputs_h1 = ["The answer is I1."] * 10  # confident (wrong)
+        outputs_h2 = ["I cannot determine which is meant."] * 10  # abstaining
+        tidy = _tidy_with_output(
+            outputs_h1 + outputs_h2,
+            regimes=["H1_external"] * 10 + ["H2_derivable"] * 10,
+        )
+        table = abstention_table(tidy)
+        h1_row = table[table["regime"] == "H1_external"]
+        h2_row = table[table["regime"] == "H2_derivable"]
+        h1_rate = float(h1_row["abstention_rate"].iloc[0])
+        h2_rate = float(h2_row["abstention_rate"].iloc[0])
+        assert h1_rate < h2_rate  # H1 agents commit (low abstention), H2 abstain
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. export_validation_sample
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExportValidationSample:
+
+    def test_jsonl_export(self, tmp_path):
+        outputs = [f"output_{i}" for i in range(20)]
+        outputs[0] = "I cannot determine the answer."
+        tidy = _tidy_with_output(outputs)
+        out_file = tmp_path / "sample.jsonl"
+        n = export_validation_sample(tidy, out_file, n_sample=10, seed=1)
+        assert n == 10
+        with open(out_file) as f:
+            lines = [json.loads(l) for l in f if l.strip()]
+        assert len(lines) == 10
+        for rec in lines:
+            assert "output" in rec
+            assert "rule_signal" in rec
+            assert "abstained" in rec
+            assert "evidence" in rec
+
+    def test_csv_export(self, tmp_path):
+        outputs = [f"answer_{i}" for i in range(15)]
+        tidy = _tidy_with_output(outputs)
+        out_file = tmp_path / "sample.csv"
+        n = export_validation_sample(tidy, out_file, n_sample=5, seed=2, fmt="csv")
+        assert n == 5
+        df = pd.read_csv(out_file)
+        assert "output" in df.columns
+        assert "rule_signal" in df.columns
+
+    def test_export_fewer_than_n(self, tmp_path):
+        """When tidy has fewer rows than n_sample, export all available."""
+        outputs = ["answer_1", "answer_2"]
+        tidy = _tidy_with_output(outputs)
+        out_file = tmp_path / "sample.jsonl"
+        n = export_validation_sample(tidy, out_file, n_sample=50, seed=0)
+        assert n == 2
+
+    def test_raises_without_output_column(self, tmp_path):
+        tidy = pd.DataFrame({"task": ["T1"]})
+        with pytest.raises(ValueError, match="output"):
+            export_validation_sample(tidy, tmp_path / "x.jsonl")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. future_classifier_hook (guardrail enforcement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestFutureClassifierHook:
+
+    def test_raises_not_implemented_for_cross_family(self):
+        with pytest.raises(NotImplementedError):
+            future_classifier_hook(["some output"], classifier_family="GPT")
+
+    def test_raises_not_implemented_for_gemini(self):
+        with pytest.raises(NotImplementedError):
+            future_classifier_hook(["some output"], classifier_family="Gemini")
+
+    def test_raises_value_error_for_claude_family(self):
+        """A09 guardrail: calling with Claude family MUST raise ValueError."""
+        with pytest.raises(ValueError, match="guardrail"):
+            future_classifier_hook(["some output"], classifier_family="Claude")
+
+    def test_raises_value_error_for_claude_variant(self):
+        with pytest.raises(ValueError, match="guardrail"):
+            future_classifier_hook(["output"], classifier_family="claude-opus")
+
+    def test_raises_value_error_for_anthropic(self):
+        with pytest.raises(ValueError, match="guardrail"):
+            future_classifier_hook(["output"], classifier_family="Anthropic")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Auditor regression — Finding 3 (round-2 audit examples)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuditorRegressionFinding3:
+    """Regression suite for the GPT round-2 MINOR finding (abstention grammar).
+
+    Genuine-abstention cases (abstained=True):
+      1. "I do not know which interpretation is intended"
+      2. "do not know which" (short form)
+      3. "which interpretation is intended" (surfaced ambiguity)
+      4. "Please provide more context before I answer"
+      5. "Assuming the FIRST interpretation is intended"
+
+    Committed-with-premise cases (abstained=False):
+      6. "I will assume a 5% discount rate. The answer is I1."
+      7. "For the purposes of this answer, use UTC. The result is I0."
+
+    Stays True (already worked but explicitly confirmed):
+      8. "cannot determine which you mean"
+    """
+
+    def test_do_not_know_which_interpretation_is_intended(self):
+        """'I do not know which interpretation is intended' → abstained=True."""
+        out = "I do not know which interpretation is intended here."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True, got signal={r['signal']!r}"
+        )
+
+    def test_do_not_know_which_short(self):
+        """'do not know which' alone → abstained=True."""
+        out = "Based on the available text, I do not know which is meant."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+
+    def test_which_interpretation_is_intended(self):
+        """'which interpretation is intended' → abstained=True."""
+        out = "It is unclear which interpretation is intended by the question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True, got signal={r['signal']!r}"
+        )
+
+    def test_please_provide_more_context(self):
+        """'Please provide more context before I answer' → abstained=True."""
+        out = "Please provide more context before I answer this question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True, got signal={r['signal']!r}"
+        )
+
+    def test_assuming_first_interpretation_is_intended(self):
+        """'Assuming the FIRST interpretation is intended' → abstained=True."""
+        out = "Assuming the first interpretation is intended, the answer is I1."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True for interpretation-referent assumption, "
+            f"got signal={r['signal']!r}"
+        )
+        assert r["signal"] == SIGNAL_ASSUMING
+
+    def test_assuming_second_interpretation_is_intended(self):
+        """'Assuming the SECOND interpretation is intended' → abstained=True."""
+        out = "Assuming the second interpretation is intended, I select I0."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_ASSUMING
+
+    def test_committed_with_methodological_premise_not_abstained(self):
+        """'I will assume a 5% discount rate. The answer is I1.' → abstained=False.
+
+        A methodological parameter assumption that still commits to a final
+        interpretation must NOT be classified as abstention.
+        """
+        out = "I will assume a 5% discount rate. The answer is I1."
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed-with-premise, "
+            f"got signal={r['signal']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_for_purposes_of_answer_not_abstained(self):
+        """'For the purposes of this answer, use UTC. The result is I0.' → abstained=False."""
+        out = "For the purposes of this answer, use UTC. The result is I0."
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed-with-premise, "
+            f"got signal={r['signal']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_cannot_determine_which_you_mean_stays_true(self):
+        """'cannot determine which you mean' stays abstained=True (already worked)."""
+        out = "I cannot determine which you mean by this question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_CANNOT_DETERMINE
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. A09 guardrail: no LLM call anywhere in the module
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestNoLlmCall:
+
+    def test_detect_abstention_is_pure_regex(self):
+        """detect_abstention must be deterministic and not call any network/LLM.
+
+        We call it 100 times and verify identical output each time.
+        """
+        out = "I cannot determine which specification you mean."
+        results = [detect_abstention(out) for _ in range(100)]
+        assert all(r == results[0] for r in results), "Non-deterministic output detected"
+
+    def test_abstention_table_is_deterministic(self):
+        outputs = ["I need more info.", "The answer is I1."]
+        tidy = _tidy_with_output(outputs)
+        t1 = abstention_table(tidy)
+        t2 = abstention_table(tidy)
+        assert t1.equals(t2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Auditor regression — round-3 Finding 3 (over-firing committed outputs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuditorRegressionRound3Finding3:
+    """Regression suite for GPT round-3 MINOR finding (rule precision).
+
+    Two committed outputs were wrongly flagged abstained=True. This class adds
+    tests to prevent regression. The genuine-abstention cases from the round-2
+    regression suite must still pass.
+
+    New COMMITTED cases (must be abstained=False):
+      A. "The documentation clearly states which interpretation is intended:
+         the first one, so the answer is I1."
+      B. "I do not know which benchmark is faster, but the specification
+         unambiguously requires I1."
+
+    Preserved GENUINE-ABSTENTION cases (must be abstained=True):
+      C. "I do not know which interpretation is intended." (alone)
+      D. "It is unclear which interpretation is intended by this prompt."
+      E. "Please provide more context before I answer this question."
+    """
+
+    def test_committed_clearly_states_which_interpretation(self):
+        """'clearly states which interpretation is intended: ... the answer is I1' - False.
+
+        The phrase 'which interpretation is intended' appears but is RESOLVED
+        by 'clearly states' + 'the answer is I1'. Must not fire abstention.
+        """
+        out = (
+            "The documentation clearly states which interpretation is intended: "
+            "the first one, so the answer is I1."
+        )
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed output with resolved referent, "
+            f"got signal={r['signal']!r}, evidence={r['evidence']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_committed_do_not_know_which_benchmark_but_unambiguously(self):
+        """'do not know which benchmark is faster, but ... unambiguously requires I1' - False.
+
+        'do not know which' refers to benchmarks, not interpretation; the output
+        resolves with 'unambiguously requires I1'. Must not fire abstention.
+        """
+        out = (
+            "I do not know which benchmark is faster, but the specification "
+            "unambiguously requires I1."
+        )
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed output with incidental 'do not know which', "
+            f"got signal={r['signal']!r}, evidence={r['evidence']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_genuine_do_not_know_which_interpretation_intended_stays_true(self):
+        """'I do not know which interpretation is intended.' alone - abstained=True."""
+        out = "I do not know which interpretation is intended."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Genuine abstention must stay True, got signal={r['signal']!r}"
+        )
+
+    def test_genuine_which_interpretation_intended_stays_true(self):
+        """'which interpretation is intended' without resolution - abstained=True."""
+        out = "It is unclear which interpretation is intended by this prompt."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Genuine 'which interpretation is intended' must stay True, "
+            f"got signal={r['signal']!r}"
+        )
+
+    def test_genuine_please_provide_more_context_stays_true(self):
+        """'Please provide more context before I answer.' - abstained=True."""
+        out = "Please provide more context before I answer this question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"'Please provide more context' must stay True, got signal={r['signal']!r}"
+        )

@@ -45,8 +45,10 @@ as redefined by SIGNED Amendment 07 (R1a k0-control + R1b uniform null; label-sh
 amendment fixes only N/grid/seeds/power. The confirmatory results are reported honestly whatever they are.
 
 ## 5. Sign-off (at LAUNCH)
-- [ ] Owner confirms the final item counts (post-top-up) + the config grid + 3 seeds + the scheduled
-      verifier/SC-k10 sensitivity pass.
-- [ ] Owner acknowledges this LOCKS the pre-registration: no design changes after launch.
+- [x] Owner @EloiseJulia confirms the final item counts (H1=40 / H2=14 / 54) + the config grid
+      (single + SC-k5 + homMAD-N5 + hetMAD) + 3 seeds [0,1000,2000] + the SCHEDULED verifier/SC-k10
+      sensitivity pass. — 2026-07-18
+- [x] Owner acknowledges this LOCKS the pre-registration: no design changes after launch. — 2026-07-18
 
-Amendment status: **DRAFT — finalize counts post-top-up; owner signs at launch.** See DECISION-LOG.
+Amendment status: **SIGNED (owner @EloiseJulia, 2026-07-18) at confirmatory launch.** See DECISION-LOG
+rows 61-62 (counts) + 65 (sign-off/launch).
