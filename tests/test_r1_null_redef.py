@@ -178,6 +178,9 @@ def _write_checkpoint_for_tasks(
             elif k1_label_pattern == "weakly_converging":
                 # 3/5 on I1, 2/5 on I0 → cd_primary = 0.6
                 label = "I1" if seed_off < 3 else "I0"
+            elif k1_label_pattern == "below_uniform":
+                # 2/5 on I1, 3/5 on I0 → cd_primary = 0.4 < CD_unif≈0.5 → diff < 0
+                label = "I1" if seed_off < 2 else "I0"
             else:
                 raise ValueError(f"Unknown k1_label_pattern: {k1_label_pattern!r}")
             records.append(
@@ -536,11 +539,11 @@ class TestR1GatesViaPilotGate:
     # ── Test 12: R1b FAIL ─────────────────────────────────────────────────────
 
     def test_r1b_fails_obs_close_to_uniform(self, tmp_path):
-        """R1b FAIL: CD_real=0.6, CD_unif≈0.5, margin=0.1 < R1B_MARGIN=0.15.
+        """R1b FAIL: CD_real=0.4 < CD_unif≈0.5 — per-item diff < 0, bootstrap CI lower < 0.
 
-        k=0 items all I0, k=1 items 3/5 I1 (weakly converging → CD_real=0.6).
+        k=0 items all I0, k=1 items 2/5 I1 (below_uniform → CD_real=0.4).
         Uniform null for {I0, I1}: CD_unif ≈ 0.5.
-        0.6 < 0.5 + 0.15 = 0.65 → R1b FAIL.
+        Per-item diff ≈ -0.1 for each of 2 items → mean diff ≈ -0.1 → CI lower < 0 → R1b FAIL.
         """
         from common.config import load_config
         cfg = load_config()
@@ -553,7 +556,7 @@ class TestR1GatesViaPilotGate:
         _write_checkpoint_for_tasks(
             Path(cp),
             k0_tasks=k0_tasks, k0_label_pattern="all_correct",
-            k1_tasks=k1_tasks, k1_label_pattern="weakly_converging",  # CD_real = 0.6
+            k1_tasks=k1_tasks, k1_label_pattern="below_uniform",  # CD_real = 0.4 < CD_unif≈0.5
         )
         runner, client = _make_noop_runner(cfg, tasks, cp, tmp_path)
 
@@ -565,19 +568,24 @@ class TestR1GatesViaPilotGate:
 
         r1b_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1b"), {})
         assert r1b_det.get("status") == "fail", (
-            f"R1b should FAIL: CD_real=0.6, CD_unif≈0.5, margin≈0.1 < R1B_MARGIN=0.15. "
+            f"R1b should FAIL: CD_real=0.4 < CD_unif≈0.5 → per-item diff≈-0.1 → "
+            f"bootstrap CI lower < 0. "
             f"Got status={r1b_det.get('status')!r}, "
-            f"real_cd={r1b_det.get('real_cd')}, uniform_cd={r1b_det.get('uniform_cd')}"
+            f"real_cd={r1b_det.get('real_cd')}, uniform_cd={r1b_det.get('uniform_cd')}, "
+            f"ci_lo={r1b_det.get('ci_lo')}"
         )
         assert report["gate_r1b"] is False
 
-        # Confirm the arithmetic: real_cd ≤ uniform_cd + R1B_MARGIN
+        # Confirm obs is BELOW uniform (definitively negative diff)
         uniform_cd = report["uniform_null_cd"]
         real_cd = report["real_cd"]
-        assert real_cd <= uniform_cd + R1B_MARGIN + 0.01, (
-            f"R1b FAIL case: real_cd ({real_cd:.4f}) should not clear "
-            f"uniform_cd ({uniform_cd:.4f}) + margin ({R1B_MARGIN}) = "
-            f"{uniform_cd + R1B_MARGIN:.4f}"
+        assert real_cd < uniform_cd, (
+            f"R1b FAIL case: real_cd ({real_cd:.4f}) should be BELOW uniform_cd "
+            f"({uniform_cd:.4f}) — per-item diff is negative, CI lower < 0"
+        )
+        # CI lower bound should be negative (the core bootstrap FAIL criterion)
+        assert r1b_det.get("ci_lo", 0.0) < 0, (
+            f"R1b FAIL: CI lower bound should be < 0; got ci_lo={r1b_det.get('ci_lo')}"
         )
 
     # ── Test 13: label-shuffle no longer gates verdict ────────────────────────
@@ -712,3 +720,254 @@ class TestR1GatesViaPilotGate:
         }
         missing_compat = compat_keys - set(report)
         assert not missing_compat, f"Report missing backward-compat keys: {missing_compat}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPT audit fixes — MAJOR 1: bootstrap CI INCONCLUSIVE / PASS / FAIL tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestBootstrapCIGates:
+    """Tests for bootstrap 95% CI PASS/FAIL/INCONCLUSIVE logic (MAJOR 1 fix)."""
+
+    def test_r1a_inconclusive_single_k0_control(self, tmp_path):
+        """R1a INCONCLUSIVE when only 1 k=0 item — < 2 items required for CI.
+
+        A single k=0 item is NOT sufficient for the bootstrap CI of
+        (mean CD_k≥1 − mean CD_k0). Must be INCONCLUSIVE, never PASS.
+        """
+        from common.config import load_config
+        cfg = load_config()
+
+        k0_tasks = [_make_task("k0_0", regime="H1_external", k=0)]  # only 1!
+        k1_tasks = [_make_task(f"k1_{i}", regime="H1_external", k=1) for i in range(2)]
+        tasks = k0_tasks + k1_tasks
+
+        cp = str(tmp_path / "cp.jsonl")
+        _write_checkpoint_for_tasks(
+            Path(cp),
+            k0_tasks=k0_tasks, k0_label_pattern="all_correct",
+            k1_tasks=k1_tasks, k1_label_pattern="converging",
+        )
+        runner, client = _make_noop_runner(cfg, tasks, cp, tmp_path)
+
+        report = _rr.run_pilot_gate(
+            cfg, tasks, checkpoint_path=cp,
+            offline=True, cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+
+        r1a_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1a"), {})
+        assert r1a_det.get("status") == "inconclusive", (
+            f"R1a should be INCONCLUSIVE with only 1 k=0 item (CI needs ≥2). "
+            f"Got status={r1a_det.get('status')!r}, "
+            f"n_items_k0={r1a_det.get('n_items_k0')}"
+        )
+        assert report["gate_r1a"] is False
+        assert report["gate_b"] is False
+
+    def test_r1b_inconclusive_single_k1_item(self, tmp_path):
+        """R1b INCONCLUSIVE when only 1 k≥1 item — < 2 items required for CI."""
+        from common.config import load_config
+        cfg = load_config()
+
+        k1_tasks = [_make_task("k1_0", regime="H1_external", k=1)]  # only 1!
+
+        cp = str(tmp_path / "cp.jsonl")
+        _write_checkpoint_for_tasks(
+            Path(cp),
+            k0_tasks=[], k0_label_pattern="all_correct",
+            k1_tasks=k1_tasks, k1_label_pattern="converging",
+        )
+        runner, client = _make_noop_runner(cfg, k1_tasks, cp, tmp_path)
+
+        report = _rr.run_pilot_gate(
+            cfg, k1_tasks, checkpoint_path=cp,
+            offline=True, cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+
+        r1b_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1b"), {})
+        assert r1b_det.get("status") == "inconclusive", (
+            f"R1b should be INCONCLUSIVE with only 1 k≥1 item (CI needs ≥2). "
+            f"Got status={r1b_det.get('status')!r}, "
+            f"n_items_k1plus={r1b_det.get('n_items_k1plus')}"
+        )
+        assert report["gate_r1b"] is False
+
+    def test_r1a_bootstrap_ci_lo_positive_on_pass(self, tmp_path):
+        """R1a PASS: gate_b_details includes positive ci_lo for bootstrap CI."""
+        from common.config import load_config
+        cfg = load_config()
+
+        k0_tasks = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        k1_tasks = [_make_task(f"k1_{i}", regime="H1_external", k=1) for i in range(2)]
+        tasks = k0_tasks + k1_tasks
+
+        cp = str(tmp_path / "cp.jsonl")
+        _write_checkpoint_for_tasks(
+            Path(cp),
+            k0_tasks=k0_tasks, k0_label_pattern="all_correct",
+            k1_tasks=k1_tasks, k1_label_pattern="converging",
+        )
+        runner, client = _make_noop_runner(cfg, tasks, cp, tmp_path)
+
+        report = _rr.run_pilot_gate(
+            cfg, tasks, checkpoint_path=cp,
+            offline=True, cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+
+        r1a_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1a"), {})
+        assert r1a_det.get("status") == "pass"
+        ci_lo = r1a_det.get("ci_lo", float("-inf"))
+        assert ci_lo > 0, f"R1a PASS must have ci_lo > 0; got ci_lo={ci_lo:.4f}"
+        assert r1a_det.get("n_items_k0") == 2
+        assert r1a_det.get("n_items_k1plus") == 2
+
+    def test_r1b_bootstrap_ci_lo_positive_on_pass(self, tmp_path):
+        """R1b PASS: gate_b_details includes positive ci_lo for bootstrap CI."""
+        from common.config import load_config
+        cfg = load_config()
+
+        k0_tasks = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        k1_tasks = [_make_task(f"k1_{i}", regime="H1_external", k=1) for i in range(2)]
+        tasks = k0_tasks + k1_tasks
+
+        cp = str(tmp_path / "cp.jsonl")
+        _write_checkpoint_for_tasks(
+            Path(cp),
+            k0_tasks=k0_tasks, k0_label_pattern="all_correct",
+            k1_tasks=k1_tasks, k1_label_pattern="converging",
+        )
+        runner, client = _make_noop_runner(cfg, tasks, cp, tmp_path)
+
+        report = _rr.run_pilot_gate(
+            cfg, tasks, checkpoint_path=cp,
+            offline=True, cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+
+        r1b_det = next((d for d in report["gate_b_details"] if d.get("gate") == "r1b"), {})
+        assert r1b_det.get("status") == "pass"
+        ci_lo = r1b_det.get("ci_lo", float("-inf"))
+        assert ci_lo > 0, f"R1b PASS must have ci_lo > 0; got ci_lo={ci_lo:.4f}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPT audit fix — MAJOR 2: frozen label_shuffle_null diagnostic
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestFrozenLabelShuffleDiagnostic:
+    """MAJOR 2: frozen label_shuffle_null (false_consensus_rate) per condition."""
+
+    def test_shuffle_null_details_has_both_null_keys(self, tmp_path):
+        """shuffle_null_details entries must have null_cd_cd_primary AND null_cd_frozen_fcr."""
+        from common.config import load_config
+        cfg = load_config()
+
+        k0_tasks = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        k1_tasks = [_make_task(f"k1_{i}", regime="H1_external", k=1) for i in range(2)]
+        tasks = k0_tasks + k1_tasks
+
+        cp = str(tmp_path / "cp.jsonl")
+        _write_checkpoint_for_tasks(
+            Path(cp),
+            k0_tasks=k0_tasks, k0_label_pattern="all_correct",
+            k1_tasks=k1_tasks, k1_label_pattern="converging",
+        )
+        runner, client = _make_noop_runner(cfg, tasks, cp, tmp_path)
+
+        report = _rr.run_pilot_gate(
+            cfg, tasks, checkpoint_path=cp,
+            offline=True, cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+
+        details = report.get("shuffle_null_details", [])
+        assert details, "Expected at least one shuffle_null_details entry"
+
+        for det in details:
+            if det.get("null_cd_cd_primary") is None:
+                continue  # inconclusive entry
+            assert "null_cd_cd_primary" in det, (
+                f"Entry missing null_cd_cd_primary: {det}"
+            )
+            assert "null_cd_frozen_fcr" in det, (
+                f"Entry missing null_cd_frozen_fcr (Amdt 07 §2): {det}"
+            )
+            assert isinstance(det["null_cd_cd_primary"], float)
+            assert isinstance(det["null_cd_frozen_fcr"], float)
+
+    def test_report_has_null_cd_frozen_key(self, tmp_path):
+        """Report dict must contain null_cd_frozen (mean FROZEN label_shuffle_null)."""
+        from common.config import load_config
+        cfg = load_config()
+
+        k0_tasks = [_make_task(f"k0_{i}", regime="H1_external", k=0) for i in range(2)]
+        k1_tasks = [_make_task(f"k1_{i}", regime="H1_external", k=1) for i in range(2)]
+        tasks = k0_tasks + k1_tasks
+
+        cp = str(tmp_path / "cp.jsonl")
+        _write_checkpoint_for_tasks(
+            Path(cp),
+            k0_tasks=k0_tasks, k0_label_pattern="all_correct",
+            k1_tasks=k1_tasks, k1_label_pattern="converging",
+        )
+        runner, client = _make_noop_runner(cfg, tasks, cp, tmp_path)
+
+        report = _rr.run_pilot_gate(
+            cfg, tasks, checkpoint_path=cp,
+            offline=True, cache_dir=str(tmp_path / "llm_cache"),
+            _runner_override=(runner, client),
+        )
+
+        assert "null_cd_frozen" in report, (
+            "Report must contain 'null_cd_frozen' (FROZEN label_shuffle_null — Amdt 07 §2)"
+        )
+        assert isinstance(report["null_cd_frozen"], float)
+        assert report["null_cd_frozen"] >= 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPT audit fix — MINOR: 4-interpretation uniform null scales with set size
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestUniformNullScalesWithInterpretations:
+    """MINOR: 4-interpretation uniform null < 2-interpretation baseline (≈0.5)."""
+
+    def test_four_interpretations_lower_than_two(self):
+        """All-same-foil item with 4 interpretations yields CD_unif < 2-interp CD_unif.
+
+        With k=2 (4 interpretations {I0, I1, I2, I3}) and 5 agents all labelling I1:
+          2-interp (k=1): E[I1_count/5] = 0.5  (half of mass on I1)
+          4-interp (k=2): probability mass split across I1, I2, I3
+                          → E[max_foil/5] < 0.5  (lower null baseline)
+
+        The 4-interp null is LOWER, confirming the null scales with interpretation-set size.
+        """
+        items_labels = [["I1", "I1", "I1", "I1", "I1"]]
+        target = "I0"
+
+        # 2-interpretation null (k=1)
+        cd_unif_2interp = uniform_interpretation_null(
+            items_labels, [["I0", "I1"]], target, n_perm=1000, seed=42
+        )
+
+        # 4-interpretation null (k=2)
+        cd_unif_4interp = uniform_interpretation_null(
+            items_labels, [["I0", "I1", "I2", "I3"]], target, n_perm=1000, seed=42
+        )
+
+        assert abs(cd_unif_2interp - 0.5) < 0.03, (
+            f"2-interp null expected ≈ 0.5; got {cd_unif_2interp:.4f}"
+        )
+        assert cd_unif_4interp < cd_unif_2interp, (
+            f"4-interp CD_unif ({cd_unif_4interp:.4f}) should be < 2-interp CD_unif "
+            f"({cd_unif_2interp:.4f}). More interpretations → lower coordination baseline."
+        )
+        assert cd_unif_4interp > 0.1, (
+            f"4-interp CD_unif ({cd_unif_4interp:.4f}) should be > 0.1 (non-trivial)"
+        )
+        assert cd_unif_4interp < 0.45, (
+            f"4-interp CD_unif ({cd_unif_4interp:.4f}) should be < 0.45 (clearly below 2-interp)"
+        )
