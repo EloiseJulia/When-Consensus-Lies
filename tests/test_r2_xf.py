@@ -1,14 +1,15 @@
 """Tests for bench/r2_xf — Amendment 10 R2 cross-family construction subset.
 
 The r2_xf items are Anthropic claude-opus-4.8-constructed H1_external traps with
-I0 = the NATURAL DEFAULT (which survives deletion of the disambiguating clause)
-and one foil per binary convention axis. Coverage:
+I0 = the EXTERNAL / hidden convention (the target, which an unaware solver does
+NOT produce) and one [combined-default] foil = the NATURAL DEFAULT a Python-
+native solver writes once the disambiguating clause is deleted. Coverage:
   - 100% deterministic distinguishability (executable gold + mandatory foils)
   - unique target I0
   - Amdt-03 per-variant invariant len(key_questions)==k==len(interpretations)-1
   - k0 control has EMPTY key_questions and a single I0 interpretation
   - every item carries regime="H1_external" and the r2xf_ id prefix
-  - the natural-default I0 is uniquely identified (a foil answer fails the I0 gold)
+  - target I0 (external convention) and foil (natural default) are gold-distinct
   - analysis/io.py constructor_family plumbing (additive, byte-identical default)
 """
 
@@ -33,12 +34,12 @@ from common.schema import Interpretation, Task
 def test_checkers_exist():
     """All 12 interpretation checker ids are present with reference candidates."""
     required = [
-        "r2xf_sort_native", "r2xf_sort_ci",
-        "r2xf_wc_default", "r2xf_wc_singlespace",
-        "r2xf_median_mean", "r2xf_median_lower",
-        "r2xf_roundmean_even", "r2xf_roundmean_up",
-        "r2xf_days_exclusive", "r2xf_days_inclusive",
-        "r2xf_speed_arith", "r2xf_speed_harmonic",
+        "r2xf_intdiv_trunc", "r2xf_intdiv_floor",
+        "r2xf_weekday_iso", "r2xf_weekday_py",
+        "r2xf_argmax_1based", "r2xf_argmax_0based",
+        "r2xf_sortids_numeric", "r2xf_sortids_lex",
+        "r2xf_days_inclusive", "r2xf_days_exclusive",
+        "r2xf_weeks_business", "r2xf_weeks_calendar",
     ]
     for cid in required:
         assert cid in CHECKERS, f"missing checker: {cid}"
@@ -111,11 +112,13 @@ def test_distinguishability():
         assert result["distinguishable"], f"{t.id}: {result['errors']}"
 
 
-def test_natural_default_i0_uniquely_identified():
-    """The target I0 = natural default; a foil answer must FAIL the I0 checker.
+def test_target_external_convention_distinct_from_default():
+    """The target I0 = external convention; the foil = natural default.
 
-    Guards the H1 construction: I0 (default) and the foil (one-axis deviation)
-    are gold-distinct, so a converged-on-foil consensus is scored as NOT-I0.
+    Guards the H1 construction (correct trap polarity): I0 (external convention)
+    and the foil (the Python-native default an UNAWARE solver converges on) are
+    gold-distinct, so a converged-on-foil consensus is scored as NOT-I0 and the
+    convergent-delusion metric can fire.
     """
     for t in generate_tasks():
         if t.ambiguity_level != 1:
@@ -123,10 +126,13 @@ def test_natural_default_i0_uniquely_identified():
         checkers, candidates, _ = get_checkers_and_candidates("r2_xf", t)
         i0 = next(i.id for i in t.interpretations if i.is_target)
         foil = next(i.id for i in t.interpretations if not i.is_target)
-        # I0 reference matches I0 checker; foil reference fails the I0 checker.
+        # I0 (external) ref matches its gold; the natural-default foil answer
+        # must FAIL the I0 target gold (opposite polarity from the old bug).
         assert checkers[i0].check(candidates[i0]).passed, f"{t.id}: I0 ref"
         assert not checkers[i0].check(candidates[foil]).passed, \
-            f"{t.id}: foil answer must not satisfy the I0 target gold"
+            f"{t.id}: natural-default foil must not satisfy the external I0 gold"
+        # And the foil reference must satisfy the foil's own (natural-default) gold.
+        assert checkers[foil].check(candidates[foil]).passed, f"{t.id}: foil ref"
 
 
 # ── analysis/io.py constructor_family plumbing (Amendment 10) ──────────────────
@@ -165,7 +171,7 @@ def test_io_constructor_family_derivation(tmp_path):
     """include_constructor_family=True populates the column from the id prefix."""
     from analysis.io import load_runs_tidy, _derive_constructor_family
 
-    assert _derive_constructor_family("r2xf_code_sort_001_k1_case_convention") == \
+    assert _derive_constructor_family("r2xf_code_intdiv_001_k1_integer_division") == \
         "anthropic/claude-opus-4.8"
     assert _derive_constructor_family("policy_overtime_001_k1") == "mai-code"
 

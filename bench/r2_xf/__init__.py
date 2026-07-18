@@ -9,15 +9,25 @@ control). Every item in this module was DESIGNED by the Anthropic
 ``common/schema.py``). The main benchmark is mai-code-constructed; this subset
 supplies the SECOND independent constructor family R2 needs.
 
-Design (H1_external, "which-convention with a NATURAL DEFAULT"):
-  - I0 (target) = the NATURAL DEFAULT a reasonable UNAWARE solver picks — the
-    language-native / format-standard / domain-default behavior. It MUST SURVIVE
-    deletion of the disambiguating clause: delete it and I0 is still the default.
-  - Each foil deviates on EXACTLY ONE convention axis. These are H1 (the
-    disambiguator is EXTERNAL knowledge NOT in the retained prompt) so — unlike
-    H2 — they are NOT resolvable from the retained prompt.
-  - Deterministic executable-gold ``check()``; I0 uniquely identifiable;
-    enumerated foils; cross-family-FAIR (not tuned to any single tested family).
+Design (H1_external, "hidden-convention trap" — mirrors the main benchmark's
+genuine H1 mechanic, e.g. ``code_quarter_001`` fiscal-April quarters):
+  - I0 (TARGET, is_target=True) = the NON-obvious interpretation that depends on
+    an EXTERNAL / hidden convention or fact NOT present in the retained prompt
+    (e.g. "integer division truncates toward zero, per the C/SQL spec"). A
+    reasonable UNAWARE solver — lacking the external fact — does NOT produce it.
+  - The FOIL (is_target=False, the [combined-default] branch) = the NATURAL
+    DEFAULT a language-native / unaware solver writes (e.g. Python ``a // b``
+    floor division). Deleting the disambiguating clause LEAVES this default as
+    what a solver produces, so unaware models CONVERGE on the foil → the
+    convergent-delusion trap fires (high cd_primary over the non-target foil).
+  - The disambiguator is genuinely EXTERNAL: NOTHING in the retained prompt lets
+    a capable model derive the target (that would make it H2_derivable). The
+    prompt_core is deliberately generic; the external convention lives ONLY in
+    the deleted requirement-class clause.
+  - The TARGET's gold computes the external-convention answer; the FOIL's gold
+    computes the natural default. Deterministic executable-gold ``check()``; I0
+    uniquely identifiable; enumerated foils; cross-family-FAIR (not tuned to any
+    single tested family). Axes are DISTINCT from the main benchmark's families.
   - k in {0, 1}: a k0 control (EMPTY key_questions, prompt==latent_spec) and a
     k1 trap. Amdt-03 per-variant invariant holds:
         len(key_questions) == ambiguity_level == len(interpretations) - 1
@@ -67,6 +77,11 @@ from bench.policy_qa import StructuredAnswerChecker
 # ============================================================================
 # EXECUTABLE-GOLD SPECS — one deterministic checker per interpretation.
 #
+# TARGET (I0)  gold = the EXTERNAL / hidden convention (what the deleted clause
+#                     asks for; an unaware solver does NOT produce it).
+# FOIL         gold = the NATURAL DEFAULT a language-native / unaware solver
+#                     writes once the clause is deleted (convergence target).
+#
 # Each entry: id -> dict with
 #   kind        : "code" | "data" | "policy"
 #   entrypoint  : function name (code/data only)
@@ -76,137 +91,137 @@ from bench.policy_qa import StructuredAnswerChecker
 # All ids are r2xf_-prefixed => disjoint from every host-domain checker id.
 # ============================================================================
 
-# ── Family 1 (code_spec): string-sort case convention ────────────────────────
-# NATURAL DEFAULT: Python's native sorted() = Unicode code-point order (uppercase
-# before lowercase). Foil: case-insensitive sort (external convention).
-_SORT_DATA = ["banana", "Apple", "cherry", "Date", "apple"]
-_SORT_NATIVE = sorted(_SORT_DATA)              # ['Apple','Date','apple','banana','cherry']
-_SORT_CI = sorted(_SORT_DATA, key=str.lower)   # ['Apple','apple','banana','cherry','Date']
+# ── Family 1 (code_spec): integer-division rounding direction ────────────────
+# TARGET (external): truncate toward zero (C / SQL / many APIs) -> -7 // 2 = -3.
+# FOIL   (default) : Python's native floor division `a // b`     -> -7 // 2 = -4.
+_INTDIV_CASES_TRUNC = [((-7, 2), -3), ((7, 2), 3), ((-8, 3), -2), ((-9, 4), -2)]
+_INTDIV_CASES_FLOOR = [((-7, 2), -4), ((7, 2), 3), ((-8, 3), -3), ((-9, 4), -3)]
 
-# ── Family 2 (code_spec): word-count whitespace-split convention ─────────────
-# NATURAL DEFAULT: str.split() (split on ANY run of whitespace, drop empties).
-# Foil: split on a single space ' ' (keeps empty tokens from repeated spaces).
-_WC_DATA = "  the quick  brown  "
-_WC_DEFAULT = len(_WC_DATA.split())            # 3
-_WC_SINGLE = len(_WC_DATA.split(" "))          # 8
+# ── Family 2 (code_spec): weekday numbering convention ───────────────────────
+# TARGET (external): ISO 8601 weekday, Monday=1 .. Sunday=7  (date.isoweekday()).
+# FOIL   (default) : Python's native date.weekday(), Monday=0 .. Sunday=6.
+_WD_CASES_ISO = [((2023, 1, 2), 1), ((2023, 1, 1), 7), ((2023, 1, 4), 3)]
+_WD_CASES_PY = [((2023, 1, 2), 0), ((2023, 1, 1), 6), ((2023, 1, 4), 2)]
 
-# ── Family 3 (data_analysis): even-length median convention ──────────────────
-# NATURAL DEFAULT: mean of the two middle values (standard statistical median).
-# Foil: lower median (the lower of the two middles).
-_MED_DATA = [1, 2, 3, 4]
+# ── Family 3 (data_analysis): position-index base for a reported location ─────
+# TARGET (external): 1-based row/position number (report/spreadsheet convention).
+# FOIL   (default) : 0-based Python list index (list.index()).
+_ARGMAX_DATA = [3, 7, 2, 9, 4]                  # max value 9 at 0-based index 3
 
-# ── Family 4 (data_analysis): rounding convention for a mean ─────────────────
-# NATURAL DEFAULT: Python's built-in round() = round-half-to-even (banker's).
-# Foil: round-half-up. Dataset mean lands exactly on x.5 so the two diverge.
-_ROUND_DATA = [1, 2, 3, 4]                      # mean 2.5 -> banker 2, half-up 3
+# ── Family 4 (data_analysis): sort order for numeric-string ids ──────────────
+# TARGET (external): NUMERIC order (catalog spec) -> ['1','2','3','10','21'].
+# FOIL   (default) : Python-native lexicographic sorted() -> ['1','10','2','21','3'].
+_SORTIDS_DATA = ["10", "2", "1", "21", "3"]
+_SORTIDS_NUMERIC = sorted(_SORTIDS_DATA, key=int)
+_SORTIDS_LEX = sorted(_SORTIDS_DATA)
 
-# ── Family 5 (policy_qa): day-count convention ───────────────────────────────
-# NATURAL DEFAULT: exclusive day span (end - start). Foil: inclusive (both ends).
-# start day 3, end day 10 -> exclusive 7, inclusive 8.
+# ── Family 5 (policy_qa): day-count inclusivity ──────────────────────────────
+# TARGET (external): INCLUSIVE count, both endpoints (leave policy) -> 8.
+# FOIL   (default) : exclusive arithmetic span end - start (10 - 3)  -> 7.
 
-# ── Family 6 (policy_qa): average-speed convention ───────────────────────────
-# NATURAL DEFAULT: arithmetic mean of the two leg speeds. Foil: harmonic mean.
-# same distance at 30 and 60 -> arithmetic 45, harmonic 40.
+# ── Family 6 (policy_qa): meaning of "weeks" in a deadline ───────────────────
+# TARGET (external): BUSINESS weeks = 5 working days each (SLA) -> 2 weeks = 10.
+# FOIL   (default) : calendar weeks = 7 days each -> 2 weeks = 14.
 
 
 CHECK_SPECS: Dict[str, Dict[str, Any]] = {
-    # -- Family 1: sort case convention -----------------------------------------
-    "r2xf_sort_native": {
+    # -- Family 1: integer-division rounding ------------------------------------
+    "r2xf_intdiv_trunc": {  # TARGET (external: truncate toward zero)
         "kind": "code",
-        "entrypoint": "sort_names",
-        "test_cases": [(_SORT_DATA, _SORT_NATIVE)],
-        "candidate": "def sort_names(names):\n    return sorted(names)\n",
-    },
-    "r2xf_sort_ci": {
-        "kind": "code",
-        "entrypoint": "sort_names",
-        "test_cases": [(_SORT_DATA, _SORT_CI)],
-        "candidate": "def sort_names(names):\n    return sorted(names, key=str.lower)\n",
-    },
-    # -- Family 2: word-count split convention ----------------------------------
-    "r2xf_wc_default": {
-        "kind": "code",
-        "entrypoint": "word_count",
-        "test_cases": [(_WC_DATA, _WC_DEFAULT)],
-        "candidate": "def word_count(s):\n    return len(s.split())\n",
-    },
-    "r2xf_wc_singlespace": {
-        "kind": "code",
-        "entrypoint": "word_count",
-        "test_cases": [(_WC_DATA, _WC_SINGLE)],
-        "candidate": "def word_count(s):\n    return len(s.split(' '))\n",
-    },
-    # -- Family 3: even-median convention ---------------------------------------
-    "r2xf_median_mean": {
-        "kind": "data",
-        "entrypoint": "median",
-        "test_cases": [(_MED_DATA, "2.50")],
+        "entrypoint": "int_divide",
+        "test_cases": _INTDIV_CASES_TRUNC,
         "candidate": (
-            "def median(data):\n"
-            "    s = sorted(data)\n"
-            "    n = len(s)\n"
-            "    mid = n // 2\n"
-            "    if n % 2 == 0:\n"
-            "        return f'{(s[mid - 1] + s[mid]) / 2.0:.2f}'\n"
-            "    return f'{float(s[mid]):.2f}'\n"
+            "def int_divide(a, b):\n"
+            "    q = abs(a) // abs(b)\n"
+            "    return q if (a < 0) == (b < 0) else -q\n"
         ),
     },
-    "r2xf_median_lower": {
-        "kind": "data",
-        "entrypoint": "median",
-        "test_cases": [(_MED_DATA, "2.00")],
+    "r2xf_intdiv_floor": {  # FOIL (default: Python floor //)
+        "kind": "code",
+        "entrypoint": "int_divide",
+        "test_cases": _INTDIV_CASES_FLOOR,
+        "candidate": "def int_divide(a, b):\n    return a // b\n",
+    },
+    # -- Family 2: weekday numbering --------------------------------------------
+    "r2xf_weekday_iso": {  # TARGET (external: ISO Monday=1)
+        "kind": "code",
+        "entrypoint": "weekday_number",
+        "test_cases": _WD_CASES_ISO,
         "candidate": (
-            "def median(data):\n"
-            "    s = sorted(data)\n"
-            "    n = len(s)\n"
-            "    mid = n // 2\n"
-            "    if n % 2 == 0:\n"
-            "        return f'{float(s[mid - 1]):.2f}'\n"
-            "    return f'{float(s[mid]):.2f}'\n"
+            "import datetime\n"
+            "def weekday_number(year, month, day):\n"
+            "    return datetime.date(year, month, day).isoweekday()\n"
         ),
     },
-    # -- Family 4: mean-rounding convention -------------------------------------
-    "r2xf_roundmean_even": {
-        "kind": "data",
-        "entrypoint": "avg_rounded",
-        "test_cases": [(_ROUND_DATA, 2)],
+    "r2xf_weekday_py": {  # FOIL (default: Python .weekday() Monday=0)
+        "kind": "code",
+        "entrypoint": "weekday_number",
+        "test_cases": _WD_CASES_PY,
         "candidate": (
-            "def avg_rounded(data):\n"
-            "    return round(sum(data) / len(data))\n"
+            "import datetime\n"
+            "def weekday_number(year, month, day):\n"
+            "    return datetime.date(year, month, day).weekday()\n"
         ),
     },
-    "r2xf_roundmean_up": {
+    # -- Family 3: reported position base ---------------------------------------
+    "r2xf_argmax_1based": {  # TARGET (external: 1-based position)
         "kind": "data",
-        "entrypoint": "avg_rounded",
-        "test_cases": [(_ROUND_DATA, 3)],
+        "entrypoint": "max_position",
+        "test_cases": [(_ARGMAX_DATA, 4)],
         "candidate": (
-            "def avg_rounded(data):\n"
-            "    from decimal import Decimal, ROUND_HALF_UP\n"
-            "    mean = Decimal(sum(data)) / Decimal(len(data))\n"
-            "    return int(mean.quantize(Decimal('1'), rounding=ROUND_HALF_UP))\n"
+            "def max_position(data):\n"
+            "    return data.index(max(data)) + 1\n"
         ),
     },
-    # -- Family 5: day-count convention -----------------------------------------
-    "r2xf_days_exclusive": {
-        "kind": "policy",
-        "expected": {"amount": 7.0},
-        "candidate": {"amount": 7.0},
+    "r2xf_argmax_0based": {  # FOIL (default: 0-based Python index)
+        "kind": "data",
+        "entrypoint": "max_position",
+        "test_cases": [(_ARGMAX_DATA, 3)],
+        "candidate": (
+            "def max_position(data):\n"
+            "    return data.index(max(data))\n"
+        ),
     },
-    "r2xf_days_inclusive": {
+    # -- Family 4: numeric vs lexicographic id sort -----------------------------
+    "r2xf_sortids_numeric": {  # TARGET (external: numeric order)
+        "kind": "data",
+        "entrypoint": "sort_ids",
+        "test_cases": [(_SORTIDS_DATA, _SORTIDS_NUMERIC)],
+        "candidate": (
+            "def sort_ids(ids):\n"
+            "    return sorted(ids, key=int)\n"
+        ),
+    },
+    "r2xf_sortids_lex": {  # FOIL (default: lexicographic sorted())
+        "kind": "data",
+        "entrypoint": "sort_ids",
+        "test_cases": [(_SORTIDS_DATA, _SORTIDS_LEX)],
+        "candidate": (
+            "def sort_ids(ids):\n"
+            "    return sorted(ids)\n"
+        ),
+    },
+    # -- Family 5: day-count inclusivity ----------------------------------------
+    "r2xf_days_inclusive": {  # TARGET (external: inclusive)
         "kind": "policy",
         "expected": {"amount": 8.0},
         "candidate": {"amount": 8.0},
     },
-    # -- Family 6: average-speed convention -------------------------------------
-    "r2xf_speed_arith": {
+    "r2xf_days_exclusive": {  # FOIL (default: exclusive end - start)
         "kind": "policy",
-        "expected": {"amount": 45.0},
-        "candidate": {"amount": 45.0},
+        "expected": {"amount": 7.0},
+        "candidate": {"amount": 7.0},
     },
-    "r2xf_speed_harmonic": {
+    # -- Family 6: business vs calendar weeks -----------------------------------
+    "r2xf_weeks_business": {  # TARGET (external: 5-day business weeks)
         "kind": "policy",
-        "expected": {"amount": 40.0},
-        "candidate": {"amount": 40.0},
+        "expected": {"amount": 10.0},
+        "candidate": {"amount": 10.0},
+    },
+    "r2xf_weeks_calendar": {  # FOIL (default: 7-day calendar weeks)
+        "kind": "policy",
+        "expected": {"amount": 14.0},
+        "candidate": {"amount": 14.0},
     },
 }
 
@@ -266,28 +281,32 @@ def _register_into_host_domains() -> None:
 _register_into_host_domains()
 
 
+
 # ============================================================================
-# PROBLEM LIBRARY — H1_external, I0 = NATURAL DEFAULT, one binary axis each.
+# PROBLEM LIBRARY — H1_external "hidden-convention traps".
+#   I0 (TARGET)      = the EXTERNAL convention (deleted clause; unaware != this)
+#   FOIL [comb-def]  = the NATURAL DEFAULT an unaware Python solver writes
+# Each family has ONE binary axis; prompt_core is generic (no in-prompt hint).
 # ============================================================================
 
-def problem_sort_001() -> FullSpec:
-    """code_spec / axis case_convention. Default = native code-point sort."""
+def problem_intdiv_001() -> FullSpec:
+    """code_spec / axis integer_division. TARGET=truncate-toward-zero (external)."""
     return FullSpec(
         domain="code_spec",
-        task_id="r2xf_code_sort_001",
+        task_id="r2xf_code_intdiv_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `sort_names(names)` that returns the given list of "
-            "strings sorted in ascending order."
+            "Write a function `int_divide(a, b)` that performs integer division "
+            "of two integers a and b and returns the integer quotient."
         ),
         requirement_classes=[
             RequirementClass(
-                id="case_convention",
-                description="Which string-ordering convention to sort by",
+                id="integer_division",
+                description="Rounding direction of integer division for negatives",
                 clauses=[
-                    "Sort using Python's native string comparison — order the "
-                    "strings by Unicode code point (the language-default "
-                    "ordering), so uppercase letters sort before lowercase."
+                    "Per the external service contract, integer division TRUNCATES "
+                    "TOWARD ZERO (as in C and SQL): e.g. int_divide(-7, 2) == -3 "
+                    "and int_divide(-8, 3) == -2, not -4 and -3."
                 ],
             ),
         ],
@@ -295,47 +314,47 @@ def problem_sort_001() -> FullSpec:
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NATURAL DEFAULT (target): native code-point sort, "
-                    "sorted(names). An unaware solver's default in Python."
+                    "NON-default (target): truncate toward zero (C/SQL convention). "
+                    "int_divide(-7, 2) == -3. Requires the EXTERNAL contract."
                 ),
                 is_target=True,
-                gold_check="r2xf_sort_native",
+                gold_check="r2xf_intdiv_trunc",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "FOIL [combined-default]: case-insensitive sort, "
-                    "sorted(names, key=str.lower) — deviates on the case axis."
+                    "MODEL DEFAULT [combined-default]: Python floor division a // b, "
+                    "which floors toward -inf. int_divide(-7, 2) == -4."
                 ),
                 is_target=False,
-                gold_check="r2xf_sort_ci",
-                opened_by="case_convention",
+                gold_check="r2xf_intdiv_floor",
+                opened_by="integer_division",
             ),
         ],
         key_questions=[
-            "Sort by Python's default code-point order, or case-insensitively?",
+            "Does integer division truncate toward zero (C/SQL) or floor toward "
+            "negative infinity (Python default)?",
         ],
     )
 
 
-def problem_wordcount_001() -> FullSpec:
-    """code_spec / axis split_convention. Default = str.split() whitespace split."""
+def problem_weekday_001() -> FullSpec:
+    """code_spec / axis weekday_numbering. TARGET=ISO Monday=1 (external)."""
     return FullSpec(
         domain="code_spec",
-        task_id="r2xf_code_wordcount_001",
+        task_id="r2xf_code_weekday_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `word_count(s)` that returns the number of words in "
-            "the string s, as an int."
+            "Write a function `weekday_number(year, month, day)` that returns the "
+            "weekday number for the given date."
         ),
         requirement_classes=[
             RequirementClass(
-                id="split_convention",
-                description="Which tokenization convention to count words by",
+                id="weekday_numbering",
+                description="Which weekday-numbering convention to use",
                 clauses=[
-                    "Count words using Python's default str.split() — split on "
-                    "any run of whitespace, discarding the empty tokens produced "
-                    "by leading, trailing, or repeated spaces."
+                    "Per ISO 8601, number weekdays Monday=1, Tuesday=2, ..., "
+                    "Sunday=7 (as returned by date.isoweekday())."
                 ],
             ),
         ],
@@ -343,48 +362,48 @@ def problem_wordcount_001() -> FullSpec:
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NATURAL DEFAULT (target): len(s.split()) — the Python-native "
-                    "whitespace split an unaware solver reaches for."
+                    "NON-default (target): ISO 8601 numbering Monday=1..Sunday=7. "
+                    "Requires the EXTERNAL ISO convention."
                 ),
                 is_target=True,
-                gold_check="r2xf_wc_default",
+                gold_check="r2xf_weekday_iso",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "FOIL [combined-default]: len(s.split(' ')) — splits on a "
-                    "single space, keeping empty tokens (deviates on the split axis)."
+                    "MODEL DEFAULT [combined-default]: Python date.weekday(), "
+                    "Monday=0..Sunday=6."
                 ),
                 is_target=False,
-                gold_check="r2xf_wc_singlespace",
-                opened_by="split_convention",
+                gold_check="r2xf_weekday_py",
+                opened_by="weekday_numbering",
             ),
         ],
         key_questions=[
-            "Count words with Python's default whitespace split, or by splitting "
-            "on single spaces?",
+            "Number weekdays ISO 8601 (Monday=1..Sunday=7) or Python-native "
+            "(Monday=0..Sunday=6)?",
         ],
     )
 
 
-def problem_median_001() -> FullSpec:
-    """data_analysis / axis even_median. Default = mean of the two middle values."""
+def problem_argmax_001() -> FullSpec:
+    """data_analysis / axis position_base. TARGET=1-based position (external)."""
     return FullSpec(
         domain="data_analysis",
-        task_id="r2xf_data_median_001",
+        task_id="r2xf_data_argmax_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `median(data)` that returns the median of the list "
-            "[1, 2, 3, 4], as a string rounded to 2 decimal places."
+            "Write a function `max_position(data)` that returns the position of "
+            "the largest value in the list data = [3, 7, 2, 9, 4]."
         ),
         requirement_classes=[
             RequirementClass(
-                id="even_median",
-                description="Which even-length median convention to use",
+                id="position_base",
+                description="Whether reported positions are 0-based or 1-based",
                 clauses=[
-                    "For an even number of values, use the standard convention: "
-                    "the median is the arithmetic MEAN of the two middle values. "
-                    "Answer to 2 decimals."
+                    "Per our reporting-system spec, positions are reported as "
+                    "1-BASED row numbers (the first element is position 1), so the "
+                    "largest value 9 is at position 4."
                 ],
             ),
         ],
@@ -392,49 +411,48 @@ def problem_median_001() -> FullSpec:
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NATURAL DEFAULT (target): mean of the two middles. "
-                    "[1,2,3,4] -> (2+3)/2 = '2.50'. The standard median convention."
+                    "NON-default (target): 1-based position number = 4. "
+                    "Requires the EXTERNAL reporting convention."
                 ),
                 is_target=True,
-                gold_check="r2xf_median_mean",
+                gold_check="r2xf_argmax_1based",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "FOIL [combined-default]: lower median (lower of the two "
-                    "middles). [1,2,3,4] -> '2.00' — deviates on the parity axis."
+                    "MODEL DEFAULT [combined-default]: 0-based Python index "
+                    "data.index(max(data)) = 3."
                 ),
                 is_target=False,
-                gold_check="r2xf_median_lower",
-                opened_by="even_median",
+                gold_check="r2xf_argmax_0based",
+                opened_by="position_base",
             ),
         ],
         key_questions=[
-            "Even-length median: mean of the two middle values (standard), or the "
-            "lower of the two middles?",
+            "Report the position 1-based (first element = 1) or 0-based (Python "
+            "index)?",
         ],
     )
 
 
-def problem_roundmean_001() -> FullSpec:
-    """data_analysis / axis rounding_convention. Default = Python round() (banker's)."""
+def problem_sortids_001() -> FullSpec:
+    """data_analysis / axis id_sort_order. TARGET=numeric order (external)."""
     return FullSpec(
         domain="data_analysis",
-        task_id="r2xf_data_roundmean_001",
+        task_id="r2xf_data_sortids_001",
         regime="H1_external",
         prompt_core=(
-            "Write a function `avg_rounded(data)` that returns the arithmetic mean "
-            "of the integer list [1, 2, 3, 4] rounded to the nearest whole number, "
-            "as an int."
+            "Write a function `sort_ids(ids)` that returns the list of id strings "
+            "['10', '2', '1', '21', '3'] sorted in ascending order."
         ),
         requirement_classes=[
             RequirementClass(
-                id="rounding_convention",
-                description="Which rounding convention to apply to the mean",
+                id="id_sort_order",
+                description="Whether ids sort numerically or lexicographically",
                 clauses=[
-                    "Round the mean to the nearest whole number using Python's "
-                    "built-in default rounding (round-half-to-even / banker's "
-                    "rounding, i.e. round(mean))."
+                    "Per the catalog specification, the id strings are sorted by "
+                    "their NUMERIC value, so the result is "
+                    "['1', '2', '3', '10', '21'], not lexicographic order."
                 ],
             ),
         ],
@@ -442,49 +460,48 @@ def problem_roundmean_001() -> FullSpec:
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NATURAL DEFAULT (target): round(mean) = round-half-to-even. "
-                    "mean 2.5 -> 2. The Python-native default rounding."
+                    "NON-default (target): numeric-value order "
+                    "['1','2','3','10','21']. Requires the EXTERNAL catalog spec."
                 ),
                 is_target=True,
-                gold_check="r2xf_roundmean_even",
+                gold_check="r2xf_sortids_numeric",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "FOIL [combined-default]: round-half-up. mean 2.5 -> 3 — "
-                    "deviates on the rounding axis."
+                    "MODEL DEFAULT [combined-default]: Python-native lexicographic "
+                    "sorted(ids) = ['1','10','2','21','3']."
                 ),
                 is_target=False,
-                gold_check="r2xf_roundmean_up",
-                opened_by="rounding_convention",
+                gold_check="r2xf_sortids_lex",
+                opened_by="id_sort_order",
             ),
         ],
         key_questions=[
-            "Round the mean using Python's default round-half-to-even, or "
-            "round-half-up?",
+            "Sort the id strings by numeric value or lexicographically (Python "
+            "default string order)?",
         ],
     )
 
 
 def problem_days_001() -> FullSpec:
-    """policy_qa / axis day_count. Default = exclusive day span (end - start)."""
+    """policy_qa / axis day_count. TARGET=inclusive count (external policy)."""
     return FullSpec(
         domain="policy_qa",
         task_id="r2xf_policy_days_001",
         regime="H1_external",
         prompt_core=(
-            "A task starts on day 3 and ends on day 10 of the same month. Compute "
-            "the number of days from the start to the end. Return the answer as "
-            '{"amount": <number of days>}.'
+            "A task runs from day 3 to day 10 of the same month. Compute the "
+            'number of days it spans. Return {"amount": <number of days>}.'
         ),
         requirement_classes=[
             RequirementClass(
                 id="day_count",
-                description="Which day-counting convention to use",
+                description="Whether the span counts both endpoints",
                 clauses=[
-                    "Count the number of days using the standard exclusive "
-                    "convention: end minus start (10 - 3), not counting both "
-                    "endpoints."
+                    "Per company leave policy, day spans are counted INCLUSIVELY "
+                    "(both the start and end day count), so day 3 to day 10 spans "
+                    "8 days."
                 ],
             ),
         ],
@@ -492,48 +509,47 @@ def problem_days_001() -> FullSpec:
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NATURAL DEFAULT (target): exclusive span end - start = 7. "
-                    "The default arithmetic day difference."
+                    "NON-default (target): inclusive count (both endpoints) = 8. "
+                    "Requires the EXTERNAL leave policy."
                 ),
                 is_target=True,
-                gold_check="r2xf_days_exclusive",
+                gold_check="r2xf_days_inclusive",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "FOIL [combined-default]: inclusive count (both endpoints) = 8 "
-                    "— deviates on the day-count axis."
+                    "MODEL DEFAULT [combined-default]: exclusive arithmetic span "
+                    "end - start = 10 - 3 = 7."
                 ),
                 is_target=False,
-                gold_check="r2xf_days_inclusive",
+                gold_check="r2xf_days_exclusive",
                 opened_by="day_count",
             ),
         ],
         key_questions=[
-            "Count the day span exclusively (end - start, standard) or inclusively "
-            "(counting both endpoints)?",
+            "Count the day span inclusively (both endpoints, per policy) or "
+            "exclusively (end - start, the arithmetic default)?",
         ],
     )
 
 
-def problem_speed_001() -> FullSpec:
-    """policy_qa / axis averaging_method. Default = arithmetic mean of speeds."""
+def problem_weeks_001() -> FullSpec:
+    """policy_qa / axis week_definition. TARGET=business weeks (external SLA)."""
     return FullSpec(
         domain="policy_qa",
-        task_id="r2xf_policy_speed_001",
+        task_id="r2xf_policy_weeks_001",
         regime="H1_external",
         prompt_core=(
-            "A vehicle travels the SAME distance on two legs of a trip: the first "
-            "leg at 30 units/hour and the second at 60 units/hour. Compute the "
-            'average speed over the whole trip. Return {"amount": <speed>}.'
+            "A deadline is set 2 weeks from the project start. Compute how many "
+            'days that deadline is from the start. Return {"amount": <days>}.'
         ),
         requirement_classes=[
             RequirementClass(
-                id="averaging_method",
-                description="Which averaging convention to use for the speeds",
+                id="week_definition",
+                description="Whether a week means calendar days or business days",
                 clauses=[
-                    "Compute the average speed as the arithmetic mean of the two "
-                    "leg speeds, (30 + 60) / 2."
+                    "Per our SLA, durations expressed in 'weeks' mean BUSINESS "
+                    "weeks of 5 working days each, so 2 weeks = 10 days."
                 ],
             ),
         ],
@@ -541,38 +557,37 @@ def problem_speed_001() -> FullSpec:
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NATURAL DEFAULT (target): arithmetic mean (30+60)/2 = 45. "
-                    "The default 'average of the two numbers' an unaware solver uses."
+                    "NON-default (target): business weeks, 5 days each -> "
+                    "2 * 5 = 10. Requires the EXTERNAL SLA definition."
                 ),
                 is_target=True,
-                gold_check="r2xf_speed_arith",
+                gold_check="r2xf_weeks_business",
             ),
             InterpretationBranch(
                 id="I1",
                 description=(
-                    "FOIL [combined-default]: harmonic mean 2/(1/30+1/60) = 40 "
-                    "(physically correct for equal distances) — deviates on the "
-                    "averaging axis."
+                    "MODEL DEFAULT [combined-default]: calendar weeks, 7 days each "
+                    "-> 2 * 7 = 14."
                 ),
                 is_target=False,
-                gold_check="r2xf_speed_harmonic",
-                opened_by="averaging_method",
+                gold_check="r2xf_weeks_calendar",
+                opened_by="week_definition",
             ),
         ],
         key_questions=[
-            "Average speed via the arithmetic mean of the two speeds (default), or "
-            "the harmonic mean (correct for equal distances)?",
+            "Does 'weeks' mean 5-day business weeks (per SLA) or 7-day calendar "
+            "weeks (the natural default)?",
         ],
     )
 
 
 _PROBLEMS = [
-    problem_sort_001,
-    problem_wordcount_001,
-    problem_median_001,
-    problem_roundmean_001,
+    problem_intdiv_001,
+    problem_weekday_001,
+    problem_argmax_001,
+    problem_sortids_001,
     problem_days_001,
-    problem_speed_001,
+    problem_weeks_001,
 ]
 
 
@@ -658,41 +673,41 @@ def generate_tasks() -> List[Task]:
 
 def get_task_specific_foils(task_id_base: str) -> List[Any]:
     """Near-miss adversarial candidates per family; each matches AT MOST ONE checker."""
-    if task_id_base == "r2xf_code_sort_001":
+    if task_id_base == "r2xf_code_intdiv_001":
         return [
-            "def sort_names(names):\n    return sorted(names, reverse=True)\n",
-            "def sort_names(names):\n    return sorted(names, key=len)\n",
-            "def sort_names(names):\n    return list(names)\n",
+            "def int_divide(a, b):\n    return abs(a) // abs(b)\n",
+            "def int_divide(a, b):\n    return -(abs(a) // abs(b))\n",
+            "def int_divide(a, b):\n    return a // b + 1\n",
         ]
-    if task_id_base == "r2xf_code_wordcount_001":
+    if task_id_base == "r2xf_code_weekday_001":
         return [
-            "def word_count(s):\n    return len(s)\n",
-            "def word_count(s):\n    return len(s.split('\\t'))\n",
-            "def word_count(s):\n    return 0\n",
+            "import datetime\ndef weekday_number(year, month, day):\n    return datetime.date(year, month, day).day\n",
+            "import datetime\ndef weekday_number(year, month, day):\n    return datetime.date(year, month, day).isoweekday() + 1\n",
+            "import datetime\ndef weekday_number(year, month, day):\n    return datetime.date(year, month, day).month\n",
         ]
-    if task_id_base == "r2xf_data_median_001":
+    if task_id_base == "r2xf_data_argmax_001":
         return [
-            "def median(data):\n    s = sorted(data)\n    return f'{float(s[len(s)//2]):.2f}'\n",
-            "def median(data):\n    return f'{float(min(data)):.2f}'\n",
-            "def median(data):\n    s = sorted(data)\n    n = len(s)\n    return str((s[n//2-1]+s[n//2])/2.0)\n",
+            "def max_position(data):\n    return max(data)\n",
+            "def max_position(data):\n    return len(data)\n",
+            "def max_position(data):\n    return data.index(min(data))\n",
         ]
-    if task_id_base == "r2xf_data_roundmean_001":
+    if task_id_base == "r2xf_data_sortids_001":
         return [
-            "def avg_rounded(data):\n    return sum(data)\n",
-            "def avg_rounded(data):\n    return min(data)\n",
-            "def avg_rounded(data):\n    return max(data)\n",
+            "def sort_ids(ids):\n    return sorted(ids, key=int, reverse=True)\n",
+            "def sort_ids(ids):\n    return sorted(ids, reverse=True)\n",
+            "def sort_ids(ids):\n    return list(ids)\n",
         ]
     if task_id_base == "r2xf_policy_days_001":
         return [
             {"amount": 6.0},
             {"amount": 9.0},
-            7.0,
+            {"amount": 8.5},
         ]
-    if task_id_base == "r2xf_policy_speed_001":
+    if task_id_base == "r2xf_policy_weeks_001":
         return [
-            {"amount": 50.0},
-            {"amount": 90.0},
-            45.0,
+            {"amount": 7.0},
+            {"amount": 12.0},
+            {"amount": 5.0},
         ]
     return [{"error": "unknown"}, "N/A", None]
 
