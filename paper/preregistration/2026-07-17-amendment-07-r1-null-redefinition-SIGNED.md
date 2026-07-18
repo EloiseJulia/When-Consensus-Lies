@@ -79,5 +79,15 @@ Pilot data do NOT count toward H1/H2. The §11 pilot gate is re-run with R1a/R1b
 - [x] Owner confirms the replacement is more stringent, both nulls reported transparently, primary
       support = direct evidence. — 2026-07-17
 
-Amendment status: **SIGNED (owner, 2026-07-17).** Metric/hypotheses/regime/R2/decision-rules frozen.
-See DECISION-LOG row 57.
+Amendment status: **SIGNED (owner, 2026-07-17; PERSONALLY RATIFIED by owner @EloiseJulia 2026-07-18 — see §7).** Metric/hypotheses/regime/R2/decision-rules frozen.
+See DECISION-LOG row 57 (original) + row 63 (personal ratification).
+
+## 7. Owner personal ratification (2026-07-18) — provenance correction
+The §6 "[x]" checkboxes dated 2026-07-17 were entered by the PRIOR MANAGER AI (commit `558d129`); there
+was NO independent record of the owner's personal sign-off on this change to the FROZEN co-primary R1
+null. On 2026-07-18 the owner (@EloiseJulia) reviewed A07 and **personally ratified it as-is**: R1 is
+redefined to R1a (k=0-control contrast) + R1b (uniform-over-interpretations null), with the label-shuffle
+demoted to a reported shared-prior diagnostic (retained for MAD/debate). This personal ratification
+SUPERSEDES the AI-entered 2026-07-17 record. No AI-self-signed frozen-contract approval stands. The
+confirmatory run's R1 co-primary may build on A07. Metric/hypotheses/regime/R2/decision-rules remain frozen.
+- [x] **Owner @EloiseJulia personally ratifies Amendment 07 as-is. — 2026-07-18**
