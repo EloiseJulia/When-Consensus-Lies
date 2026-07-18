@@ -17,9 +17,10 @@ Five estimators (all pure, deterministic, no LLM):
 1. ``pairwise_wrong_agreement`` — fraction of wrong-agent pairs choosing the
    SAME wrong enumerated label (I_perp excluded; 0/0 → NaN).
 
-2. ``kappa`` — chance-corrected agreement (Fleiss κ for n≥2 raters on one item,
-   Cohen κ dispatch for exactly 2 raters). Measures over the item's
-   interpretation set.
+2. ``fleiss_kappa_multi`` — multi-subject Fleiss κ (N items as subjects, agents
+   as raters). Valid chance-corrected agreement across multiple items; avoids
+   the degenerate single-subject estimator (constant −1/(n−1) for non-unanimous
+   inputs). This is the ONLY reported κ.
 
 3. ``icc_wrong_indicator`` — one-way random-effects ICC of the wrong-indicator
    (0/1) across agents WITHIN cells, estimated across multiple cells (required).
@@ -99,22 +100,21 @@ def pairwise_wrong_agreement(labels: List[str], target: str) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Chance-corrected agreement — Fleiss κ (per-cell, n≥2 raters, 1 subject)
+# 2. Chance-corrected agreement — DEPRECATED single-subject variants (private)
+#    These functions implement the invalid single-subject estimator that returns
+#    a constant −1/(n−1) for any non-unanimous input and must NOT be used for
+#    reporting.  They are kept private solely to avoid breaking internal
+#    call-graph references during transition; call ``fleiss_kappa_multi``
+#    instead.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fleiss_kappa(labels: List[str], categories: Sequence[str]) -> float:
-    """Fleiss κ for n raters assigning a single subject to one of the categories.
+def _fleiss_kappa_single(labels: List[str], categories: Sequence[str]) -> float:
+    """DEPRECATED — invalid single-subject estimator.  Use ``fleiss_kappa_multi``.
 
-    Estimand: chance-corrected agreement among the n agents in this cell over
-    the item's interpretation set. Uses the per-cell proportions as the marginal
-    for chance correction (appropriate when estimating cell-level dependence).
-
-    Formula:
-        P_o = Σ_k n_k(n_k−1) / (n(n−1))      [observed agreement fraction]
-        P_e = Σ_k (n_k/n)²                    [expected-by-chance fraction]
-        κ   = (P_o − P_e) / (1 − P_e)
-
-    Returns NaN when n < 2, fewer than 2 categories are present, or P_e = 1.
+    For a single subject (one item), P_e is estimated from the same item's label
+    counts, which algebraically forces κ = −1/(n−1) for any non-unanimous input
+    regardless of the actual agreement pattern. This is NOT a valid agreement
+    measure.
 
     Args:
         labels: Agent labels in this cell (length n).
@@ -137,40 +137,22 @@ def fleiss_kappa(labels: List[str], categories: Sequence[str]) -> float:
     p_o = sum(nk * (nk - 1) for nk in n_k) / (n * (n - 1))
     p_e = sum((nk / n) ** 2 for nk in n_k)
     if abs(1.0 - p_e) < 1e-12:
-        # P_e = 1 means all raters agree on one category → perfect agreement by convention.
         return 1.0 if abs(p_o - 1.0) < 1e-12 else float("nan")
     return (p_o - p_e) / (1.0 - p_e)
 
 
-def cohen_kappa(labels: List[str], categories: Sequence[str]) -> float:
-    """Cohen κ for exactly 2 raters on one item.
-
-    Dispatches to :func:`fleiss_kappa` with the first two labels. For n=2,
-    Fleiss κ and Cohen κ are equivalent (both use per-cell marginals for P_e).
-
-    Returns NaN when fewer than 2 labels are provided.
-    """
+def _cohen_kappa_single(labels: List[str], categories: Sequence[str]) -> float:
+    """DEPRECATED — invalid single-subject estimator.  Use ``fleiss_kappa_multi``."""
     if len(labels) < 2:
         return float("nan")
-    return fleiss_kappa(labels[:2], categories)
+    return _fleiss_kappa_single(labels[:2], categories)
 
 
-def kappa(labels: List[str], categories: Sequence[str]) -> float:
-    """Dispatch to Cohen κ (n=2) or Fleiss κ (n≥3).
-
-    Convenience wrapper that selects the appropriate kappa variant based on the
-    number of agents in the cell.
-
-    Args:
-        labels: Agent labels in this cell.
-        categories: Item interpretation set.
-
-    Returns:
-        Float κ in [−1, 1], or NaN for degenerate inputs.
-    """
+def _kappa_single(labels: List[str], categories: Sequence[str]) -> float:
+    """DEPRECATED — invalid single-subject estimator.  Use ``fleiss_kappa_multi``."""
     if len(labels) == 2:
-        return cohen_kappa(labels, categories)
-    return fleiss_kappa(labels, categories)
+        return _cohen_kappa_single(labels, categories)
+    return _fleiss_kappa_single(labels, categories)
 
 
 def fleiss_kappa_multi(
@@ -191,20 +173,31 @@ def fleiss_kappa_multi(
 
     Formula (Fleiss 1971, multi-subject):
         n_ij  = count of agents assigning category j to item i
+        n_i   = Σ_j n_ij  (IN-CATEGORY ratings only; out-of-category excluded)
         p_j   = Σ_i n_ij / Σ_i n_i          (pooled marginal across all items)
         P_i   = Σ_j n_ij(n_ij−1) / [n_i(n_i−1)]  (per-item observed agreement)
         P̄_o  = (1/N) Σ_i P_i                (mean observed agreement)
         P̄_e  = Σ_j p_j²                     (expected agreement under independence)
         κ     = (P̄_o − P̄_e) / (1 − P̄_e)
 
-    Returns NaN when valid N (items with ≥2 raters) < 2, fewer than 2
-    categories are present, or P̄_e = 1.
+    **Out-of-category ratings (e.g. I_perp)**: labels absent from ``categories``
+    are excluded from BOTH the category counts AND the per-item denominator
+    (n_i = number of IN-CATEGORY ratings). Items whose in-category rating count
+    falls below 2 are dropped as subjects. If no valid subjects remain, the
+    function returns NaN (κ is UNDEFINED, not 0.0). Rationale: κ measures
+    agreement over the enumerated interpretation set; I_perp is noise, not an
+    interpretation, so it does not contribute to the agreement computation
+    (consistent with A04 treating I_perp as ineligible).
+
+    Returns NaN when valid N (items with ≥2 in-category raters) < 2, fewer than
+    2 categories are present, or P̄_e = 1.
 
     Args:
         ratings: List of per-item label lists. ``ratings[i]`` is the list of
             all agent labels for item i (i.e. one cell in the item × agents
             matrix, with items as subjects).
         categories: The full interpretation set (bounds the denominator).
+            Labels absent from this sequence are treated as out-of-category.
 
     Returns:
         Float κ in (−∞, 1], or NaN for degenerate inputs.
@@ -221,15 +214,16 @@ def fleiss_kappa_multi(
     valid_N = 0
 
     for row in ratings:
-        ni = len(row)
-        if ni < 2:
-            continue
-        valid_N += 1
+        # ni = number of IN-CATEGORY ratings for this item (out-of-category excluded).
         n_ij = [0] * k
         for lbl in row:
             j = cat_idx.get(lbl, -1)
             if j >= 0:
                 n_ij[j] += 1
+        ni = sum(n_ij)  # in-category count only
+        if ni < 2:
+            continue  # need ≥2 in-category ratings to form a valid subject
+        valid_N += 1
         for j in range(k):
             cat_totals[j] += n_ij[j]
         total_ratings += ni

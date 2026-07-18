@@ -15,14 +15,11 @@ import pytest
 from analysis.cd import cd_primary as _cd_primary_fn
 from analysis.dependence import (
     IPERP,
-    cohen_kappa,
     compute_dependence_table,
     effective_ensemble_size,
-    fleiss_kappa,
     fleiss_kappa_multi,
     icc_wrong_indicator,
     independence_counterfactual,
-    kappa,
     pairwise_wrong_agreement,
 )
 
@@ -114,74 +111,7 @@ class TestPairwiseWrongAgreement:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. fleiss_kappa / cohen_kappa
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestFleissKappa:
-
-    def test_perfect_agreement(self):
-        """All agents same label → κ = 1.0."""
-        labels = ["I1", "I1", "I1"]
-        cats = ["I0", "I1", "I2"]
-        assert fleiss_kappa(labels, cats) == pytest.approx(1.0)
-
-    def test_all_differ(self):
-        """All agents different labels with equal distribution → κ = 0 or negative."""
-        labels = ["I0", "I1", "I2"]
-        cats = ["I0", "I1", "I2"]
-        # P_o = 0 (no same-label pairs), P_e = (1/3)^2 * 3 = 1/3
-        # κ = (0 - 1/3) / (1 - 1/3) = (-1/3)/(2/3) = -1/2
-        assert fleiss_kappa(labels, cats) == pytest.approx(-0.5)
-
-    def test_chance_level(self):
-        """Agreement at chance level → κ ≈ 0."""
-        # 3 raters, 2 categories, uniform marginals, uniform agreement
-        labels = ["I0", "I0", "I1", "I1"]  # 50/50 split
-        cats = ["I0", "I1"]
-        # n_I0=2, n_I1=2, n=4
-        # P_o = (2*1 + 2*1) / (4*3) = 4/12 = 1/3
-        # P_e = (2/4)^2 + (2/4)^2 = 0.25 + 0.25 = 0.5
-        # kappa = (1/3 - 0.5) / (1 - 0.5) = (-1/6) / (1/2) = -1/3
-        val = fleiss_kappa(labels, cats)
-        assert isinstance(val, float)
-        assert not math.isnan(val)
-
-    def test_too_few_labels(self):
-        """Fewer than 2 labels → NaN."""
-        assert math.isnan(fleiss_kappa(["I1"], ["I0", "I1"]))
-        assert math.isnan(fleiss_kappa([], ["I0", "I1"]))
-
-    def test_single_category(self):
-        """Fewer than 2 categories → NaN."""
-        assert math.isnan(fleiss_kappa(["I0", "I0"], ["I0"]))
-
-    def test_cohen_kappa_dispatches(self):
-        """cohen_kappa should match fleiss_kappa for the first 2 labels."""
-        labels = ["I1", "I0"]
-        cats = ["I0", "I1", "I2"]
-        assert cohen_kappa(labels, cats) == pytest.approx(fleiss_kappa(["I1", "I0"], cats))
-
-    def test_kappa_dispatch_2(self):
-        """kappa() dispatches to cohen_kappa for n=2; both return the same value."""
-        labels = ["I0", "I0"]
-        cats = ["I0", "I1"]
-        v_kappa = kappa(labels, cats)
-        v_cohen = cohen_kappa(labels, cats)
-        # Both should be the same (either both NaN or both equal).
-        if math.isnan(v_kappa):
-            assert math.isnan(v_cohen)
-        else:
-            assert v_kappa == pytest.approx(v_cohen)
-
-    def test_kappa_dispatch_3(self):
-        """kappa() dispatches to fleiss_kappa for n>=3."""
-        labels = ["I0", "I0", "I1"]
-        cats = ["I0", "I1"]
-        assert kappa(labels, cats) == pytest.approx(fleiss_kappa(labels, cats))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2b. fleiss_kappa_multi — multi-subject Fleiss' κ (Fix 1 golden tests)
+# 2. fleiss_kappa_multi — multi-subject Fleiss' κ (the ONLY valid reported κ)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestFleissKappaMulti:
@@ -277,6 +207,66 @@ class TestFleissKappaMulti:
         val = fleiss_kappa_multi(ratings, cats)
         # After skipping the single-rater item, N = 2, both agree → κ = 1.0
         assert val == pytest.approx(1.0)
+
+    # ── Finding 2 regression: out-of-category (I_perp) handling ──────────────
+
+    def test_all_iperp_items_returns_nan(self):
+        """Two items where every agent picks I_perp → 0 in-category raters per item
+        → NaN (UNDEFINED), NOT 0.0.
+
+        Rationale: κ is undefined when no in-category ratings exist; returning
+        0.0 would be a spurious non-NaN value (the auditor's Finding 2).
+        """
+        ratings = [
+            [IPERP, IPERP, IPERP],  # item 1: all out-of-category
+            [IPERP, IPERP, IPERP],  # item 2: all out-of-category
+        ]
+        cats = ["I0", "I1"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert math.isnan(val), (
+            f"Expected NaN for all-I_perp items, got {val!r}"
+        )
+
+    def test_mixed_in_and_out_of_category_correct_marginals(self):
+        """Out-of-category ratings excluded from ni and total_ratings → valid marginals.
+
+        Item 1: [I0, I0, I_perp] → in-category ni=2, both I0 → P_i=1.0
+        Item 2: [I1, I1, I_perp] → in-category ni=2, both I1 → P_i=1.0
+        P̄_o = 1.0; marginals: 2 I0 + 2 I1 out of 4 → p_I0=p_I1=0.5 → P̄_e=0.5
+        κ = (1.0 - 0.5) / (1.0 - 0.5) = 1.0
+
+        The bug would give ni=3, P_i=2/(3*2)=1/3 and total_ratings=6 with
+        marginals skewed by 0-count I_perp entries → wrong κ.
+        """
+        ratings = [
+            ["I0", "I0", IPERP],
+            ["I1", "I1", IPERP],
+        ]
+        cats = ["I0", "I1"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert not math.isnan(val), "Expected a valid κ for mixed in/out-category items"
+        assert val == pytest.approx(1.0), (
+            f"Expected κ=1.0 (unanimous on in-category labels), got {val!r}"
+        )
+
+    def test_partial_in_category_item_skipped_when_fewer_than_two(self):
+        """Item with only 1 in-category rating is dropped as a subject.
+
+        Item 1: [I0, I_perp, I_perp] → ni=1 in-category → skip
+        Item 2: [I0, I0] → ni=2 → valid
+        Item 3: [I1, I1] → ni=2 → valid
+        N=2 valid subjects, both unanimous → κ=1.0.
+        """
+        ratings = [
+            ["I0", IPERP, IPERP],  # only 1 in-category → skip
+            ["I0", "I0"],           # 2 in-category → valid
+            ["I1", "I1"],           # 2 in-category → valid
+        ]
+        cats = ["I0", "I1"]
+        val = fleiss_kappa_multi(ratings, cats)
+        assert not math.isnan(val)
+        assert val == pytest.approx(1.0)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

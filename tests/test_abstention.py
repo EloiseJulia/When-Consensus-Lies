@@ -428,6 +428,107 @@ class TestFutureClassifierHook:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 9. Auditor regression — Finding 3 (round-2 audit examples)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuditorRegressionFinding3:
+    """Regression suite for the GPT round-2 MINOR finding (abstention grammar).
+
+    Genuine-abstention cases (abstained=True):
+      1. "I do not know which interpretation is intended"
+      2. "do not know which" (short form)
+      3. "which interpretation is intended" (surfaced ambiguity)
+      4. "Please provide more context before I answer"
+      5. "Assuming the FIRST interpretation is intended"
+
+    Committed-with-premise cases (abstained=False):
+      6. "I will assume a 5% discount rate. The answer is I1."
+      7. "For the purposes of this answer, use UTC. The result is I0."
+
+    Stays True (already worked but explicitly confirmed):
+      8. "cannot determine which you mean"
+    """
+
+    def test_do_not_know_which_interpretation_is_intended(self):
+        """'I do not know which interpretation is intended' → abstained=True."""
+        out = "I do not know which interpretation is intended here."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True, got signal={r['signal']!r}"
+        )
+
+    def test_do_not_know_which_short(self):
+        """'do not know which' alone → abstained=True."""
+        out = "Based on the available text, I do not know which is meant."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+
+    def test_which_interpretation_is_intended(self):
+        """'which interpretation is intended' → abstained=True."""
+        out = "It is unclear which interpretation is intended by the question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True, got signal={r['signal']!r}"
+        )
+
+    def test_please_provide_more_context(self):
+        """'Please provide more context before I answer' → abstained=True."""
+        out = "Please provide more context before I answer this question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True, got signal={r['signal']!r}"
+        )
+
+    def test_assuming_first_interpretation_is_intended(self):
+        """'Assuming the FIRST interpretation is intended' → abstained=True."""
+        out = "Assuming the first interpretation is intended, the answer is I1."
+        r = detect_abstention(out)
+        assert r["abstained"] is True, (
+            f"Expected abstained=True for interpretation-referent assumption, "
+            f"got signal={r['signal']!r}"
+        )
+        assert r["signal"] == SIGNAL_ASSUMING
+
+    def test_assuming_second_interpretation_is_intended(self):
+        """'Assuming the SECOND interpretation is intended' → abstained=True."""
+        out = "Assuming the second interpretation is intended, I select I0."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_ASSUMING
+
+    def test_committed_with_methodological_premise_not_abstained(self):
+        """'I will assume a 5% discount rate. The answer is I1.' → abstained=False.
+
+        A methodological parameter assumption that still commits to a final
+        interpretation must NOT be classified as abstention.
+        """
+        out = "I will assume a 5% discount rate. The answer is I1."
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed-with-premise, "
+            f"got signal={r['signal']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_for_purposes_of_answer_not_abstained(self):
+        """'For the purposes of this answer, use UTC. The result is I0.' → abstained=False."""
+        out = "For the purposes of this answer, use UTC. The result is I0."
+        r = detect_abstention(out)
+        assert r["abstained"] is False, (
+            f"Expected abstained=False for committed-with-premise, "
+            f"got signal={r['signal']!r}"
+        )
+        assert r["signal"] == SIGNAL_CONFIDENT_COMMIT
+
+    def test_cannot_determine_which_you_mean_stays_true(self):
+        """'cannot determine which you mean' stays abstained=True (already worked)."""
+        out = "I cannot determine which you mean by this question."
+        r = detect_abstention(out)
+        assert r["abstained"] is True
+        assert r["signal"] == SIGNAL_CANNOT_DETERMINE
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 8. A09 guardrail: no LLM call anywhere in the module
 # ─────────────────────────────────────────────────────────────────────────────
 

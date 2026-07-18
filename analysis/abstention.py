@@ -100,6 +100,8 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
         _p(r"\b(?:there\s+is\s+)?(?:no\s+way\s+(?:to\s+)?(?:know|tell|determine))\b"),
         _p(r"\b(?:it\s+is\s+)?(?:unknowable|indeterminate|undecidable)\b"),
         _p(r"\bcannot\s+be\s+(?:determined|known|inferred|concluded)\b"),
+        # "do not know which" / "don't know which" — epistemic about the referent.
+        _p(r"\b(?:do\s+not|don['']t)\s+know\s+which\b"),
     ]),
 
     # 3. Insufficient information / needs more context
@@ -113,6 +115,10 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
            r"(?:context|information|detail|clarification)\b"),
         _p(r"\bI\s+don['']t\s+have\s+(?:enough|sufficient)\s+"
            r"(?:context|information|detail)\b"),
+        # "Please provide more context before I answer" and similar requests.
+        _p(r"\bplease\s+provide\s+(?:more|additional|further)\s+"
+           r"(?:context|information|detail|clarification)\b"),
+        _p(r"\bprovide\s+(?:more|additional|further)\s+(?:context|information)\s+before\b"),
     ]),
 
     # 4. Direct clarification request — "which X did you mean?"
@@ -122,6 +128,8 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
         _p(r"\bcould\s+you\s+(?:please\s+)?clarify\s+(?:which|what|whether)\b"),
         _p(r"\bplease\s+(?:clarify|specify|indicate)\s+(?:which|what|whether)\b"),
         _p(r"\bare\s+you\s+(?:referring|asking)\s+(?:to|about)\b.{0,40}\?"),
+        # "which interpretation is intended" surfaces interpretation ambiguity.
+        _p(r"\bwhich\s+interpretation\s+is\s+intended\b"),
     ]),
 
     # 5. Trailing clarifying question (the output ends with a "?" question about
@@ -163,6 +171,11 @@ ABSTENTION_RULES: List[Tuple[str, List[re.Pattern]]] = [
            r"the\s+question\s+(?:refers|is\s+about))\b"),
         _p(r"\bin\s+the\s+absence\s+of\s+(?:more|additional|further)\s+"
            r"(?:context|information)\b"),
+        # "Assuming the FIRST/SECOND/... interpretation is intended" — flags which
+        # interpretation the agent is picking, surfacing ambiguity (abstained=True).
+        _p(r"\bassuming\b.{0,60}\binterpretation\s+is\s+intended\b"),
+        _p(r"\bassuming\s+(?:the\s+)?(?:first|second|third|fourth|1st|2nd|3rd|4th)\s+"
+           r"interpretation\b"),
     ]),
 ]
 
