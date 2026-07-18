@@ -57,9 +57,9 @@ The confirmatory secondary-analysis set is EXACTLY {P1, P2} (plus the already-re
 the A04 sensitivity variants). No further post-hoc secondaries will be added to chase significance.
 
 ## 5. Sign-off (at LAUNCH, with A08)
-- [ ] Owner confirms P1 (dependence estimators) + P2 (abstention detection, rule-based/cross-family +
-      human-validated, NOT same-family LLM-judge) as pre-registered SECONDARY analyses.
-- [ ] Owner acknowledges these are additive/post-hoc and change nothing frozen.
+- [x] Owner @EloiseJulia confirms P1 (dependence estimators) + P2 (abstention detection, rule-based/
+      cross-family + human-validated, NOT same-family LLM-judge) as pre-registered SECONDARY analyses. — 2026-07-18
+- [x] Owner acknowledges these are additive/post-hoc and change nothing frozen. — 2026-07-18
 
-Amendment status: **DRAFT — owner signs at launch (with A08).** Content approved by owner 2026-07-18.
-See DECISION-LOG.
+Amendment status: **SIGNED (owner @EloiseJulia, 2026-07-18) at confirmatory launch.** Content approved
+2026-07-18; secondary set = EXACTLY {P1,P2} (no forking-path proliferation). See DECISION-LOG rows 64-65.
