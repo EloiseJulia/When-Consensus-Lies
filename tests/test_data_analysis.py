@@ -510,16 +510,48 @@ def test_golden_midpoint_rank():
 
 def test_geomean_natural_default_is_arithmetic_foil():
     """REVERSED property (H2_derivable): a model that computes the arithmetic mean of
-    growth factors (ignoring the product-property in the prompt) FAILS the geometric
-    target and PASSES only the arithmetic foil."""
+    growth factors (ignoring the compounding constraint r**n=product in the prompt)
+    FAILS the geometric target and PASSES only the arithmetic foil."""
     arith_default = """
 def average_growth(factors):
     return f"{sum(factors) / len(factors):.2f}"
 """
     assert not CHECKERS["geomean_geometric"].check(arith_default).passed, \
-        "Arithmetic default must FAIL the I0 target (I0 = geometric mean)"
+        "Arithmetic default must FAIL the I0 target (I0 = geometric mean / compounding r)"
     assert CHECKERS["geomean_arithmetic"].check(arith_default).passed, \
         "Arithmetic default must PASS the I_d foil (I1 = arithmetic mean)"
+
+
+def test_geomean_prompt_core_compounding_constraint():
+    """BLOCKER FIX: the retained prompt_core must state the r**n=product compounding
+    constraint explicitly so I0 is uniquely derivable by algebra, not by external
+    CAGR convention. The geometric-mean NAME lives only in the deletable clause."""
+    spec = problem_geomean()
+    core = spec.prompt_core
+    # The constraint r**n = product(factors) must be in the retained prompt_core
+    assert "r ** n" in core or "r**n" in core, \
+        f"prompt_core must contain 'r ** n' (the compounding constraint): {core!r}"
+    assert "reproduces" in core or "exactly" in core, \
+        f"prompt_core must assert the product-reproduction property: {core!r}"
+    assert "cumulative product" in core or "cumulative" in core, \
+        f"prompt_core must reference the cumulative product: {core!r}"
+    # The word "geometric" must NOT appear in prompt_core (stays in deletable clause)
+    assert "geometric" not in core.lower(), \
+        f"prompt_core must not name the formula 'geometric mean' (that's in the clause): {core!r}"
+    # The deletable clause IS allowed to name it
+    clause_text = " ".join(spec.requirement_classes[0].clauses)
+    assert "geometric" in clause_text.lower(), \
+        f"The deletable clause must name 'geometric mean': {clause_text!r}"
+    # Arithmetic mean must be provably wrong: arith^n ≠ product for the primary dataset
+    import operator
+    from functools import reduce
+    factors = [1.10, 1.50, 1.10]
+    product = reduce(operator.mul, factors, 1.0)
+    arith = sum(factors) / len(factors)
+    arith_cubed = arith ** len(factors)
+    assert abs(arith_cubed - product) > 0.01, \
+        f"Arithmetic mean {arith:.4f} satisfies compounding constraint (should not): " \
+        f"{arith:.4f}^3={arith_cubed:.4f} vs product={product:.4f}"
 
 
 def test_harmonic_natural_default_is_arithmetic_foil():

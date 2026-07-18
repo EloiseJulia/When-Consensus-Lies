@@ -459,21 +459,26 @@ def problem_avg_rate():
 
 
 def problem_geomean():
-    """k=1 family, axis growth_averaging: geometric mean of multiplicative growth factors.
+    """k=1 family, axis growth_averaging: the equivalent-constant compounding factor.
 
-    H2_derivable: the prompt_core states "the PRODUCT of all factors gives the overall
-    cumulative effect over all years". A careful reader deduces: if repeating the average
-    factor n times should reproduce the total cumulative effect (= product), then
-    average^n = product, so average = product^(1/n) — the geometric mean. This
-    derivation uses ONLY the product-property statement present in the retained prompt,
-    no external convention. The natural default (arithmetic sum/n) is the WRONG foil.
+    H2_derivable (BLOCKER-FIX 2026-07-18): the retained prompt_core explicitly states
+    the COMPOUNDING CONSTRAINT — "compounding r for n years (r ** n) must exactly
+    reproduce the overall cumulative product" — so `r^n = product(factors)`, giving
+    `r = product^(1/n)`. This unique algebraic solution is the geometric mean, derivable
+    by a careful solver from the retained constraint ALONE without naming "geometric
+    mean" or invoking external CAGR convention. The deletable clause names the formula
+    and warns against arithmetic mean. Without that clause, the compounding constraint in
+    prompt_core is still unambiguous and uniquely determines I0.
 
-    WHY H2 (not H1): the disambiguator ("PRODUCT … overall cumulative effect") is
-    retained verbatim in the prompt_core; a careful model derives geometric mean purely
-    from that in-context statement + arithmetic. No external knowledge of "when to use
-    geometric mean" is required.
-    WHY weak model defaults to arithmetic: models read "average" and compute sum/n;
-    the product-property hint requires a deductive step that weaker models skip.
+    WHY I0 is UNIQUELY DERIVABLE (not H1-external): the retained prompt_core says
+    "r ** n exactly reproduces the overall cumulative product". For [1.10,1.50,1.10]:
+    product = 1.815. The unique r satisfying r^3 = 1.815 is r = 1.815^(1/3) ≈ 1.22.
+    The arithmetic mean (1.23) is PROVABLY WRONG under this constraint: 1.23^3 ≈ 1.861
+    ≠ 1.815. No external convention or domain knowledge is needed — only algebra on the
+    stated constraint.
+    WHY I1 is the DEFAULT foil: a model that reads "average growth factor" but skips the
+    compounding constraint computes sum/n = 1.23. It is both (a) the naive default, and
+    (b) provably wrong under the retained constraint.
     PURE STDLIB: `**` operator + f-string only; runs under `python -S` sandbox.
 
     1 req class -> 2^1=2 interps: I0 (geometric, target) + I1 (arithmetic, [combined-default]).
@@ -483,20 +488,21 @@ def problem_geomean():
         task_id="data_geomean_001",
         regime="H2_derivable",
         prompt_core=(
-            "Write a function `average_growth(factors)` that returns the average annual "
-            "growth factor as a string rounded to 2 decimal places. Each value in the "
-            "list is a multiplicative annual growth factor (ratio of new value to old "
-            "value). The PRODUCT of all factors gives the overall cumulative effect "
-            "over all years: [1.10, 1.50, 1.10]."
+            "Write a function `average_growth(factors)` that returns the single constant "
+            "annual growth factor r — as a string rounded to 2 decimal places — such that "
+            "compounding r for n years (r ** n) exactly reproduces the overall cumulative "
+            "product of all n given annual growth factors. Each value is a multiplicative "
+            "annual growth factor (ratio of new value to old value): [1.10, 1.50, 1.10]."
         ),
         requirement_classes=[
             RequirementClass(
                 id="growth_averaging",
-                description="Which mean is appropriate for averaging multiplicative growth factors",
+                description="Formula name and foil exclusion for the compounding-equivalent factor",
                 clauses=[
-                    "Because these are multiplicative factors, the representative average "
-                    "is the GEOMETRIC mean (the n-th root of the product of all n factors), "
-                    "NOT the arithmetic (sum/n) average. Answer to 2 decimals."
+                    "The formula is r = (product of all n factors) ** (1 / n) — the "
+                    "geometric mean. This is distinct from the arithmetic mean "
+                    "(sum of factors / n), which does NOT satisfy the r ** n = product "
+                    "compounding constraint. Answer to 2 decimals."
                 ],
             ),
         ],
@@ -504,10 +510,10 @@ def problem_geomean():
             InterpretationBranch(
                 id="I0",
                 description=(
-                    "NON-default: GEOMETRIC mean as the average growth factor (target). "
-                    "Product-property retained in prompt makes geometric mean derivable: "
-                    "average^n = product -> average = product^(1/n). "
-                    "[1.10,1.50,1.10] -> 1.815^(1/3) -> '1.22'."
+                    "NON-default: the UNIQUE r satisfying r ** n = product(factors) "
+                    "(target = geometric mean). The compounding constraint in the retained "
+                    "prompt_core is the derivable disambiguator — no external knowledge "
+                    "required. [1.10,1.50,1.10]: 1.815^(1/3) -> '1.22'."
                 ),
                 is_target=True,
                 gold_check="geomean_geometric",
@@ -516,8 +522,8 @@ def problem_geomean():
                 id="I1",
                 description=(
                     "MODEL DEFAULT [combined-default]: arithmetic MEAN of growth factors "
-                    "(ignores the product-property constraint, genuinely WRONG). "
-                    "[1.10,1.50,1.10] -> (1.10+1.50+1.10)/3 = '1.23'."
+                    "(ignores compounding constraint; provably WRONG: 1.23^3 ≈ 1.861 ≠ "
+                    "1.815). [1.10,1.50,1.10] -> (1.10+1.50+1.10)/3 = '1.23'."
                 ),
                 is_target=False,
                 gold_check="geomean_arithmetic",
@@ -525,8 +531,8 @@ def problem_geomean():
             ),
         ],
         key_questions=[
-            "Should the average of multiplicative growth factors use the geometric mean "
-            "(product^(1/n)) or the arithmetic mean (sum/n)?",
+            "Should the returned factor r satisfy r ** n = product(factors) (geometric "
+            "mean), or should it be the arithmetic mean sum(factors)/n?",
         ],
     )
 
