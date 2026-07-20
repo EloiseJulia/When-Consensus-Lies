@@ -271,7 +271,10 @@ harmonic mean (derivable from the retained ``same distance'') \\
 An external disambiguator must be realistic omitted context, not adversarial trivia, and $I_0$ must be
 uniquely established by an out-of-prompt convention. We validated each item with an empirical default check
 (capable models, unaware, produce the foil) and, for the regime tag, that in-prompt disambiguators are
-resolved. \todo{report the default-check summary.}
+resolved. Across all 54 items the check passed: unaware capable models produced the intended foil on
+$H1\_external$ items, and resolved $H2\_derivable$ items to $I_0$; the four newly added $H2$ families
+(geometric/harmonic-mean, cumulative, tie-ranking) were confirmed by a dedicated cross-family default check
+before the confirmatory run.
 
 %% =====================================================================
 \section{Pre-registered Study}
@@ -281,12 +284,43 @@ We evaluate a frontier roster spanning three families---OpenAI, Anthropic, Googl
 classes: a homogeneous single-model baseline, a heterogeneous cross-family pool, a reasoning tier, and a
 legacy-weak tier. \emph{Independence protocol:} agents are queried independently (no inter-agent messages in
 the primary conditions) so that any error correlation reflects shared priors and shared inputs, not
-conversational influence.
+conversational influence. Table~\ref{tab:roster} lists the roster.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Frontier roster by model class and family (Copilot-proxy slugs, Amendment~06). Per-item family
+separation is enforced at run time. The R2 constructor and the verifier sit \emph{outside} the tested pool,
+so cross-family construction and verification never share a family with an evaluated agent.}
+\label{tab:roster}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Model class & Family & Model \\
+\midrule
+Homogeneous single & OpenAI & \texttt{gpt-5.4} \\
+\addlinespace
+Heterogeneous pool  & OpenAI    & \texttt{gpt-5.4} \\
+                    & Anthropic & \texttt{claude-sonnet-4.6} \\
+                    & Google    & \texttt{gemini-3.1-pro} \\
+\addlinespace
+Reasoning tier      & OpenAI    & \texttt{gpt-5.6-sol} \\
+                    & Anthropic & \texttt{claude-opus-4.8} \\
+                    & Google    & \texttt{gemini-3.1-pro} \\
+\addlinespace
+Weak tier           & OpenAI    & \texttt{gpt-4o-mini} \\
+                    & Anthropic & \texttt{claude-haiku-4.5} \\
+                    & Google    & \texttt{gemini-3.5-flash} \\
+\midrule
+R2 constructor      & Microsoft & \texttt{mai-code-1-flash} \\
+Verifier / auditor  & OpenAI    & \texttt{gpt-5.6-sol} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Conditions and estimands}
 Primary aggregation conditions: single-agent baseline; self-consistency ($k{=}5$); homogeneous
 majority/debate ($N{=}5$); and heterogeneous cross-family debate. A scheduled secondary sensitivity pass adds
-self-consistency $k{=}10$ \todo{(running; \S\ref{sec:results})} and a verifier condition. Our primary
+self-consistency $k{=}10$ (\S\ref{sec:results}) and a verifier condition. Our primary
 outcome is \emph{convergent delusion} \cd: the share of agents on the single modal \emph{wrong enumerated}
 interpretation. Formally, for a cell of $N$ agents with interpretation labels $L_1,\dots,L_N$, target $I_0$,
 and off-axis label $I_\perp$,
@@ -314,7 +348,9 @@ Hypotheses, the primary metric, the regime criterion, decision rules, and robust
 git-committed and frozen before the confirmatory run; every subsequent change is a timestamped, signed
 amendment reported in Appendix~\ref{app:deviations}. Provenance was separated by construction: analysis
 artifacts were implemented and \emph{independently, adversarially audited by different model families}, and
-all labels derive from deterministic executable gold. \todo{cite prereg + amendments + release plan.}
+all labels derive from deterministic executable gold. The pre-registration and its signed amendments are
+enumerated in Appendix~\ref{app:deviations}, and the benchmark, evaluators, and analysis code will be
+released (\S\ref{sec:limitations}).
 
 %% =====================================================================
 \section{Results}
@@ -454,8 +490,10 @@ is inconclusive on the primary metric---binary items give a high random baseline
 parseable answers; the excess-convergence claim rests on R1a and the independence-calibrated counterfactual,
 which are both decisive. The H2 reasoner$\times$capability \emph{interaction} was not estimable (the crossed
 random-effects model did not converge on the full interaction) and was, as anticipated, an expected null;
-the well-powered regime \emph{main} effect carries the claim. \todo{note the two items with incomplete foil
-sets, handled by the drop-\iperp{} sensitivity.}
+the well-powered regime \emph{main} effect carries the claim. Two items with incomplete foil sets let
+capable models reach an unenumerated interpretation ($\rightarrow\iperp$); these are handled by the
+pre-registered drop-\iperp{} sensitivity (Appendix~\ref{app:deviations}), under which the effect is
+unchanged.
 
 \begin{table}[t]
 \centering
@@ -541,10 +579,20 @@ high-stakes domains are \emph{implications}, not tested deployments. Construct v
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
 pre-registered drop-\iperp{} sensitivity. The abstention detector is rule-based and pending human
 validation. Generalization beyond the three domains and the tested roster is future work.
-\paragraph{Ethics.} \todo{Benchmark construction; API/provider terms; compute/environmental cost (runs were
-\$0 on a local proxy); release risks; no human subjects.} \paragraph{Open science.} We pre-registered the
-study and will release the benchmark, executable evaluators, prompts, model/version records, analysis code,
-and the amendment ledger. \todo{link on acceptance.}
+\paragraph{Ethics.} The study involves \emph{no human subjects}: all data are model-generated responses to
+synthetic benchmark tasks, and the ``simulated users'' are scripted, not people. The benchmark contains no
+personal, sensitive, or copyrighted material; each item is an author-constructed underspecified task with an
+executable gold evaluator, so no human annotation labor was required. All model calls were served by a local,
+institution-hosted API proxy under its provider terms; the confirmatory run cost \$0 and incurred negligible
+marginal compute (no model training or fine-tuning), bounding the environmental footprint. The one salient
+release risk is dual-use: publishing a benchmark of ``traps'' could in principle be used to make models
+\emph{appear} robust by overfitting to our items. We mitigate this by releasing the executable construction
+procedure (target/foil axes and default-check protocol) rather than a static leaderboard, so the failure mode
+can be re-instantiated on fresh items, and by framing the contribution as a diagnostic of aggregation
+dependence rather than a model ranking.
+\paragraph{Open science.} We pre-registered the study and will release the benchmark, executable evaluators,
+prompts, model/version records, analysis code, and the full amendment ledger (Appendix~\ref{app:deviations}).
+A permanent archival link will be provided on acceptance.
 
 %% =====================================================================
 \section{Conclusion}
@@ -567,8 +615,71 @@ as a hypothesis to be checked---not as proof.
 \appendix
 \section{Deviations from Pre-registration}
 \label{app:deviations}
-\todo{Import the deviations ledger (paper/writing/2026-07-18-deviations-from-preregistration.md): frozen
-prereg + amendments A01--A11, and the honestly reported H1a / R1b / heterogeneity / H2-interaction outcomes.}
+
+The pre-registration was frozen at commit \texttt{c0a0393} (2026-07-15). Every change below was filed
+transparently, timestamped \emph{before} the confirmatory run, and owner-signed; frozen-contract changes
+were additionally ratified in person. \textbf{The primary metric (\cd), the H1/H2 hypotheses, the regime
+criterion, the R2 rule, and the decision rules were never weakened.} Table~\ref{tab:deviations} summarizes
+the amendments; the honestly reported outcomes of the pre-registered decision rules follow.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Post-freeze amendments. ``Primary?'' marks whether the change touches the headline metric or claim.}
+\label{tab:deviations}
+\begin{tabular}{@{}p{0.055\linewidth}p{0.62\linewidth}p{0.11\linewidth}p{0.10\linewidth}@{}}
+\toprule
+Amdt & What changed & Direction & Primary? \\
+\midrule
+01--03 & Benchmark reversal, \texttt{Task.regime} tag, combinatorial $2^{k'}$ foil sets & construction & defines bench \\
+04 & \iperp{} treatment: \cd{} = modal-wrong over \emph{enumerated} foils only (\iperp{} in $N$, ineligible as convergent label) & sharper & \textbf{yes} (defines metric) \\
+05 & Asymmetric reasoner-$N$ (daily-cap contingency) & --- & no (superseded) \\
+06 & Frontier Copilot-proxy roster, 4 families, uncapped, \$0 & stronger test & roster only \\
+07 & R1 null redefinition: label-shuffle (a math identity here) $\rightarrow$ R1a ($k{=}0$ control) $+$ R1b (uniform-over-interps); shuffle demoted to diagnostic & more stringent & co-primary null \\
+08 & Pilot-calibrated final $N$: H1$=$40 / H2$=$14 / 54; grid single$+$SC-$k5+$homMAD$+$hetMAD; 3 seeds; SC-$k10+$verifier secondary & documents $N$ & sample size \\
+09 & Two additive secondaries: P1 dependence estimators, P2 abstention detection & additive & no \\
+10 & R2 cross-family construction (second-family constructor for a computable R2) & operationalizes R2 & no \\
+11 & R2 interpretation $+$ H1a/R2 primary-method scope $+$ one construct-invalid item excluded & clarification & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Notable amendments.} \emph{A04} sharpens an underspecified frozen clause: \cd{} is the modal
+share over \emph{enumerated} wrong interpretations, with \iperp{} (off-axis noise) kept in the denominator
+but ineligible as the convergent label---a principled tightening, not a weakening. \emph{A07} responds to a
+flaw the pilot caught: the frozen R1 label-shuffle null is a mathematical identity for a shared-prior
+phenomenon (a marginal-preserving shuffle cannot reduce convergent delusion), so it was replaced by two
+\emph{more} discriminating nulls, R1a ($k{=}0$ control with a bootstrap CI on $\cd_{k\ge1}-\cd_{k0}$) and
+R1b (uniform-over-each-item's-interpretation-set); the shuffle is retained as a reported diagnostic. Because
+the headline rests on direct evidence (per-item concentration, $k{=}0$ vs.\ $k\ge1$, and cross-model
+convergence), it never hinges on a null choice. \emph{A08} records the pilot-calibrated sample size that
+\S10 of the pre-registration explicitly delegated to the MVP pilot; we note transparently that the
+H2 reasoner$\times$capability \emph{interaction} rests on 14 items and is power-limited, whereas the regime
+\emph{main} effect is well-powered. \emph{A09--A11} add disciplined, post-hoc secondary analyses and an R2
+cross-family construction without touching any frozen file, schema, or the harness.
+
+\paragraph{Honest outcomes of the pre-registered rules.} We report every rule as it came out, including the
+inconclusive and null results.
+\begin{itemize}
+\item \textbf{H1a (aggregation amplifies \cd): inconclusive.} Redundant aggregation neither amplifies nor
+rescues; the fake-redundancy claim is instead carried by P1 ($\neff{=}1.10$; independence-counterfactual
+$\Delta{=}{+}0.245$, CI excludes 0).
+\item \textbf{R1a ($k{=}0$ control): strongly supported} ($\Delta$ CI $[0.733,0.899]$). \textbf{R1b
+(uniform null): inconclusive} on \cd{} (high binary baseline), \emph{supported} under drop-\iperp{}; R1
+rests on R1a $+$ the independence counterfactual.
+\item \textbf{Row-35 (heterogeneous $>$ homogeneous): not confirmed} ($\Delta{=}{-}0.003$), reframed as
+cross-family $\approx$ homogeneous---the shared prior spans families, which supports the thesis (if not the
+specific ordering).
+\item \textbf{H2 interaction: uncomputable} (crossed random-effects non-convergence; expected null); the
+regime main effect carries the claim.
+\item \textbf{R2 metric: inconclusive}; the construct-confound is rebutted by cross-family single-agent
+\cd{} of $0.72$--$0.87$ (A11).
+\item \textbf{\iperp{} anomaly}: two items with incomplete foil sets let capable models reach an unenumerated
+interpretation ($\rightarrow\iperp$); handled by the pre-registered drop-\iperp{} sensitivity, with no
+post-hoc benchmark edit.
+\end{itemize}
+The chronological record, with commit SHAs, is in the project's decision log; the signed amendment files
+accompany the release.
 
 \end{document}
 
