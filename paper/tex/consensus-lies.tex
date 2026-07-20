@@ -82,6 +82,20 @@ pre-registration}
 
 \maketitle
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_overview.pdf}
+\caption{\textbf{Overview.} The same underspecified prompt and the same $k$ independent agents (three model
+families $\times$ capability tiers) fork into two regimes that differ \emph{only} by where the missing
+disambiguating clause lives. \textbf{H1\_external} (clause outside the retained prompt): agents
+\emph{silently} converge on the same wrong interpretation---consensus looks strong (``5/5 agree'') but is
+wrong, and the $k$-agent ensemble collapses to $\approx\!1$ effective independent judgment (fake redundancy,
+$\rho\!\to\!1$, $\neff\!=\!1.10$; $\cd\!\approx\!0.53$). \textbf{H2\_derivable} (clause inside the prompt):
+every tier resolves it ($\cd\!=\!0$). Correctness is set by an executable-gold check, not an LLM judge. The
+failure axis is the clause's \emph{location}, not model capability.}
+\label{fig:overview}
+\end{figure*}
+
 %% =====================================================================
 \section{Introduction}
 \label{sec:intro}
@@ -109,7 +123,8 @@ how capable the models are but by \emph{where the missing information lives}. Wh
 families---\emph{silently} converge on the \emph{same wrong} interpretation. They do not make independent
 errors that average away; they make the \emph{same} error, in unison and with confidence, and a nominal
 $k$-agent ensemble collapses to roughly one effective independent judgment. When the same disambiguator is
-present \emph{inside} the prompt, every tier resolves it. We call the wrong-consensus failure
+present \emph{inside} the prompt, every tier resolves it (Figure~\ref{fig:overview} previews the setup and
+result). We call the wrong-consensus failure
 \emph{convergent delusion}, and the structural condition that produces it \emph{fake redundancy}: apparent
 redundancy that supplies no independent evidence because all agents inherit the same lossy representation of
 the task.
