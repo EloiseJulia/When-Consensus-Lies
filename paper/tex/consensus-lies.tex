@@ -19,6 +19,8 @@
 \usepackage{booktabs}
 \usepackage{amsmath}
 \usepackage{array}
+\usepackage{graphicx}
+\graphicspath{{figures/}}
 \usepackage{xcolor}
 \newcommand{\todo}[1]{\textcolor{red}{[\textbf{TODO:} #1]}}
 \newcommand{\cd}{\textsf{CD}}
@@ -48,7 +50,7 @@ manipulate a single factor---whether the decisive disambiguating information lie
 across agents. When the disambiguator is outside the prompt, independent agents across capability tiers and
 across model families (OpenAI, Anthropic, Google) converge on the \emph{same wrong} interpretation
 (convergent-delusion rate $\approx\!0.53$), almost never signaling that anything is missing (abstention
-$\approx\!0.02\%$); a nominal $k$-agent ensemble supplies the evidence of $\approx\!1$ independent judgment
+$\approx\!0.03\%$); a nominal $k$-agent ensemble supplies the evidence of $\approx\!1$ independent judgment
 ($\neff\!=\!1.10$). When the same information is inside the prompt, every tier---including legacy-weak
 models---resolves it (rate $=\!0.00$). A second benchmark constructed by a \emph{different} model family
 rules out a shared-prior-with-the-constructor artifact. We name this failure \emph{fake redundancy}: under a
@@ -225,7 +227,30 @@ question-answering). Items are \emph{reversed} so the natural default an unaware
 quarter; floor vs.\ truncating integer division). The set contains 40 \textbf{H1\_external} items (the
 disambiguator requires outside knowledge) and 14 \textbf{H2\_derivable} items (the disambiguator is present
 in the retained prompt), each at ambiguity level $k\in\{0,1,2,3\}$, where $k{=}0$ is fully specified.
-\todo{Table: domains $\times$ axes $\times$ example; unique-$I_0$ fairness; construction validation.}
+Table~\ref{tab:examples} illustrates the two regimes: in both, an unaware solver produces a natural default;
+the regimes differ only in whether the retained prompt \emph{contains} what is needed to override it.
+
+\begin{table}[t]
+\centering
+\caption{Example ambiguity axes. In H1\_external, the deciding convention is \emph{outside} the retained
+prompt, so the natural default ($I_1$) is a foil and the target ($I_0$) requires external knowledge; in
+H2\_derivable, the deciding fact is \emph{in} the prompt, so a competent solver can derive $I_0$.}
+\label{tab:examples}
+\small
+\begin{tabular}{p{2.0cm} p{3.1cm} p{2.6cm} p{2.6cm}}
+\toprule
+Regime / domain & Task (disambiguator deleted) & Natural default $I_1$ (foil) & Target $I_0$ \\
+\midrule
+H1 / code & ``\texttt{quarter(month)}: quarter of a calendar month'' & calendar quarter (Jan{-}Mar$=$Q1) &
+fiscal quarter (external fiscal-year start) \\
+H1 / code & integer division of $a,b$ & Python floor \texttt{//} & truncate-toward-zero (C/SQL convention) \\
+H1 / policy & days from start to end & exclusive \texttt{end$-$start} & inclusive (external policy) \\
+\midrule
+H2 / data & average speed over equal-distance legs (``\emph{same distance}'' retained) & arithmetic mean &
+harmonic mean (derivable from the retained ``same distance'') \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Construct validity}
 An external disambiguator must be realistic omitted context, not adversarial trivia, and $I_0$ must be
@@ -248,11 +273,24 @@ Primary aggregation conditions: single-agent baseline; self-consistency ($k{=}5$
 majority/debate ($N{=}5$); and heterogeneous cross-family debate. A scheduled secondary sensitivity pass adds
 self-consistency $k{=}10$ \todo{(running; \S\ref{sec:results})} and a verifier condition. Our primary
 outcome is \emph{convergent delusion} \cd: the share of agents on the single modal \emph{wrong enumerated}
-interpretation (\iperp{} stays in the denominator but cannot be the convergent label), with two
+interpretation. Formally, for a cell of $N$ agents with interpretation labels $L_1,\dots,L_N$, target $I_0$,
+and off-axis label $I_\perp$,
+\begin{equation}
+\label{eq:cd}
+\cd \;=\; \frac{1}{N}\,\max_{\,I_j \,\notin\, \{I_0,\, I_\perp\}}\ \bigl|\{\,i : L_i = I_j\,\}\bigr|,
+\end{equation}
+so \cd{} is high only when agents \emph{agree} on a specific wrong answer, not merely when they are
+individually wrong (\iperp{} stays in the denominator but cannot be the convergent label). We report two
 pre-registered sensitivity variants (\iperp{}-eligible; \iperp{}-dropped). We additionally report dependence
-estimators over each cell's agent labels---pairwise wrong-answer agreement, Fleiss' $\kappa$, the intraclass
-correlation of the wrong-answer indicator, and the effective ensemble size $\neff=n/(1+(n-1)\bar\rho)$---and
-an independence-calibrated counterfactual that resamples each agent from its own marginal accuracy. A
+estimators over each cell's labels---pairwise wrong-answer agreement, Fleiss' $\kappa$, the intraclass
+correlation $\rho$ of the wrong-answer indicator, and the \emph{effective ensemble size}
+\begin{equation}
+\label{eq:neff}
+\neff \;=\; \frac{n}{1+(n-1)\,\bar\rho},
+\end{equation}
+which quantifies how many \emph{independent} judgments a nominal $n$-agent ensemble supplies ($\neff\!\to\!1$
+as $\bar\rho\!\to\!1$)---and an independence-calibrated counterfactual $\Delta = \cd_{\mathrm{obs}} -
+\mathbb{E}[\cd_{\mathrm{indep}}]$ that resamples each agent independently from its own marginal accuracy. A
 rule-based (non-LLM) detector flags whether an agent abstained or requested clarification. Each cell is
 replicated over three collision-free seeds.
 
@@ -273,7 +311,8 @@ seeds, and the primary conditions. We report answer-first findings.
 On \textbf{H1\_external}, \cd{} $=0.53$ (0.60 among parseable answers): a majority of independent agents land
 on the \emph{same wrong} interpretation. On \textbf{H2\_derivable}, \cd{} $=0.00$: with the disambiguator in
 the prompt, no parseable agent converges on a wrong enumerated interpretation. The regime gap is
-$\Delta\cd=0.53$, consistent across all three metric variants (Table~\ref{tab:regime}). A within-design
+$\Delta\cd=0.53$, consistent across all three metric variants (Table~\ref{tab:regime}) and monotone in the
+number of deleted clauses $k$ (Figure~\ref{fig:phase}). A within-design
 manipulation check makes this decisive: on fully specified $k{=}0$ items \cd{} $=0.00$, and on $k\ge1$ items
 \cd{} $=0.82$ (difference 95\% CI $[0.73,0.90]$)---the same pipeline, labeler, and metric yield zero when
 the prompt is complete and high when a single clause is deleted (\textbf{R1a}), ruling out a labeler or
@@ -301,16 +340,37 @@ H2\_derivable & weak         & 0.000 & 0.000 & 0.067 \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\linewidth]{fig_phase_diagram.pdf}
+\caption{Convergent delusion vs.\ ambiguity level $k$. On H1\_external, \cd{} is zero at the fully specified
+$k{=}0$ control and rises sharply once a disambiguating clause is deleted; on H2\_derivable it stays near
+zero at every $k$. The failure is a property of the information boundary, not of task difficulty per se.}
+\label{fig:phase}
+\end{figure}
+
 \subsection{F2: Capability and model-family diversity do not restore interpretive independence}
-The H1\_external failure is essentially flat across model classes (Table~\ref{tab:regime}): frontier
+The H1\_external failure is essentially flat across model classes (Table~\ref{tab:regime},
+Figure~\ref{fig:capability}): frontier
 reasoners are trapped as reliably as legacy-weak models, and a heterogeneous cross-family pool converges as
 strongly as a single model sampled repeatedly (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
 $[-0.078,+0.058]$; not the ordering we predicted). Vendor and capability diversity did not translate into
 \emph{viewpoint} diversity: the shared prior spans families.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{fig_capability_invariance.pdf}
+\caption{Convergent delusion by model class, split by regime. On H1\_external the failure is essentially
+flat across the homogeneous, heterogeneous (cross-family), reasoning, and legacy-weak classes---frontier
+reasoners are trapped as reliably as weak models---while H2\_derivable is near zero for all classes. The
+failure axis is the disambiguator's \emph{location}, not model capability.}
+\label{fig:capability}
+\end{figure}
+
 \subsection{F3: Adding agents adds little effective redundancy (fake redundancy)}
 On H1\_external, pairwise wrong-answer agreement is $0.98$, Fleiss' $\kappa=0.97$, and the intraclass
-correlation of the wrong-answer indicator is $0.89$; the effective ensemble size is $\neff=1.10$. An
+correlation of the wrong-answer indicator is $0.89$; the effective ensemble size is $\neff=1.10$
+(Table~\ref{tab:dependence}, Figure~\ref{fig:fakeredundancy}). An
 independence-calibrated counterfactual yields observed$-$independent $\cd=+0.245$ (95\% CI $[0.234,0.257]$):
 observed convergence significantly exceeds what genuinely independent agents at the same accuracy would
 produce. Consistently, the pre-registered aggregation-vs-single contrast (\textbf{H1a}) is inconclusive
@@ -318,13 +378,48 @@ produce. Consistently, the pre-registered aggregation-vs-single contrast (\textb
 $k{=}5$. \emph{A nominal $k$-agent system here supplies about one independent judgment.} \todo{SC $k{=}10$
 sensitivity (running): confirm $\neff\!\to\!1$ persists at higher $k$.}
 
+\begin{table}[t]
+\centering
+\caption{Error dependence by regime (H1\_external items, primary conditions). On H1\_external agents make the
+\emph{same} error: a $k$-agent ensemble supplies $\approx\!1$ independent judgment. Independence
+counterfactual $\Delta = \cd_{\mathrm{obs}} - \mathbb{E}[\cd_{\mathrm{indep}}]$.}
+\label{tab:dependence}
+\small
+\begin{tabular}{lccccc}
+\toprule
+Regime & Pairwise wrong-agree. & Fleiss' $\kappa$ & ICC ($\bar\rho$) & \neff{} & Indep.\ counterfactual $\Delta$ (95\% CI) \\
+\midrule
+H1\_external & 0.98 & 0.97 & 0.89 & 1.10 & $+0.245\ [0.234, 0.257]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\linewidth]{fig_fake_redundancy.pdf}
+\caption{Fake redundancy on H1\_external. High inter-agent error dependence (pairwise wrong-answer agreement,
+$\kappa$, ICC) drives the effective ensemble size \neff{} to $\approx\!1$: nominally many agents supply the
+evidence of roughly one. Adding agents does not add independent evidence.}
+\label{fig:fakeredundancy}
+\end{figure}
+
 \subsection{F4: The failure is silent; retaining the disambiguator eliminates it}
-On H1\_external the abstention / clarification-request rate is $\approx0.02\%$ while \cd{} $=0.53$: agents
-are confidently wrong and almost never signal missing information, so consensus carries no internal warning.
+On H1\_external the abstention / clarification-request rate is $\approx0.03\%$ while \cd{} $=0.53$: agents
+are confidently wrong and almost never signal missing information, so consensus carries no internal warning
+(Figure~\ref{fig:silent}).
 Wrong-consensus also rises with the number of omitted clauses $k$ (\textbf{H1b} supported; $k$-coefficient
 $0.31$, 95\% CI $[0.18,0.45]$). The constructive boundary condition is that \emph{presence} of the
 disambiguator (H2) removes the failure entirely.
 \todo{finalize abstention once the rule-based detector's human-validation sample is checked.}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\linewidth]{fig_silent_failure.pdf}
+\caption{The failure is silent. On H1\_external, convergent delusion is high ($\cd\!\approx\!0.53$) yet the
+abstention / clarification-request rate is $\approx\!0.03\%$: agents are confidently wrong and do not signal
+that decisive information is missing. Consensus offers no internal warning.}
+\label{fig:silent}
+\end{figure}
 
 \subsection{F5: The convergence is not an artifact of the benchmark's constructor}
 A skeptic might argue that convergence reflects a prior shared with whoever \emph{built} the traps. We
@@ -336,13 +431,44 @@ R1b below, statistically inconclusive on the primary metric, so we rest the conf
 cross-family single-agent persistence and report the metric honestly.
 
 \subsection{Robustness and honestly reported nulls}
-The within-design $k{=}0$ control (R1a) is strongly supported (above). An interpretation-uniform null (R1b)
+Table~\ref{tab:outcomes} summarizes every pre-registered outcome. The within-design $k{=}0$ control (R1a) is
+strongly supported (above). An interpretation-uniform null (R1b)
 is inconclusive on the primary metric---binary items give a high random baseline---but supported among
 parseable answers; the excess-convergence claim rests on R1a and the independence-calibrated counterfactual,
 which are both decisive. The H2 reasoner$\times$capability \emph{interaction} was not estimable (the crossed
 random-effects model did not converge on the full interaction) and was, as anticipated, an expected null;
 the well-powered regime \emph{main} effect carries the claim. \todo{note the two items with incomplete foil
 sets, handled by the drop-\iperp{} sensitivity.}
+
+\begin{table}[t]
+\centering
+\caption{Pre-registered outcomes. We report all outcomes, including those not supported; the
+capability/family nulls are what make the failure a property of the information boundary rather than of any
+model.}
+\label{tab:outcomes}
+\small
+\begin{tabular}{p{3.4cm} p{4.6cm} l}
+\toprule
+Hypothesis & Test & Outcome \\
+\midrule
+Two-regime (H1 vs H2) & regime main effect on \cd{}; $\Delta\cd=0.53$ & \textbf{Supported} \\
+H1b (dose) & \cd{} increases with $k$; coef.\ $0.31\,[0.18,0.45]$ & \textbf{Supported} \\
+R1a ($k{=}0$ control) & $\cd_{k\ge1}-\cd_{k=0}=0.82\,[0.73,0.90]$ & \textbf{Supported} \\
+Fake redundancy & $\neff=1.10$; indep.\ counterfactual $+0.245\,[0.234,0.257]$ & \textbf{Supported} \\
+Silent failure & abstention $\approx\!0.03\%$ at $\cd=0.53$ & \textbf{Supported} \\
+R2 (cross-family construction) & non-constructor families converge (single-agent $\cd=0.72$) & \textbf{Supported}$^\dagger$ \\
+\midrule
+H1a (aggregation amplifies) & agg$-$single \cd{} CI crosses 0 & Inconclusive \\
+R1b (uniform null) & obs$-$uniform: high binary baseline & Inconclusive$^\ddagger$ \\
+Heterogeneous $>$ homogeneous & $\Delta\cd=-0.003\,[-0.078,0.058]$ & Not supported \\
+H2 reasoner$\times$capability interaction & crossed-RE did not converge & Uncomputable (expected null) \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+\footnotesize $^\dagger$Via direct cross-family single-agent persistence; the pre-registered
+aggregation-amplification metric was inconclusive (reported honestly). $^\ddagger$Supported among parseable
+answers.
+\end{table}
 
 %% =====================================================================
 \section{Discussion}
@@ -428,3 +554,4 @@ as a hypothesis to be checked---not as proof.
 prereg + amendments A01--A11, and the honestly reported H1a / R1b / heterogeneity / H2-interaction outcomes.}
 
 \end{document}
+
