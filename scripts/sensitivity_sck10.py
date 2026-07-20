@@ -167,26 +167,60 @@ def _validate_gate_c_sck10(
     violations: List[Dict[str, Any]] = []
     for job in done_sc_jobs:
         task_id = job["task_id"]
+        model_role = job["model_role"]
         model_id = job["model_id"]
         grid_seed = int(job["seed"])
+        job_endpoint = job.get("endpoint", "")
 
-        count = 0
+        # Collect unique run identities that match this job's full identity.
+        # Mirroring run_identity() in harness/runner.py: the key is
+        # [endpoint?,] task_id, config, model_role, model_id, per_agent_seed [, R{replicate_seed}?]
+        # Deduplication prevents duplicate checkpoint lines from inflating the count.
+        seen_run_ids: set = set()
         for run in run_records:
-            if run.get("task_id") != task_id or run.get("model_id") != model_id:
+            # Full job identity match — model_role and endpoint are required
+            # to avoid foreign-role or foreign-endpoint records inflating the count.
+            if run.get("task_id") != task_id:
+                continue
+            if run.get("model_role") != model_role:
+                continue
+            if run.get("model_id") != model_id:
+                continue
+            if run.get("endpoint", "") != job_endpoint:
                 continue
             # Match run to grid seed: use replicate_seed if present (multi-agent
             # records where per-agent seed != grid seed), else fall back to seed
             # (single-agent record or agent-0 where per-agent seed == grid seed).
             rep = run.get("replicate_seed")
             match_seed = int(rep) if rep is not None else int(run.get("seed", -1))
-            if match_seed == grid_seed:
-                count += 1
+            if match_seed != grid_seed:
+                continue
+            # Build a unique identity tuple mirroring run_identity() in runner.py.
+            per_seed = int(run.get("seed", -1))
+            id_parts: List[Any] = [
+                run.get("task_id", ""),
+                run.get("config", ""),
+                run.get("model_role", ""),
+                run.get("model_id", ""),
+                per_seed,
+            ]
+            rep_int = int(rep) if rep is not None else None
+            if rep_int is not None and rep_int != per_seed:
+                id_parts.append(f"R{rep_int}")
+            ep = run.get("endpoint", "")
+            if ep:
+                id_parts.insert(0, ep)
+            seen_run_ids.add(tuple(id_parts))
+
+        count = len(seen_run_ids)
 
         if count < min_agents:
             violations.append({
                 "task_id": task_id,
+                "model_role": model_role,
                 "model_id": model_id,
                 "seed": grid_seed,
+                "endpoint": job_endpoint,
                 "agent_count": count,
                 "expected": min_agents,
             })

@@ -428,6 +428,78 @@ class TestGateCValidation:
         assert result["violations"] == []
         assert result["checked"] == 1
 
+    def test_foreign_endpoint_runs_dont_count(self, tmp_path):
+        """5 same-endpoint + 5 foreign-endpoint runs must flag Gate C violation.
+
+        Non-vacuous: if Gate C matched only on (task_id, model_id, seed) the
+        foreign-endpoint runs would inflate the count to 10 and the assertion
+        would fail (passed=True instead of passed=False).
+        """
+        cp = tmp_path / "cp_ep.jsonl"
+
+        # 5 matching runs (no endpoint field → default endpoint "")
+        same_ep = [self._run_rec("t1", "gpt-4o", 0, i) for i in range(5)]
+
+        # 5 foreign-endpoint runs — same task/model/seed but different endpoint
+        foreign_ep = []
+        for i in range(5):
+            rec = self._run_rec("t1", "gpt-4o", 0, i + 5)
+            rec["endpoint"] = "github_models\x00https://models.github.ai/inference"
+            foreign_ep.append(rec)
+
+        # job_done has no endpoint → matches only the 5 same-endpoint runs
+        job_done = self._job_done_rec("t1", "gpt-4o", 0)
+
+        self._write_checkpoint(cp, same_ep + foreign_ep + [job_done])
+
+        result = _driver._validate_gate_c_sck10(str(cp), min_agents=10)
+
+        assert not result["passed"], (
+            "Gate C must fail: foreign-endpoint runs must not count toward "
+            "the same-endpoint job identity"
+        )
+        assert len(result["violations"]) == 1
+        v = result["violations"][0]
+        assert v["agent_count"] == 5, (
+            f"Only 5 same-identity runs should count; got agent_count={v['agent_count']}"
+        )
+
+    def test_foreign_model_role_runs_dont_count(self, tmp_path):
+        """5 same-role + 5 foreign-model_role runs must flag Gate C violation.
+
+        Non-vacuous: if Gate C matched only on (task_id, model_id, seed) the
+        foreign-role runs would inflate the count to 10 and the assertion
+        would fail (passed=True instead of passed=False).
+        """
+        cp = tmp_path / "cp_role.jsonl"
+
+        # 5 matching runs (model_role="tested_agents")
+        same_role = [self._run_rec("t1", "gpt-4o", 0, i) for i in range(5)]
+
+        # 5 foreign-role runs — same task/model/seed but different model_role
+        foreign_role = []
+        for i in range(5):
+            rec = self._run_rec("t1", "gpt-4o", 0, i + 5)
+            rec["model_role"] = "judge_agents"
+            foreign_role.append(rec)
+
+        # job_done has model_role="tested_agents" → matches only the 5 same-role runs
+        job_done = self._job_done_rec("t1", "gpt-4o", 0)
+
+        self._write_checkpoint(cp, same_role + foreign_role + [job_done])
+
+        result = _driver._validate_gate_c_sck10(str(cp), min_agents=10)
+
+        assert not result["passed"], (
+            "Gate C must fail: foreign-model_role runs must not count toward "
+            "the tested_agents job identity"
+        )
+        assert len(result["violations"]) == 1
+        v = result["violations"][0]
+        assert v["agent_count"] == 5, (
+            f"Only 5 same-role runs should count; got agent_count={v['agent_count']}"
+        )
+
     def test_run_raises_on_partial_job(self, tmp_path):
         """run() must raise RuntimeError when Gate C finds a <10-agent sc job.
 
