@@ -1,0 +1,430 @@
+%% When Consensus Lies — CSCW (PACM HCI) full paper
+%% Format: ACM acmart, acmsmall (PACM HCI journal single-column). `review,anonymous` for submission.
+%% Build: pdflatex -> bibtex -> pdflatex x2  (bib: references.bib)
+%%
+%% ⚠️ CSCW 2026 LLM-writing policy: this file is a Manager-prepared SCAFFOLD. The author MUST rewrite the
+%% prose in their own voice, INDEPENDENTLY VERIFY EVERY CITATION (some bib entries are approximate), and
+%% follow the venue's disclosure policy. Do not submit as-is. See paper/research/2026-07-20-cscw-writing-style-guide.md.
+\documentclass[acmsmall,screen,review,anonymous]{acmart}
+
+\acmJournal{PACMHCI}
+\acmVolume{9}
+\acmNumber{CSCW}
+\acmArticle{XXX}
+\acmMonth{4}
+\acmYear{2026}
+\acmDOI{10.1145/XXXXXXX}
+\setcopyright{acmlicensed}
+
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{xcolor}
+\newcommand{\todo}[1]{\textcolor{red}{[\textbf{TODO:} #1]}}
+\newcommand{\cd}{\textsf{CD}}
+\newcommand{\iperp}{$I_\perp$}
+\newcommand{\neff}{$n_{\mathrm{eff}}$}
+
+\begin{document}
+
+\title{When Consensus Lies: Fake Redundancy and Silent Convergent Delusion in AI-Assisted Collective Judgment}
+
+\author{Anonymous Author(s)}
+\affiliation{%
+  \institution{Anonymous Institution}
+  \city{}
+  \country{}
+}
+
+\begin{abstract}
+Groups and organizations increasingly treat \emph{agreement among multiple AI systems} as corroboration:
+we sample a language model repeatedly, pool several models from different vendors, or stage multi-agent
+``debates,'' and read the resulting consensus as a warrant for a decision. The epistemic value of such
+consensus rests on an assumption inherited from the wisdom of crowds---that the judgments being aggregated
+carry \emph{sufficiently independent} evidence. We show that this assumption can fail silently. In a
+pre-registered study on a reconstructed, executable-gold benchmark of \emph{underspecified} tasks, we
+manipulate a single factor---whether the decisive disambiguating information lies \emph{outside} or
+\emph{inside} the retained prompt---and measure not just accuracy but the \emph{correlation} of errors
+across agents. When the disambiguator is outside the prompt, independent agents across capability tiers and
+across model families (OpenAI, Anthropic, Google) converge on the \emph{same wrong} interpretation
+(convergent-delusion rate $\approx\!0.53$), almost never signaling that anything is missing (abstention
+$\approx\!0.02\%$); a nominal $k$-agent ensemble supplies the evidence of $\approx\!1$ independent judgment
+($\neff\!=\!1.10$). When the same information is inside the prompt, every tier---including legacy-weak
+models---resolves it (rate $=\!0.00$). A second benchmark constructed by a \emph{different} model family
+rules out a shared-prior-with-the-constructor artifact. We name this failure \emph{fake redundancy}: under a
+shared information boundary, nominally diverse agents form an \emph{interpretive monoculture}, and consensus
+stops being evidence of correctness. We derive implications for how collaborative systems should aggregate,
+display, and place trust in AI judgments---measuring \emph{dependence} rather than counting \emph{agreement}.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept><concept_id>10003120.10003130.10011762</concept_id>
+  <concept_desc>Human-centered computing~Collaborative and social computing theory, concepts and paradigms</concept_desc>
+  <concept_significance>500</concept_significance></concept>
+ <concept><concept_id>10003120.10003130.10011765</concept_id>
+  <concept_desc>Human-centered computing~Collaborative and social computing systems and tools</concept_desc>
+  <concept_significance>300</concept_significance></concept>
+ <concept><concept_id>10010147.10010178</concept_id>
+  <concept_desc>Computing methodologies~Artificial intelligence</concept_desc>
+  <concept_significance>300</concept_significance></concept>
+</ccs2012>
+\end{CCSXML}
+\ccsdesc[500]{Human-centered computing~Collaborative and social computing theory, concepts and paradigms}
+\ccsdesc[300]{Human-centered computing~Collaborative and social computing systems and tools}
+\ccsdesc[300]{Computing methodologies~Artificial intelligence}
+
+\keywords{collective intelligence, wisdom of crowds, consensus, common ground, algorithmic monoculture,
+human--AI collaboration, large language models, multi-agent systems, error correlation, automation bias,
+pre-registration}
+
+\maketitle
+
+%% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+When people must decide under uncertainty, they seek \emph{corroboration}: they consult multiple sources,
+solicit second opinions, and trust a conclusion more when independent parties agree. This practice is
+increasingly automated. Software teams triage incidents with several model ``reviewers''; analysts pool
+outputs from different vendors' assistants; emerging agentic pipelines sample a model many times and take
+the majority, or stage multi-agent debate, and surface the result to a person as ``$5/5$ agents agree.''
+In each case, \emph{agreement among AI systems is read as a signal that the answer can be trusted}.
+
+The epistemic warrant for this practice is old and specific. From the Condorcet Jury Theorem to the wisdom
+of crowds, aggregation improves reliability \emph{only when} the judgments being combined are competent and
+carry \emph{sufficiently independent} errors~\cite{condorcet,ladha1992}; social influence that erodes that
+independence produces confident convergence on error rather than accuracy~\cite{lorenz2011}. Aggregating AI
+judgments imports this warrant, but it also imports its precondition---and it is far from obvious that
+querying a model five times, or pooling five vendors, produces five \emph{independent} interpretations of
+the task.
+
+We show that it often does not, and we identify \emph{when}. Our study concerns \emph{underspecified}
+inputs: inputs from which a decisive disambiguating clause has been omitted, so more than one
+interpretation is consistent with what remains---an everyday condition when context is lost across a handoff
+between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
+how capable the models are but by \emph{where the missing information lives}. When the disambiguator lies
+\emph{outside} the retained prompt, independent agents---across capability tiers, and across three model
+families---\emph{silently} converge on the \emph{same wrong} interpretation. They do not make independent
+errors that average away; they make the \emph{same} error, in unison and with confidence, and a nominal
+$k$-agent ensemble collapses to roughly one effective independent judgment. When the same disambiguator is
+present \emph{inside} the prompt, every tier resolves it. We call the wrong-consensus failure
+\emph{convergent delusion}, and the structural condition that produces it \emph{fake redundancy}: apparent
+redundancy that supplies no independent evidence because all agents inherit the same lossy representation of
+the task.
+
+This reframes a question at the heart of CSCW. Aggregating AI advice is not merely an accuracy problem; it
+is a question about whether our collaborative infrastructures preserve the \emph{epistemic independence}
+that makes consensus meaningful. When nominally diverse agents share an information boundary, they can form
+an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture} whose agreement is an artifact of a shared
+prior rather than corroborating evidence---and, because the failure is silent, nothing in the system's
+behavior distinguishes it from genuine agreement.
+
+\paragraph{Contributions.} This paper makes four contributions.
+\begin{itemize}
+  \item \textbf{Empirical.} Pre-registered evidence that independently queried LLM agents, spanning
+  capability tiers \emph{and} three model families, silently converge on the same incorrect interpretation
+  when a decisive disambiguator is omitted from the retained prompt---and that this failure vanishes when
+  the disambiguator is present. The failure is capability-invariant and cross-family, not an artifact of a
+  single model or vendor.
+  \item \textbf{Methodological.} An \emph{executable-gold} protocol that manipulates whether the
+  disambiguator crosses the prompt boundary and measures \emph{correlated error}---not merely individual
+  accuracy---so that correctness is established independently of model agreement and no LLM judge is in the
+  loop.
+  \item \textbf{Conceptual.} \emph{Fake redundancy} as a failure mode of AI aggregation, operationalized
+  through classical dependence estimators (pairwise wrong-answer agreement, intraclass correlation, and
+  effective ensemble size), showing when a nominally $k$-agent system supplies $\approx\!1$ independent
+  judgment.
+  \item \textbf{Design.} Implications for AI-mediated collaborative decision systems: consensus displays
+  should expose interpretive and evidential \emph{dependence} rather than agent count; systems should elicit
+  competing interpretations before aggregating answers, preserve contextual provenance across handoffs, and
+  route to human review when agreement is high but contextual completeness is uncertain.
+\end{itemize}
+We report our pre-registered hypotheses honestly, including those that were not supported, and treat the
+capability/family nulls as theoretically informative: they are what makes the failure a property of the
+\emph{information boundary} rather than of any model.
+
+%% =====================================================================
+\section{Consensus, Grounding, and AI-Mediated Collective Judgment}
+\label{sec:related}
+We organize related work around the assumptions our study tests, rather than around technologies.
+
+\subsection{When does aggregation help? Independence and its erosion}
+The Condorcet Jury Theorem's optimistic conclusion---that majority accuracy approaches one as a group
+grows---depends on competence \emph{and} sufficiently independent votes; correlation among votes changes,
+and can invert, the result~\cite{condorcet,ladha1992,dietrich2013}. Ensemble learning reaches the same
+conclusion formally: ensemble error is average member error minus a diversity term, and a common-error
+floor persists as members correlate~\cite{krogh1994,tumer1996,breiman2001}. For $n$ exchangeable errors
+with pairwise correlation $\rho$, the variance of the mean is $\sigma^2(\rho + (1-\rho)/n)$: as
+$\rho\!\to\!1$, $n$ nominal contributors provide one effective independent signal. Empirically, social
+influence can reduce the diversity that crowds rely on \emph{without} improving accuracy, yielding confident
+convergence around error~\cite{lorenz2011}. \emph{Unresolved premise our study tests:} whether independently
+\emph{queried} AI agents form independent \emph{interpretations} when all inherit the same underspecified
+representation.
+
+\subsection{Grounding and information boundaries in cooperative work}
+Grounding is the process by which collaborators establish mutual understanding sufficient for present
+purposes~\cite{clark1991grounding}. We treat the retained prompt as the agents' shared information
+environment and the deleted disambiguator as a \emph{grounding-resource boundary}: information available
+in-prompt enters the interpretive process, information lost at the handoff does not, and downstream
+agreement cannot repair an upstream grounding failure. We do not claim that non-interacting agents establish
+common ground with one another; we claim that their \emph{common information environment} determines whether
+convergence is warranted. \emph{Unresolved premise:} whether corroboration across agents can substitute for
+the grounding lost at a context handoff.
+
+\subsection{Reliance on aggregated AI advice}
+Overreliance on automation is a long-standing concern~\cite{parasuraman1997,skitka1999}; explanations help
+mainly when they lower the cost of \emph{verifying} the machine, not when they merely assert
+confidence~\cite{vasconcelos2023explanations}. A ``$5/5$ agents agree'' display is precisely the kind of cue
+that can increase reliance while adding little independent evidence. \emph{Unresolved premise:} whether
+consensus displays convey evidence or only the \emph{appearance} of it.
+
+\subsection{Algorithmic monoculture and shared priors}
+When many decision-makers rely on the same model or data, individually accurate systems can reduce
+system-level welfare through correlated outcomes~\cite{kleinberg2021monoculture}. We identify a related
+\emph{within-ensemble} phenomenon: even nominally heterogeneous models can form an interpretive monoculture
+when decisive context is uniformly absent, and recent evidence shows LLM errors are correlated across
+providers and architectures, especially among stronger models~\cite{kim2025correlated}, with sycophancy and
+shared preference training as plausible sources~\cite{perez2022,sharma2024}.
+
+\subsection{LLM ensembles and multi-agent systems}
+Self-consistency samples multiple chains and votes~\cite{wang2023selfconsistency}; multi-agent debate can
+help~\cite{du2023debate} but also converge to shared misconceptions~\cite{estornell2024,liang2024}, conform
+to majorities~\cite{choi2025conformity}, and degrade under peer pressure~\cite{wynn2025talk}. Underspecified
+prompts are common and destabilizing~\cite{yang2025underspecification}. Our contribution is not to
+re-demonstrate that consensus can be wrong; it is to \emph{isolate a controlled axis}---the location of the
+disambiguator---that switches the failure on and off while holding the task, answer space, and verifier
+fixed, and to connect it to the CSCW question of when aggregated AI judgment can be trusted.
+
+%% =====================================================================
+\section{Research Questions and Hypotheses}
+\label{sec:rqs}
+We pre-registered the following (\S\ref{sec:study}; deviations in Appendix~\ref{app:deviations}).
+\textbf{RQ1 (regime):} does convergent delusion depend on the \emph{location} of the disambiguator?
+We predict high wrong-consensus when it is external (\textbf{H1\_external}) and near-zero when it is
+in-prompt (\textbf{H2\_derivable}). \textbf{RQ2 (redundancy):} does adding agents add independent evidence?
+We test aggregation vs.\ a single agent (\textbf{H1a}) and quantify effective ensemble size.
+\textbf{RQ3 (capability/family):} is the failure explained by weak models or a single vendor? We compare
+capability tiers and model families. \textbf{RQ4 (dose):} does wrong-consensus increase with the number of
+omitted clauses $k$ (\textbf{H1b})? We include a fully specified $k{=}0$ control (\textbf{R1a}), an
+interpretation-uniform null (\textbf{R1b}), and a cross-family \emph{construction} control (\textbf{R2}).
+
+%% =====================================================================
+\section{Executable-Gold Benchmark}
+\label{sec:benchmark}
+\subsection{Construct and design}
+A task is \emph{underspecified} when a decisive clause is removed so that multiple interpretations remain
+consistent with the retained input. Each task fixes a target interpretation $I_0$ and enumerated
+alternatives (foils) $I_1,\dots$; an answer is labeled deterministically by \emph{which} interpretation it
+realizes---via an executable \texttt{check()}---or \iperp{} if it is off-axis or unparseable. Critically,
+correctness and the interpretation label are established \emph{independently of model agreement}: no LLM
+judges any output.
+
+We reconstruct 54 task variants across three domains (code specification, data analysis, policy
+question-answering). Items are \emph{reversed} so the natural default an unaware solver would produce is a
+\emph{foil}, and each foil differs from $I_0$ on exactly one convention axis (e.g., calendar vs.\ fiscal
+quarter; floor vs.\ truncating integer division). The set contains 40 \textbf{H1\_external} items (the
+disambiguator requires outside knowledge) and 14 \textbf{H2\_derivable} items (the disambiguator is present
+in the retained prompt), each at ambiguity level $k\in\{0,1,2,3\}$, where $k{=}0$ is fully specified.
+\todo{Table: domains $\times$ axes $\times$ example; unique-$I_0$ fairness; construction validation.}
+
+\subsection{Construct validity}
+An external disambiguator must be realistic omitted context, not adversarial trivia, and $I_0$ must be
+uniquely established by an out-of-prompt convention. We validated each item with an empirical default check
+(capable models, unaware, produce the foil) and, for the regime tag, that in-prompt disambiguators are
+resolved. \todo{report the default-check summary.}
+
+%% =====================================================================
+\section{Pre-registered Study}
+\label{sec:study}
+\subsection{Models, tiers, and families}
+We evaluate a frontier roster spanning three families---OpenAI, Anthropic, Google---grouped into model
+classes: a homogeneous single-model baseline, a heterogeneous cross-family pool, a reasoning tier, and a
+legacy-weak tier. \emph{Independence protocol:} agents are queried independently (no inter-agent messages in
+the primary conditions) so that any error correlation reflects shared priors and shared inputs, not
+conversational influence.
+
+\subsection{Conditions and estimands}
+Primary aggregation conditions: single-agent baseline; self-consistency ($k{=}5$); homogeneous
+majority/debate ($N{=}5$); and heterogeneous cross-family debate. A scheduled secondary sensitivity pass adds
+self-consistency $k{=}10$ \todo{(running; \S\ref{sec:results})} and a verifier condition. Our primary
+outcome is \emph{convergent delusion} \cd: the share of agents on the single modal \emph{wrong enumerated}
+interpretation (\iperp{} stays in the denominator but cannot be the convergent label), with two
+pre-registered sensitivity variants (\iperp{}-eligible; \iperp{}-dropped). We additionally report dependence
+estimators over each cell's agent labels---pairwise wrong-answer agreement, Fleiss' $\kappa$, the intraclass
+correlation of the wrong-answer indicator, and the effective ensemble size $\neff=n/(1+(n-1)\bar\rho)$---and
+an independence-calibrated counterfactual that resamples each agent from its own marginal accuracy. A
+rule-based (non-LLM) detector flags whether an agent abstained or requested clarification. Each cell is
+replicated over three collision-free seeds.
+
+\subsection{Analysis and open science}
+Hypotheses, the primary metric, the regime criterion, decision rules, and robustness nulls were
+git-committed and frozen before the confirmatory run; every subsequent change is a timestamped, signed
+amendment reported in Appendix~\ref{app:deviations}. Provenance was separated by construction: analysis
+artifacts were implemented and \emph{independently, adversarially audited by different model families}, and
+all labels derive from deterministic executable gold. \todo{cite prereg + amendments + release plan.}
+
+%% =====================================================================
+\section{Results}
+\label{sec:results}
+The confirmatory run comprised 5{,}832 aggregation jobs (16{,}461 agent executions) over 54 items, three
+seeds, and the primary conditions. We report answer-first findings.
+
+\subsection{F1: Omitting external context produces accurate-looking but systematically wrong consensus}
+On \textbf{H1\_external}, \cd{} $=0.53$ (0.60 among parseable answers): a majority of independent agents land
+on the \emph{same wrong} interpretation. On \textbf{H2\_derivable}, \cd{} $=0.00$: with the disambiguator in
+the prompt, no parseable agent converges on a wrong enumerated interpretation. The regime gap is
+$\Delta\cd=0.53$, consistent across all three metric variants (Table~\ref{tab:regime}). A within-design
+manipulation check makes this decisive: on fully specified $k{=}0$ items \cd{} $=0.00$, and on $k\ge1$ items
+\cd{} $=0.82$ (difference 95\% CI $[0.73,0.90]$)---the same pipeline, labeler, and metric yield zero when
+the prompt is complete and high when a single clause is deleted (\textbf{R1a}), ruling out a labeler or
+foil-count artifact.
+
+\begin{table}[t]
+\centering
+\caption{Convergent delusion by regime and model class (primary conditions). \cd{} is capability-invariant
+on H1\_external and zero on H2\_derivable.}
+\label{tab:regime}
+\begin{tabular}{llccc}
+\toprule
+Regime & Model class & \cd{} (primary) & \cd{} (parseable) & \iperp{} rate \\
+\midrule
+H1\_external & homogeneous   & 0.536 & 0.562 & 0.112 \\
+H1\_external & heterogeneous & 0.544 & 0.558 & 0.106 \\
+H1\_external & reasoning     & 0.539 & 0.625 & 0.107 \\
+H1\_external & weak          & 0.517 & 0.613 & 0.129 \\
+\midrule
+H2\_derivable & homogeneous  & 0.000 & 0.000 & 0.152 \\
+H2\_derivable & heterogeneous& 0.000 & 0.000 & 0.048 \\
+H2\_derivable & reasoning    & 0.000 & 0.000 & 0.016 \\
+H2\_derivable & weak         & 0.000 & 0.000 & 0.067 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{F2: Capability and model-family diversity do not restore interpretive independence}
+The H1\_external failure is essentially flat across model classes (Table~\ref{tab:regime}): frontier
+reasoners are trapped as reliably as legacy-weak models, and a heterogeneous cross-family pool converges as
+strongly as a single model sampled repeatedly (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
+$[-0.078,+0.058]$; not the ordering we predicted). Vendor and capability diversity did not translate into
+\emph{viewpoint} diversity: the shared prior spans families.
+
+\subsection{F3: Adding agents adds little effective redundancy (fake redundancy)}
+On H1\_external, pairwise wrong-answer agreement is $0.98$, Fleiss' $\kappa=0.97$, and the intraclass
+correlation of the wrong-answer indicator is $0.89$; the effective ensemble size is $\neff=1.10$. An
+independence-calibrated counterfactual yields observed$-$independent $\cd=+0.245$ (95\% CI $[0.234,0.257]$):
+observed convergence significantly exceeds what genuinely independent agents at the same accuracy would
+produce. Consistently, the pre-registered aggregation-vs-single contrast (\textbf{H1a}) is inconclusive
+(agreement neither amplifies nor removes \cd{}), as expected when the ensemble has already collapsed at
+$k{=}5$. \emph{A nominal $k$-agent system here supplies about one independent judgment.} \todo{SC $k{=}10$
+sensitivity (running): confirm $\neff\!\to\!1$ persists at higher $k$.}
+
+\subsection{F4: The failure is silent; retaining the disambiguator eliminates it}
+On H1\_external the abstention / clarification-request rate is $\approx0.02\%$ while \cd{} $=0.53$: agents
+are confidently wrong and almost never signal missing information, so consensus carries no internal warning.
+Wrong-consensus also rises with the number of omitted clauses $k$ (\textbf{H1b} supported; $k$-coefficient
+$0.31$, 95\% CI $[0.18,0.45]$). The constructive boundary condition is that \emph{presence} of the
+disambiguator (H2) removes the failure entirely.
+\todo{finalize abstention once the rule-based detector's human-validation sample is checked.}
+
+\subsection{F5: The convergence is not an artifact of the benchmark's constructor}
+A skeptic might argue that convergence reflects a prior shared with whoever \emph{built} the traps. We
+reconstructed a held-out subset of H1 items with a \emph{different} constructor family (Anthropic) and
+re-ran it: models from the \emph{other} families (OpenAI, Google) converge on these Anthropic-constructed
+foils at single-agent \cd{} $=0.72$ (0.87 on construct-valid items). The convergence persists under
+cross-family construction (\textbf{R2}); the pre-registered R2 aggregation-amplification metric was, like
+R1b below, statistically inconclusive on the primary metric, so we rest the confound rebuttal on the direct
+cross-family single-agent persistence and report the metric honestly.
+
+\subsection{Robustness and honestly reported nulls}
+The within-design $k{=}0$ control (R1a) is strongly supported (above). An interpretation-uniform null (R1b)
+is inconclusive on the primary metric---binary items give a high random baseline---but supported among
+parseable answers; the excess-convergence claim rests on R1a and the independence-calibrated counterfactual,
+which are both decisive. The H2 reasoner$\times$capability \emph{interaction} was not estimable (the crossed
+random-effects model did not converge on the full interaction) and was, as anticipated, an expected null;
+the well-powered regime \emph{main} effect carries the claim. \todo{note the two items with incomplete foil
+sets, handled by the drop-\iperp{} sensitivity.}
+
+%% =====================================================================
+\section{Discussion}
+\label{sec:discussion}
+\subsection{Consensus without epistemic independence}
+Our results identify a boundary condition for applying collective-intelligence assumptions to AI ensembles.
+Aggregation earns its epistemic warrant from independence; under a shared information boundary, that warrant
+is absent even when the aggregated systems are nominally diverse. The failure is not that models are weak
+(reasoners fail identically), nor that they are homogeneous (cross-family pools fail identically), but that
+they share the \emph{same lossy representation of the task}. Consensus then measures the concentration of a
+shared prior, not the corroboration of independent evidence.
+
+\subsection{Shared-input failure, not groupthink}
+The outcome resembles groupthink---unanimous, confident error~\cite{janis1972}---but the mechanism differs.
+Classical groupthink arises from cohesion, conformity pressure, and suppressed dissent among interacting
+members; our agents do not communicate in the primary conditions, yet still converge. This points to a
+distinct pathway---a \emph{shared-input / representational monoculture}---in which unanimity requires no
+social influence at all. Naming this precisely matters: interventions for groupthink (devil's advocacy,
+structured dissent \emph{among} members) will not address a failure that occurs before any interaction.
+
+\subsection{Information loss as a sociotechnical failure}
+Because the decisive information is lost at a handoff (a grounding-resource boundary), downstream
+aggregation cannot recover it. The problem is therefore located in the \emph{pipeline}, not the model: it is
+a property of how collaborative systems preserve (or discard) context and provenance across people, tools,
+and agents. The silence of the failure compounds this: without an internal warning, more agreement reads as
+more confidence.
+
+%% =====================================================================
+\section{Implications for CSCW and Collaborative AI Systems}
+\label{sec:implications}
+We separate recommendations by evidential strength. Directly supported by our findings: (1)~\emph{Measure
+dependence, not agreement.} Systems that aggregate AI judgments should estimate error dependence during
+validation and surface effective ensemble size, not agent count; a ``$5/5$ agree'' display can be
+\emph{replaced} by a dependence-aware uncertainty display. (2)~\emph{Aggregate interpretations before
+answers.} Because the failure is interpretive, eliciting each agent's task \emph{interpretation} before
+soliciting an answer can expose latent forks that a final vote hides. (3)~\emph{Route on contextual
+completeness.} Trigger human review when consensus is high \emph{but} contextual completeness is
+uncertain---high agreement is least informative exactly when the input is underspecified. Supported by our
+findings together with prior CSCW work on reliance~\cite{vasconcelos2023explanations}: (4)~\emph{Diversify
+information, not just vendors.} Viewpoint diversity requires diverse \emph{inputs}, retrieval paths, and
+representations, not merely different model providers. (5)~\emph{Preserve provenance across handoffs}, so
+that the context needed to disambiguate is not silently dropped. (6)~\emph{Elicit clarification.} Since
+agents rarely ask, systems---or their designers---must build the clarification-seeking that the models omit.
+(7)~\emph{Maintain dissent channels} rather than forcing early convergence. (8)~\emph{Audit for interpretive
+monoculture} across a fleet, not only per-model accuracy.
+
+%% =====================================================================
+\section{Limitations, Ethics, and Open Science}
+\label{sec:limitations}
+\paragraph{Limitations.} Our tasks are single-episode and non-interactive; real collaborative pipelines
+involve iteration and human participation, which we do not test. Claims about human trust, teams, and
+high-stakes domains are \emph{implications}, not tested deployments. Construct validity rests on the
+reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
+pre-registered drop-\iperp{} sensitivity. The abstention detector is rule-based and pending human
+validation. Generalization beyond the three domains and the tested roster is future work.
+\paragraph{Ethics.} \todo{Benchmark construction; API/provider terms; compute/environmental cost (runs were
+\$0 on a local proxy); release risks; no human subjects.} \paragraph{Open science.} We pre-registered the
+study and will release the benchmark, executable evaluators, prompts, model/version records, analysis code,
+and the amendment ledger. \todo{link on acceptance.}
+
+%% =====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+When collaborative systems aggregate AI judgments, they inherit an assumption that is easy to state and easy
+to violate: that agreement reflects independent evidence. Under underspecification, that assumption fails
+silently---nominally diverse agents form an interpretive monoculture, a $k$-agent ensemble collapses to one
+effective voice, and confident consensus becomes an artifact of a shared prior rather than a warrant for a
+decision. The fix is not more agents but a different question. For CSCW, designing trustworthy AI-mediated
+collective judgment means measuring \emph{independence}, preserving \emph{context}, and treating consensus
+as a hypothesis to be checked---not as proof.
+
+\begin{acks}
+\todo{Anonymized for review.}
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\appendix
+\section{Deviations from Pre-registration}
+\label{app:deviations}
+\todo{Import the deviations ledger (paper/writing/2026-07-18-deviations-from-preregistration.md): frozen
+prereg + amendments A01--A11, and the honestly reported H1a / R1b / heterogeneity / H2-interaction outcomes.}
+
+\end{document}
