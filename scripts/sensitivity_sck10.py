@@ -87,18 +87,26 @@ def _live_ok() -> bool:
 def _proxy_reachable() -> bool:
     """Best-effort: return True if copilot_proxy is accepting connections.
 
-    Uses a 2-second timeout; any network error → False (offline / CI safe).
+    Uses a 2-second timeout.  An HTTP error response (4xx/5xx) still means
+    the server is listening, so HTTPError → True.  Only genuine connection
+    failures (URLError, timeout, socket error) → False (offline / CI safe).
     """
+    import socket
+    import urllib.error
     import urllib.request
     try:
         from common.llm import COPILOT_PROXY_BASE_URL
-        url = COPILOT_PROXY_BASE_URL.rstrip("/") + "/v1/models"
+        # COPILOT_PROXY_BASE_URL already ends in /v1; append /models only.
+        url = COPILOT_PROXY_BASE_URL.rstrip("/") + "/models"
     except (ImportError, AttributeError):
         url = "http://127.0.0.1:8313/v1/models"
     try:
         urllib.request.urlopen(url, timeout=2)  # noqa: S310
         return True
-    except Exception:
+    except urllib.error.HTTPError:
+        # Server replied with an HTTP error (404, 401, etc.) — it IS reachable.
+        return True
+    except (urllib.error.URLError, OSError, socket.timeout):
         return False
 
 
