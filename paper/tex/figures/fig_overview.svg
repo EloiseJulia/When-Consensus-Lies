@@ -1,297 +1,271 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="1200"
-     height="560"
-     viewBox="0 0 1200 560"
-     font-family="Inter, 'Helvetica Neue', Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
   <title>When Consensus Lies overview</title>
   <desc>An underspecified prompt is sent to five independent agents from three abstract model families. A fork compares an external deleted disambiguator, which produces silent convergent delusion and fake redundancy, with a derivable retained disambiguator, which produces a correct answer with genuine independent agreement.</desc>
 
-  <g id="title">
-    <text x="600" y="27" text-anchor="middle" font-size="20" font-weight="600" fill="#1A1A1A">Consensus ≠ correctness: the same agents, one deleted clause, two fates.</text>
-  </g>
+  <!-- [1] title -->
+  <text x="600" y="27" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Consensus ≠ correctness: the same agents, one deleted clause, two fates.</text>
 
-  <g id="prompt-box">
-    <rect x="40" y="210" width="260" height="140" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
-    <rect x="55" y="222" width="154" height="25" rx="4" fill="#E2EEF6" stroke="#C9CCD1" stroke-width="1"/>
-    <text x="67" y="239" font-size="13" font-weight="600" fill="#1A1A1A">Underspecified prompt</text>
-    <line x1="60" y1="266" x2="267" y2="266" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="60" y1="279" x2="244" y2="279" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="300" y1="280" x2="326" y2="280" stroke="#555555" stroke-width="2"/>
-    <polygon points="326,275 335,280 326,285" fill="#555555"/>
-  </g>
+  <!-- [2] prompt-box -->
+  <rect x="40" y="210" width="260" height="140" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <rect x="55" y="222" width="154" height="25" rx="4" fill="#E2EEF6" stroke="#C9CCD1" stroke-width="1"/>
+  <text x="67" y="239" font-size="13" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Underspecified prompt</text>
+  <line x1="60" y1="266" x2="267" y2="266" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="60" y1="279" x2="244" y2="279" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="300" y1="280" x2="326" y2="280" stroke="#555555" stroke-width="2"/>
+  <polygon points="326,275 335,280 326,285" fill="#555555"/>
 
-  <g id="deleted-clause">
-    <text x="60" y="307" font-size="11" fill="#555555">use the FISCAL calendar</text>
-    <line x1="58" y1="303" x2="197" y2="303" stroke="#D55E00" stroke-width="2"/>
-    <text x="60" y="331" font-size="11" font-weight="600" fill="#D55E00">✂ disambiguator deleted</text>
-  </g>
+  <!-- [3] deleted-clause -->
+  <text x="60" y="307" font-size="11" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">use the FISCAL calendar</text>
+  <line x1="58" y1="303" x2="197" y2="303" stroke="#D55E00" stroke-width="2"/>
+  <text x="60" y="331" font-size="11" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">✂ disambiguator deleted</text>
 
-  <g id="location-knob">
-    <rect x="60" y="360" width="230" height="40" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5" stroke-dasharray="4 3"/>
-    <text x="175" y="374" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1A1A1A">Where does the missing clause live?</text>
-    <circle cx="79" cy="389" r="5" fill="#D55E00"/>
-    <text x="89" y="393" font-size="10.5" fill="#555555">outside → H1</text>
-    <circle cx="187" cy="389" r="5" fill="#009E9E"/>
-    <text x="197" y="393" font-size="10.5" fill="#555555">inside → H2</text>
-  </g>
+  <!-- [4] location-knob -->
+  <rect x="60" y="360" width="230" height="40" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="175" y="374" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Where does the missing clause live?</text>
+  <circle cx="79" cy="389" r="5" fill="#D55E00"/>
+  <text x="89" y="393" font-size="10.5" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">outside → H1</text>
+  <circle cx="187" cy="389" r="5" fill="#009E9E"/>
+  <text x="197" y="393" font-size="10.5" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">inside → H2</text>
 
-  <g id="silence-cue">
-    <circle cx="346" cy="102" r="12" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
-    <text x="346" y="107" text-anchor="middle" font-size="15" font-weight="600" fill="#555555">?</text>
-    <line x1="337" y1="93" x2="355" y2="111" stroke="#555555" stroke-width="2"/>
-    <text x="365" y="98" font-size="10.5" font-weight="600" fill="#555555">No clarification requested</text>
-    <rect x="443" y="101" width="58" height="15" rx="4" fill="#E2EEF6" stroke="#C9CCD1" stroke-width="0.8"/>
-    <text x="365" y="113" font-size="10.5" fill="#555555">(abstention ≈ 0.03%)</text>
-  </g>
+  <!-- [5] agents-stack -->
+  <rect x="366" y="130" width="164" height="300" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <polyline points="359,139 352,139 352,421 359,421" fill="none" stroke="#555555" stroke-width="1.5"/>
+  <text x="430" y="448" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">k independent agents · 3 model families</text>
+  <text x="430" y="462" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">× capability tiers</text>
 
-  <g id="agents-stack">
-    <rect x="366" y="130" width="164" height="300" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
-    <path d="M359 139 H352 V421 H359" fill="none" stroke="#555555" stroke-width="1.5"/>
-    <text x="341" y="280" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1A1A1A" transform="rotate(-90 341 280)">k independent agents · 3 model families × capability tiers</text>
+  <rect x="378" y="140" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect x="378" y="140" width="8" height="46" fill="#555555"/>
+  <line x1="398" y1="148" x2="398" y2="153" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="398" cy="147" r="1.8" fill="#555555"/>
+  <rect x="388" y="153" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="394" cy="161" r="1.5" fill="#555555"/>
+  <circle cx="402" cy="161" r="1.5" fill="#555555"/>
+  <line x1="393" y1="174" x2="403" y2="174" stroke="#555555" stroke-width="1.2"/>
+  <line x1="430" y1="157" x2="456" y2="157" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="430" y1="166" x2="468" y2="166" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="485,150 494,155 494,165 485,170 476,165 476,155" fill="none" stroke="#555555" stroke-width="1.8"/>
 
-    <rect x="378" y="140" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
-    <path d="M386 140 H378 V186 H386" fill="#555555"/>
-    <line x1="398" y1="148" x2="398" y2="153" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="398" cy="147" r="1.8" fill="#555555"/>
-    <rect x="388" y="153" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="394" cy="161" r="1.5" fill="#555555"/>
-    <circle cx="402" cy="161" r="1.5" fill="#555555"/>
-    <line x1="393" y1="174" x2="403" y2="174" stroke="#555555" stroke-width="1.2"/>
-    <line x1="430" y1="157" x2="456" y2="157" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="430" y1="166" x2="468" y2="166" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <polygon points="485,150 494,155 494,165 485,170 476,165 476,155" fill="none" stroke="#555555" stroke-width="1.8"/>
+  <rect x="378" y="196" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect x="378" y="196" width="8" height="46" fill="#D55E00"/>
+  <line x1="398" y1="204" x2="398" y2="209" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="398" cy="203" r="1.8" fill="#555555"/>
+  <rect x="388" y="209" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="394" cy="217" r="1.5" fill="#555555"/>
+  <circle cx="402" cy="217" r="1.5" fill="#555555"/>
+  <line x1="393" y1="230" x2="403" y2="230" stroke="#555555" stroke-width="1.2"/>
+  <line x1="430" y1="213" x2="462" y2="213" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="430" y1="222" x2="470" y2="222" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="475" y1="219" x2="495" y2="219" stroke="#D55E00" stroke-width="1.8"/>
+  <line x1="485" y1="209" x2="485" y2="229" stroke="#D55E00" stroke-width="1.8"/>
+  <line x1="478" y1="212" x2="492" y2="226" stroke="#D55E00" stroke-width="1.8"/>
+  <line x1="478" y1="226" x2="492" y2="212" stroke="#D55E00" stroke-width="1.8"/>
 
-    <rect x="378" y="196" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
-    <path d="M386 196 H378 V242 H386" fill="#D55E00"/>
-    <line x1="398" y1="204" x2="398" y2="209" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="398" cy="203" r="1.8" fill="#555555"/>
-    <rect x="388" y="209" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="394" cy="217" r="1.5" fill="#555555"/>
-    <circle cx="402" cy="217" r="1.5" fill="#555555"/>
-    <line x1="393" y1="230" x2="403" y2="230" stroke="#555555" stroke-width="1.2"/>
-    <line x1="430" y1="213" x2="462" y2="213" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="430" y1="222" x2="470" y2="222" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <g transform="translate(485 219)" stroke="#D55E00" stroke-width="1.8">
-      <line x1="-10" y1="0" x2="10" y2="0"/>
-      <line x1="0" y1="-10" x2="0" y2="10"/>
-      <line x1="-7" y1="-7" x2="7" y2="7"/>
-      <line x1="-7" y1="7" x2="7" y2="-7"/>
-    </g>
+  <rect x="378" y="252" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect x="378" y="252" width="8" height="46" fill="#0072B2"/>
+  <line x1="398" y1="260" x2="398" y2="265" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="398" cy="259" r="1.8" fill="#555555"/>
+  <rect x="388" y="265" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="394" cy="273" r="1.5" fill="#555555"/>
+  <circle cx="402" cy="273" r="1.5" fill="#555555"/>
+  <line x1="393" y1="286" x2="403" y2="286" stroke="#555555" stroke-width="1.2"/>
+  <line x1="430" y1="269" x2="450" y2="269" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="430" y1="278" x2="465" y2="278" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="480" cy="270" r="3" fill="#0072B2"/>
+  <circle cx="490" cy="270" r="3" fill="#0072B2"/>
+  <circle cx="480" cy="280" r="3" fill="#0072B2"/>
+  <circle cx="490" cy="280" r="3" fill="#0072B2"/>
 
-    <rect x="378" y="252" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
-    <path d="M386 252 H378 V298 H386" fill="#0072B2"/>
-    <line x1="398" y1="260" x2="398" y2="265" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="398" cy="259" r="1.8" fill="#555555"/>
-    <rect x="388" y="265" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="394" cy="273" r="1.5" fill="#555555"/>
-    <circle cx="402" cy="273" r="1.5" fill="#555555"/>
-    <line x1="393" y1="286" x2="403" y2="286" stroke="#555555" stroke-width="1.2"/>
-    <line x1="430" y1="269" x2="450" y2="269" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="430" y1="278" x2="465" y2="278" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <circle cx="480" cy="270" r="3" fill="#0072B2"/>
-    <circle cx="490" cy="270" r="3" fill="#0072B2"/>
-    <circle cx="480" cy="280" r="3" fill="#0072B2"/>
-    <circle cx="490" cy="280" r="3" fill="#0072B2"/>
+  <rect x="378" y="308" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect x="378" y="308" width="8" height="46" fill="#555555"/>
+  <line x1="398" y1="316" x2="398" y2="321" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="398" cy="315" r="1.8" fill="#555555"/>
+  <rect x="388" y="321" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="394" cy="329" r="1.5" fill="#555555"/>
+  <circle cx="402" cy="329" r="1.5" fill="#555555"/>
+  <line x1="393" y1="342" x2="403" y2="342" stroke="#555555" stroke-width="1.2"/>
+  <line x1="430" y1="325" x2="466" y2="325" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="430" y1="334" x2="455" y2="334" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="485,318 494,323 494,333 485,338 476,333 476,323" fill="none" stroke="#555555" stroke-width="1.8"/>
 
-    <rect x="378" y="308" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
-    <path d="M386 308 H378 V354 H386" fill="#555555"/>
-    <line x1="398" y1="316" x2="398" y2="321" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="398" cy="315" r="1.8" fill="#555555"/>
-    <rect x="388" y="321" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="394" cy="329" r="1.5" fill="#555555"/>
-    <circle cx="402" cy="329" r="1.5" fill="#555555"/>
-    <line x1="393" y1="342" x2="403" y2="342" stroke="#555555" stroke-width="1.2"/>
-    <line x1="430" y1="325" x2="466" y2="325" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="430" y1="334" x2="455" y2="334" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <polygon points="485,318 494,323 494,333 485,338 476,333 476,323" fill="none" stroke="#555555" stroke-width="1.8"/>
+  <rect x="378" y="364" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect x="378" y="364" width="8" height="46" fill="#D55E00"/>
+  <line x1="398" y1="372" x2="398" y2="377" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="398" cy="371" r="1.8" fill="#555555"/>
+  <rect x="388" y="377" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
+  <circle cx="394" cy="385" r="1.5" fill="#555555"/>
+  <circle cx="402" cy="385" r="1.5" fill="#555555"/>
+  <line x1="393" y1="398" x2="403" y2="398" stroke="#555555" stroke-width="1.2"/>
+  <line x1="430" y1="381" x2="452" y2="381" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="430" y1="390" x2="468" y2="390" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="475" y1="387" x2="495" y2="387" stroke="#D55E00" stroke-width="1.8"/>
+  <line x1="485" y1="377" x2="485" y2="397" stroke="#D55E00" stroke-width="1.8"/>
+  <line x1="478" y1="380" x2="492" y2="394" stroke="#D55E00" stroke-width="1.8"/>
+  <line x1="478" y1="394" x2="492" y2="380" stroke="#D55E00" stroke-width="1.8"/>
 
-    <rect x="378" y="364" width="140" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
-    <path d="M386 364 H378 V410 H386" fill="#D55E00"/>
-    <line x1="398" y1="372" x2="398" y2="377" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="398" cy="371" r="1.8" fill="#555555"/>
-    <rect x="388" y="377" width="20" height="17" rx="4" fill="#FFFFFF" stroke="#555555" stroke-width="1.2"/>
-    <circle cx="394" cy="385" r="1.5" fill="#555555"/>
-    <circle cx="402" cy="385" r="1.5" fill="#555555"/>
-    <line x1="393" y1="398" x2="403" y2="398" stroke="#555555" stroke-width="1.2"/>
-    <line x1="430" y1="381" x2="452" y2="381" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <line x1="430" y1="390" x2="468" y2="390" stroke="#C9CCD1" stroke-width="2" stroke-linecap="round"/>
-    <g transform="translate(485 387)" stroke="#D55E00" stroke-width="1.8">
-      <line x1="-10" y1="0" x2="10" y2="0"/>
-      <line x1="0" y1="-10" x2="0" y2="10"/>
-      <line x1="-7" y1="-7" x2="7" y2="7"/>
-      <line x1="-7" y1="7" x2="7" y2="-7"/>
-    </g>
+  <line x1="518" y1="163" x2="542" y2="266" stroke="#C9CCD1" stroke-width="1.5"/>
+  <line x1="518" y1="219" x2="542" y2="273" stroke="#C9CCD1" stroke-width="1.5"/>
+  <line x1="518" y1="275" x2="542" y2="280" stroke="#C9CCD1" stroke-width="1.5"/>
+  <line x1="518" y1="331" x2="542" y2="287" stroke="#C9CCD1" stroke-width="1.5"/>
+  <line x1="518" y1="387" x2="542" y2="294" stroke="#C9CCD1" stroke-width="1.5"/>
 
-    <line x1="518" y1="163" x2="542" y2="266" stroke="#C9CCD1" stroke-width="1.5"/>
-    <line x1="518" y1="219" x2="542" y2="273" stroke="#C9CCD1" stroke-width="1.5"/>
-    <line x1="518" y1="275" x2="542" y2="280" stroke="#C9CCD1" stroke-width="1.5"/>
-    <line x1="518" y1="331" x2="542" y2="287" stroke="#C9CCD1" stroke-width="1.5"/>
-    <line x1="518" y1="387" x2="542" y2="294" stroke="#C9CCD1" stroke-width="1.5"/>
-  </g>
+  <!-- [6] silence-cue -->
+  <circle cx="346" cy="102" r="12" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <text x="346" y="107" text-anchor="middle" font-size="15" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">?</text>
+  <line x1="337" y1="93" x2="355" y2="111" stroke="#555555" stroke-width="2"/>
+  <text x="365" y="98" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">No clarification requested</text>
+  <rect x="443" y="101" width="58" height="15" rx="4" fill="#E2EEF6" stroke="#C9CCD1" stroke-width="0.8"/>
+  <text x="365" y="113" font-size="10.5" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">(abstention ≈ 0.03%)</text>
 
-  <g id="fork-node">
-    <polygon points="560,255 580,280 560,305 540,280" fill="#FFFFFF" stroke="#555555" stroke-width="1.5"/>
-    <text x="560" y="276" text-anchor="middle" font-size="7.5" font-weight="600" fill="#1A1A1A">Same prompt ·</text>
-    <text x="560" y="287" text-anchor="middle" font-size="7.5" font-weight="600" fill="#1A1A1A">same agents</text>
-  </g>
+  <!-- [7] fork-node -->
+  <polygon points="560,255 580,280 560,305 540,280" fill="#FFFFFF" stroke="#555555" stroke-width="1.5"/>
+  <text x="560" y="276" text-anchor="middle" font-size="7.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Same prompt ·</text>
+  <text x="560" y="287" text-anchor="middle" font-size="7.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">same agents</text>
 
-  <g id="lane-H1">
-    <g id="lane-H1-bg">
-      <rect x="580" y="40" width="580" height="230" rx="10" fill="#FBEAE1" stroke="#D55E00" stroke-opacity="0.4" stroke-width="1"/>
-      <text x="598" y="68" font-size="17" font-weight="700" fill="#D55E00">H1_external — disambiguator OUTSIDE the retained prompt</text>
-      <line x1="598" y1="82" x2="1142" y2="82" stroke="#D55E00" stroke-opacity="0.25" stroke-width="1"/>
-    </g>
+  <!-- [8] lane-H1 background -->
+  <rect x="580" y="40" width="580" height="230" rx="10" fill="#FBEAE1" stroke="#D55E00" stroke-opacity="0.4" stroke-width="1"/>
+  <text x="598" y="68" font-size="17" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">H1_external — disambiguator OUTSIDE the retained prompt</text>
+  <line x1="598" y1="82" x2="1142" y2="82" stroke="#D55E00" stroke-opacity="0.25" stroke-width="1"/>
 
-    <g id="H1-collapse-arrow">
-      <path d="M578 280 C586 250,584 160,592 125" fill="none" stroke="#D55E00" stroke-opacity="0.45" stroke-width="1.5"/>
-      <path d="M578 280 C586 250,586 175,592 140" fill="none" stroke="#D55E00" stroke-opacity="0.55" stroke-width="1.5"/>
-      <path d="M578 280 C587 245,588 190,592 155" fill="none" stroke="#D55E00" stroke-opacity="0.65" stroke-width="1.5"/>
-      <path d="M578 280 C588 245,589 200,592 170" fill="none" stroke="#D55E00" stroke-opacity="0.55" stroke-width="1.5"/>
-      <path d="M578 280 C589 245,590 215,592 185" fill="none" stroke="#D55E00" stroke-opacity="0.45" stroke-width="1.5"/>
-      <circle cx="592" cy="125" r="3" fill="#D55E00"/>
-      <circle cx="592" cy="140" r="3" fill="#D55E00"/>
-      <circle cx="592" cy="155" r="3" fill="#D55E00"/>
-      <circle cx="592" cy="170" r="3" fill="#D55E00"/>
-      <circle cx="592" cy="185" r="3" fill="#D55E00"/>
-      <line x1="595" y1="125" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <line x1="595" y1="140" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <line x1="595" y1="155" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <line x1="595" y1="170" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <line x1="595" y1="185" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <line x1="620" y1="155" x2="664" y2="155" stroke="#D55E00" stroke-width="12" stroke-linecap="round"/>
-      <polygon points="660,143 680,155 660,167" fill="#D55E00"/>
-      <rect x="636" y="101" width="48" height="20" rx="4" fill="#FFFFFF" stroke="#D55E00" stroke-width="1"/>
-      <text x="660" y="115" text-anchor="middle" font-size="12" font-weight="600" fill="#D55E00">ρ→1</text>
-      <line x1="680" y1="155" x2="754" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <polygon points="754,150 763,155 754,160" fill="#D55E00"/>
-    </g>
+  <!-- [9] lane-H2 background -->
+  <rect x="580" y="290" width="580" height="230" rx="10" fill="#E2EEF6" stroke="#0072B2" stroke-opacity="0.4" stroke-width="1"/>
+  <text x="598" y="318" font-size="17" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">H2_derivable — disambiguator INSIDE the retained prompt</text>
+  <line x1="598" y1="332" x2="1142" y2="332" stroke="#0072B2" stroke-opacity="0.25" stroke-width="1"/>
 
-    <g id="H1-consensus-badge">
-      <path d="M800 116 L807 123 L816 120 L821 129 L831 130 L830 140 L838 146 L833 155 L838 164 L830 170 L831 180 L821 181 L816 190 L807 187 L800 194 L793 187 L784 190 L779 181 L769 180 L770 170 L762 164 L767 155 L762 146 L770 140 L769 130 L779 129 L784 120 L793 123 Z" fill="#D55E00"/>
-      <text x="800" y="151" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">★</text>
-      <text x="800" y="168" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">5 / 5 agree</text>
-      <text x="800" y="207" text-anchor="middle" font-size="10.5" font-weight="600" fill="#555555">looks like strong consensus</text>
-      <line x1="839" y1="155" x2="875" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <polygon points="875,150 884,155 875,160" fill="#D55E00"/>
-    </g>
+  <!-- [10] H1-collapse-arrow -->
+  <path d="M578 280 C586 250 584 160 592 125" fill="none" stroke="#D55E00" stroke-opacity="0.45" stroke-width="1.5"/>
+  <path d="M578 280 C586 250 586 175 592 140" fill="none" stroke="#D55E00" stroke-opacity="0.55" stroke-width="1.5"/>
+  <path d="M578 280 C587 245 588 190 592 155" fill="none" stroke="#D55E00" stroke-opacity="0.65" stroke-width="1.5"/>
+  <path d="M578 280 C588 245 589 200 592 170" fill="none" stroke="#D55E00" stroke-opacity="0.55" stroke-width="1.5"/>
+  <path d="M578 280 C589 245 590 215 592 185" fill="none" stroke="#D55E00" stroke-opacity="0.45" stroke-width="1.5"/>
+  <circle cx="592" cy="125" r="3" fill="#D55E00"/>
+  <circle cx="592" cy="140" r="3" fill="#D55E00"/>
+  <circle cx="592" cy="155" r="3" fill="#D55E00"/>
+  <circle cx="592" cy="170" r="3" fill="#D55E00"/>
+  <circle cx="592" cy="185" r="3" fill="#D55E00"/>
+  <line x1="595" y1="125" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <line x1="595" y1="140" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <line x1="595" y1="155" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <line x1="595" y1="170" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <line x1="595" y1="185" x2="621" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <line x1="620" y1="155" x2="664" y2="155" stroke="#D55E00" stroke-width="12" stroke-linecap="round"/>
+  <polygon points="660,143 680,155 660,167" fill="#D55E00"/>
+  <rect x="636" y="101" width="48" height="20" rx="4" fill="#FFFFFF" stroke="#D55E00" stroke-width="1"/>
+  <text x="660" y="115" text-anchor="middle" font-size="12" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">ρ→1</text>
+  <line x1="680" y1="155" x2="754" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <polygon points="754,150 763,155 754,160" fill="#D55E00"/>
 
-    <g id="H1-gold-check">
-      <rect x="884" y="95" width="132" height="120" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
-      <path d="M941 106 H959 M946 106 V116 L937 130 Q950 138 963 130 L954 116 V106" fill="none" stroke="#E6A700" stroke-width="2" stroke-linejoin="round"/>
-      <text x="950" y="130" text-anchor="middle" font-size="12" font-weight="700" fill="#E6A700">★</text>
-      <text x="950" y="151" text-anchor="middle" font-size="10" font-weight="600" fill="#1A1A1A">Executable-gold check</text>
-      <text x="950" y="164" text-anchor="middle" font-size="10" font-weight="600" fill="#1A1A1A">(no LLM judge)</text>
-      <text x="950" y="189" text-anchor="middle" font-size="10.5" font-weight="600" fill="#D55E00">chose I₁ (foil) ≠</text>
-      <text x="950" y="203" text-anchor="middle" font-size="10.5" font-weight="600" fill="#D55E00">target I₀</text>
-      <line x1="1016" y1="155" x2="1054" y2="155" stroke="#D55E00" stroke-width="2"/>
-      <polygon points="1054,150 1063,155 1054,160" fill="#D55E00"/>
-    </g>
+  <!-- [11] H2-parallel-arrows -->
+  <path d="M578 280 C585 307 586 346 592 365" fill="none" stroke="#0072B2" stroke-opacity="0.55" stroke-width="1.5"/>
+  <path d="M578 280 C586 314 588 364 592 385" fill="none" stroke="#0072B2" stroke-opacity="0.65" stroke-width="1.5"/>
+  <path d="M578 280 C588 320 590 386 592 405" fill="none" stroke="#0072B2" stroke-opacity="0.8" stroke-width="1.5"/>
+  <path d="M578 280 C589 327 591 407 592 425" fill="none" stroke="#0072B2" stroke-opacity="0.65" stroke-width="1.5"/>
+  <path d="M578 280 C590 333 592 428 592 445" fill="none" stroke="#0072B2" stroke-opacity="0.55" stroke-width="1.5"/>
+  <circle cx="592" cy="365" r="3" fill="#0072B2"/>
+  <circle cx="592" cy="385" r="3" fill="#0072B2"/>
+  <circle cx="592" cy="405" r="3" fill="#0072B2"/>
+  <circle cx="592" cy="425" r="3" fill="#0072B2"/>
+  <circle cx="592" cy="445" r="3" fill="#0072B2"/>
+  <line x1="595" y1="365" x2="650" y2="365" stroke="#0072B2" stroke-width="2"/>
+  <line x1="595" y1="385" x2="650" y2="385" stroke="#0072B2" stroke-width="2"/>
+  <line x1="595" y1="405" x2="650" y2="405" stroke="#0072B2" stroke-width="2"/>
+  <line x1="595" y1="425" x2="650" y2="425" stroke="#0072B2" stroke-width="2"/>
+  <line x1="595" y1="445" x2="650" y2="445" stroke="#0072B2" stroke-width="2"/>
+  <circle cx="660" cy="365" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
+  <circle cx="660" cy="385" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
+  <circle cx="660" cy="405" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
+  <circle cx="660" cy="425" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
+  <circle cx="660" cy="445" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
+  <line x1="670" y1="365" x2="752" y2="365" stroke="#0072B2" stroke-width="2"/>
+  <line x1="670" y1="385" x2="752" y2="385" stroke="#0072B2" stroke-width="2"/>
+  <line x1="670" y1="405" x2="752" y2="405" stroke="#0072B2" stroke-width="2"/>
+  <line x1="670" y1="425" x2="752" y2="425" stroke="#0072B2" stroke-width="2"/>
+  <line x1="670" y1="445" x2="752" y2="445" stroke="#0072B2" stroke-width="2"/>
+  <polygon points="752,360 761,365 752,370" fill="#0072B2"/>
+  <polygon points="752,380 761,385 752,390" fill="#0072B2"/>
+  <polygon points="752,400 761,405 752,410" fill="#0072B2"/>
+  <polygon points="752,420 761,425 752,430" fill="#0072B2"/>
+  <polygon points="752,440 761,445 752,450" fill="#0072B2"/>
 
-    <g id="H1-outcome">
-      <circle cx="1090" cy="140" r="28" fill="#D55E00"/>
-      <text x="1090" y="154" text-anchor="middle" font-size="40" font-weight="700" fill="#FFFFFF">✗</text>
-      <text x="1090" y="181" text-anchor="middle" font-size="12.5" font-weight="700" fill="#D55E00">✗ WRONG — silent</text>
-      <text x="1090" y="195" text-anchor="middle" font-size="11" font-weight="700" fill="#D55E00">convergent delusion</text>
-    </g>
+  <!-- [12] H1-consensus-badge -->
+  <polygon points="800,116 807,123 816,120 821,129 831,130 830,140 838,146 833,155 838,164 830,170 831,180 821,181 816,190 807,187 800,194 793,187 784,190 779,181 769,180 770,170 762,164 767,155 762,146 770,140 769,130 779,129 784,120 793,123" fill="#D55E00"/>
+  <text x="800" y="151" text-anchor="middle" font-size="17" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#FFFFFF">★</text>
+  <text x="800" y="168" text-anchor="middle" font-size="11" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#FFFFFF">5 / 5 agree</text>
+  <text x="800" y="207" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">looks like strong consensus</text>
+  <line x1="839" y1="155" x2="875" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <polygon points="875,150 884,155 875,160" fill="#D55E00"/>
 
-    <g id="n_eff-motif">
-      <circle cx="1068" cy="211" r="5" fill="#D55E00"/>
-      <circle cx="1080" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
-      <circle cx="1092" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
-      <circle cx="1104" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
-      <circle cx="1116" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
-      <text x="1092" y="230" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1A1A1A">n_eff = 1 of 5</text>
-      <text x="1092" y="242" text-anchor="middle" font-size="9.5" font-weight="600" fill="#555555">· fake redundancy</text>
-    </g>
+  <!-- [13] H2-consensus-badge -->
+  <polygon points="800,366 807,373 816,370 821,379 831,380 830,390 838,396 833,405 838,414 830,420 831,430 821,431 816,440 807,437 800,444 793,437 784,440 779,431 769,430 770,420 762,414 767,405 762,396 770,390 769,380 779,379 784,370 793,373" fill="#0072B2"/>
+  <text x="800" y="401" text-anchor="middle" font-size="17" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#FFFFFF">★</text>
+  <text x="800" y="418" text-anchor="middle" font-size="11" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#FFFFFF">5 / 5 agree</text>
+  <text x="800" y="458" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">genuine agreement</text>
+  <line x1="839" y1="405" x2="875" y2="405" stroke="#0072B2" stroke-width="2"/>
+  <polygon points="875,400 884,405 875,410" fill="#0072B2"/>
 
-    <g id="H1-stat-chips">
-      <rect x="1024" y="247" width="79" height="18" rx="4" fill="#FFFFFF" stroke="#D55E00" stroke-width="1"/>
-      <text x="1063.5" y="260" text-anchor="middle" font-size="12" font-weight="600" fill="#D55E00">CD ≈ 0.53</text>
-      <rect x="1110" y="247" width="40" height="18" rx="4" fill="#FFFFFF" stroke="#D55E00" stroke-width="1"/>
-      <text x="1130" y="260" text-anchor="middle" font-size="12" font-weight="600" fill="#D55E00">ρ→1</text>
-    </g>
-  </g>
+  <!-- [14] H1-gold-check -->
+  <rect x="884" y="95" width="132" height="120" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <line x1="941" y1="106" x2="959" y2="106" stroke="#E6A700" stroke-width="2"/>
+  <polyline points="946,106 946,116 937,130 950,136 963,130 954,116 954,106" fill="none" stroke="#E6A700" stroke-width="2" stroke-linejoin="round"/>
+  <text x="950" y="130" text-anchor="middle" font-size="12" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#E6A700">★</text>
+  <text x="950" y="151" text-anchor="middle" font-size="10" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Executable-gold check</text>
+  <text x="950" y="164" text-anchor="middle" font-size="10" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">(no LLM judge)</text>
+  <text x="950" y="189" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">chose I₁ (foil) ≠</text>
+  <text x="950" y="203" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">target I₀</text>
+  <line x1="1016" y1="155" x2="1054" y2="155" stroke="#D55E00" stroke-width="2"/>
+  <polygon points="1054,150 1063,155 1054,160" fill="#D55E00"/>
 
-  <g id="lane-H2">
-    <g id="lane-H2-bg">
-      <rect x="580" y="290" width="580" height="230" rx="10" fill="#E2EEF6" stroke="#0072B2" stroke-opacity="0.4" stroke-width="1"/>
-      <text x="598" y="318" font-size="17" font-weight="700" fill="#0072B2">H2_derivable — disambiguator INSIDE the retained prompt</text>
-      <line x1="598" y1="332" x2="1142" y2="332" stroke="#0072B2" stroke-opacity="0.25" stroke-width="1"/>
-    </g>
+  <!-- [15] H2-gold-check -->
+  <rect x="884" y="345" width="132" height="118" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <line x1="941" y1="356" x2="959" y2="356" stroke="#E6A700" stroke-width="2"/>
+  <polyline points="946,356 946,366 937,380 950,386 963,380 954,366 954,356" fill="none" stroke="#E6A700" stroke-width="2" stroke-linejoin="round"/>
+  <text x="950" y="380" text-anchor="middle" font-size="12" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#E6A700">★</text>
+  <text x="950" y="401" text-anchor="middle" font-size="10" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Executable-gold check</text>
+  <text x="950" y="414" text-anchor="middle" font-size="10" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">(no LLM judge)</text>
+  <text x="950" y="443" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">chose I₀ = target I₀</text>
+  <line x1="1016" y1="405" x2="1054" y2="405" stroke="#0072B2" stroke-width="2"/>
+  <polygon points="1054,400 1063,405 1054,410" fill="#0072B2"/>
 
-    <g id="H2-parallel-arrows">
-      <path d="M578 280 C585 307,586 346,592 365" fill="none" stroke="#0072B2" stroke-opacity="0.55" stroke-width="1.5"/>
-      <path d="M578 280 C586 314,588 364,592 385" fill="none" stroke="#0072B2" stroke-opacity="0.65" stroke-width="1.5"/>
-      <path d="M578 280 C588 320,590 386,592 405" fill="none" stroke="#0072B2" stroke-opacity="0.8" stroke-width="1.5"/>
-      <path d="M578 280 C589 327,591 407,592 425" fill="none" stroke="#0072B2" stroke-opacity="0.65" stroke-width="1.5"/>
-      <path d="M578 280 C590 333,592 428,592 445" fill="none" stroke="#0072B2" stroke-opacity="0.55" stroke-width="1.5"/>
-      <circle cx="592" cy="365" r="3" fill="#0072B2"/>
-      <circle cx="592" cy="385" r="3" fill="#0072B2"/>
-      <circle cx="592" cy="405" r="3" fill="#0072B2"/>
-      <circle cx="592" cy="425" r="3" fill="#0072B2"/>
-      <circle cx="592" cy="445" r="3" fill="#0072B2"/>
-      <line x1="595" y1="365" x2="650" y2="365" stroke="#0072B2" stroke-width="2"/>
-      <line x1="595" y1="385" x2="650" y2="385" stroke="#0072B2" stroke-width="2"/>
-      <line x1="595" y1="405" x2="650" y2="405" stroke="#0072B2" stroke-width="2"/>
-      <line x1="595" y1="425" x2="650" y2="425" stroke="#0072B2" stroke-width="2"/>
-      <line x1="595" y1="445" x2="650" y2="445" stroke="#0072B2" stroke-width="2"/>
-      <circle cx="660" cy="365" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
-      <circle cx="660" cy="385" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
-      <circle cx="660" cy="405" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
-      <circle cx="660" cy="425" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
-      <circle cx="660" cy="445" r="5" fill="#FFFFFF" stroke="#0072B2" stroke-width="2"/>
-      <line x1="670" y1="365" x2="752" y2="365" stroke="#0072B2" stroke-width="2"/>
-      <line x1="670" y1="385" x2="752" y2="385" stroke="#0072B2" stroke-width="2"/>
-      <line x1="670" y1="405" x2="752" y2="405" stroke="#0072B2" stroke-width="2"/>
-      <line x1="670" y1="425" x2="752" y2="425" stroke="#0072B2" stroke-width="2"/>
-      <line x1="670" y1="445" x2="752" y2="445" stroke="#0072B2" stroke-width="2"/>
-      <polygon points="752,360 761,365 752,370" fill="#0072B2"/>
-      <polygon points="752,380 761,385 752,390" fill="#0072B2"/>
-      <polygon points="752,400 761,405 752,410" fill="#0072B2"/>
-      <polygon points="752,420 761,425 752,430" fill="#0072B2"/>
-      <polygon points="752,440 761,445 752,450" fill="#0072B2"/>
-    </g>
+  <!-- [16] H1-outcome -->
+  <circle cx="1090" cy="140" r="28" fill="#D55E00"/>
+  <text x="1090" y="154" text-anchor="middle" font-size="40" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#FFFFFF">✗</text>
+  <text x="1090" y="181" text-anchor="middle" font-size="12.5" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">✗ WRONG — silent</text>
+  <text x="1090" y="195" text-anchor="middle" font-size="11" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">convergent delusion</text>
 
-    <g id="H2-consensus-badge">
-      <path d="M800 366 L807 373 L816 370 L821 379 L831 380 L830 390 L838 396 L833 405 L838 414 L830 420 L831 430 L821 431 L816 440 L807 437 L800 444 L793 437 L784 440 L779 431 L769 430 L770 420 L762 414 L767 405 L762 396 L770 390 L769 380 L779 379 L784 370 L793 373 Z" fill="#0072B2"/>
-      <text x="800" y="401" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">★</text>
-      <text x="800" y="418" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">5 / 5 agree</text>
-      <text x="800" y="458" text-anchor="middle" font-size="10.5" font-weight="600" fill="#555555">genuine agreement</text>
-      <line x1="839" y1="405" x2="875" y2="405" stroke="#0072B2" stroke-width="2"/>
-      <polygon points="875,400 884,405 875,410" fill="#0072B2"/>
-    </g>
+  <!-- [17] n_eff-motif -->
+  <circle cx="1068" cy="211" r="5" fill="#D55E00"/>
+  <circle cx="1080" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
+  <circle cx="1092" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
+  <circle cx="1104" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
+  <circle cx="1116" cy="211" r="5" fill="#D55E00" fill-opacity="0.15"/>
+  <text x="1092" y="230" text-anchor="middle" font-size="10.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">n_eff = 1 of 5</text>
+  <text x="1092" y="242" text-anchor="middle" font-size="9.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">· fake redundancy</text>
 
-    <g id="H2-gold-check">
-      <rect x="884" y="345" width="132" height="118" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
-      <path d="M941 356 H959 M946 356 V366 L937 380 Q950 388 963 380 L954 366 V356" fill="none" stroke="#E6A700" stroke-width="2" stroke-linejoin="round"/>
-      <text x="950" y="380" text-anchor="middle" font-size="12" font-weight="700" fill="#E6A700">★</text>
-      <text x="950" y="401" text-anchor="middle" font-size="10" font-weight="600" fill="#1A1A1A">Executable-gold check</text>
-      <text x="950" y="414" text-anchor="middle" font-size="10" font-weight="600" fill="#1A1A1A">(no LLM judge)</text>
-      <text x="950" y="443" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0072B2">chose I₀ = target I₀</text>
-      <line x1="1016" y1="405" x2="1054" y2="405" stroke="#0072B2" stroke-width="2"/>
-      <polygon points="1054,400 1063,405 1054,410" fill="#0072B2"/>
-    </g>
+  <!-- [18] H1-stat-chips -->
+  <rect x="1024" y="247" width="79" height="18" rx="4" fill="#FFFFFF" stroke="#D55E00" stroke-width="1"/>
+  <text x="1063.5" y="260" text-anchor="middle" font-size="12" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">CD ≈ 0.53</text>
+  <rect x="1110" y="247" width="40" height="18" rx="4" fill="#FFFFFF" stroke="#D55E00" stroke-width="1"/>
+  <text x="1130" y="260" text-anchor="middle" font-size="12" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">ρ→1</text>
 
-    <g id="H2-outcome">
-      <circle cx="1090" cy="405" r="30" fill="#0072B2"/>
-      <text x="1090" y="419" text-anchor="middle" font-size="40" font-weight="700" fill="#FFFFFF">✓</text>
-      <text x="1090" y="458" text-anchor="middle" font-size="13" font-weight="700" fill="#0072B2">✓ CORRECT</text>
-    </g>
+  <!-- [19] H2-outcome -->
+  <circle cx="1090" cy="405" r="30" fill="#0072B2"/>
+  <text x="1090" y="419" text-anchor="middle" font-size="40" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#FFFFFF">✓</text>
+  <text x="1090" y="458" text-anchor="middle" font-size="13" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">✓ CORRECT</text>
 
-    <g id="H2-stat-chip">
-      <rect x="1004" y="470" width="172" height="22" rx="4" fill="#FFFFFF" stroke="#0072B2" stroke-width="1"/>
-      <text x="1090" y="485" text-anchor="middle" font-size="12" font-weight="600" fill="#0072B2">CD = 0 (every tier, incl. weak)</text>
-    </g>
-  </g>
+  <!-- [20] H2-stat-chip -->
+  <rect x="1004" y="470" width="172" height="22" rx="4" fill="#FFFFFF" stroke="#0072B2" stroke-width="1"/>
+  <text x="1090" y="485" text-anchor="middle" font-size="12" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">CD = 0 (every tier, incl. weak)</text>
 
-  <g id="right-callout">
-    <path d="M1172 90 C1165 90,1165 102,1165 112 V250 C1165 268,1158 274,1152 280 C1158 286,1165 292,1165 310 V448 C1165 458,1165 470,1172 470" fill="none" stroke="#1A1A1A" stroke-width="1.5"/>
-    <text x="1189" y="280" text-anchor="middle" font-size="13" font-weight="600" fill="#1A1A1A" transform="rotate(-90 1189 280)">Failure axis = clause LOCATION, not model capability.</text>
-  </g>
+  <!-- [21] right-callout -->
+  <path d="M1172 90 C1165 90 1165 102 1165 112 L1165 250 C1165 268 1158 274 1152 280 C1158 286 1165 292 1165 310 L1165 448 C1165 458 1165 470 1172 470" fill="none" stroke="#1A1A1A" stroke-width="1.5"/>
+  <text x="1180" y="190" text-anchor="middle" font-size="8.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Failure</text>
+  <text x="1180" y="207" text-anchor="middle" font-size="8.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">axis =</text>
+  <text x="1180" y="224" text-anchor="middle" font-size="8.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">clause</text>
+  <text x="1180" y="241" text-anchor="middle" font-size="8.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">LOCATION,</text>
+  <text x="1180" y="258" text-anchor="middle" font-size="8.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">not model</text>
+  <text x="1180" y="275" text-anchor="middle" font-size="8.5" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">capability.</text>
 
-  <g id="bottom-caption">
-    <line x1="40" y1="524" x2="1160" y2="524" stroke="#C9CCD1" stroke-width="1"/>
-    <text x="600" y="547" text-anchor="middle" font-size="12" font-weight="600" fill="#1A1A1A">Under a shared information boundary, consensus is not evidence of correctness. Measure independence, not agreement.</text>
-  </g>
+  <!-- [22] bottom-caption -->
+  <line x1="40" y1="524" x2="1160" y2="524" stroke="#C9CCD1" stroke-width="1"/>
+  <text x="600" y="547" text-anchor="middle" font-size="12" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Under a shared information boundary, consensus is not evidence of correctness. Measure independence, not agreement.</text>
 </svg>
