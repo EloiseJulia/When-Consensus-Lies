@@ -101,6 +101,102 @@ def _proxy_reachable() -> bool:
     except Exception:
         return False
 
+
+# ── Driver-local Gate C validation ──────────────────────────────────────────
+
+def _validate_gate_c_sck10(
+    checkpoint_path: str,
+    min_agents: int = 10,
+) -> Dict[str, Any]:
+    """Post-run Gate C cardinality check for the sc-at-k=10 sensitivity pass.
+
+    Reads the sc-k=10 checkpoint JSONL and verifies every completed sc job
+    (``job_done`` record) has at least ``min_agents`` associated ``run`` records.
+
+    A partial/stale job with fewer records indicates a corrupted or interrupted
+    checkpoint — it would silently corrupt n_eff/CD analysis if accepted.
+
+    This check is intentionally LOCAL and SEPARATE from registered_run.py's
+    ``_GATE_C_MIN_AGENTS`` (which encodes k=5).  Never import-mutate that dict.
+
+    Args:
+        checkpoint_path: Path to the sc-k=10 checkpoint JSONL.
+        min_agents: Minimum expected agent records per completed job (default 10).
+
+    Returns:
+        Dict with keys:
+          - ``"passed"``: bool — True iff all done sc jobs have >= min_agents records
+          - ``"checked"``: int — number of completed sc jobs inspected
+          - ``"violations"``: list of dicts for jobs with < min_agents agents,
+            each with keys task_id, model_id, seed, agent_count, expected
+          - ``"note"`` (optional): explanation when checkpoint is absent/empty
+    """
+    import json
+
+    cp = Path(checkpoint_path)
+    if not cp.exists():
+        return {
+            "passed": True,
+            "checked": 0,
+            "violations": [],
+            "note": "checkpoint absent — no jobs to validate",
+        }
+
+    done_sc_jobs: List[Dict[str, Any]] = []
+    run_records: List[Dict[str, Any]] = []
+
+    with cp.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rtype = rec.get("type")
+            if rec.get("config") != "sc":
+                continue
+            if rtype == "job_done":
+                required = ("task_id", "config", "model_role", "model_id", "seed")
+                if all(k in rec for k in required):
+                    done_sc_jobs.append(rec)
+            elif rtype == "run":
+                run_records.append(rec)
+
+    violations: List[Dict[str, Any]] = []
+    for job in done_sc_jobs:
+        task_id = job["task_id"]
+        model_id = job["model_id"]
+        grid_seed = int(job["seed"])
+
+        count = 0
+        for run in run_records:
+            if run.get("task_id") != task_id or run.get("model_id") != model_id:
+                continue
+            # Match run to grid seed: use replicate_seed if present (multi-agent
+            # records where per-agent seed != grid seed), else fall back to seed
+            # (single-agent record or agent-0 where per-agent seed == grid seed).
+            rep = run.get("replicate_seed")
+            match_seed = int(rep) if rep is not None else int(run.get("seed", -1))
+            if match_seed == grid_seed:
+                count += 1
+
+        if count < min_agents:
+            violations.append({
+                "task_id": task_id,
+                "model_id": model_id,
+                "seed": grid_seed,
+                "agent_count": count,
+                "expected": min_agents,
+            })
+
+    return {
+        "passed": len(violations) == 0,
+        "checked": len(done_sc_jobs),
+        "violations": violations,
+    }
+
 
 # ── Pure run function (offline-test-friendly) ────────────────────────────────
 
@@ -173,7 +269,41 @@ def run(
             config_kwargs=_CONFIG_KWARGS_SCK10,   # k=10 override (not k=5)
         )
 
-    return runner.run(dry_run=dry_run)
+    result = runner.run(dry_run=dry_run)
+
+    # ── Driver-local Gate C cardinality check (k=10, sc-only) ────────────────
+    # Validates every completed sc job in the checkpoint has >= 10 agent records.
+    # This is intentionally LOCAL — never imports/mutates _GATE_C_MIN_AGENTS in
+    # registered_run.py (which encodes the confirmatory k=5 expectation).
+    if not dry_run:
+        gate_c = _validate_gate_c_sck10(
+            checkpoint_path, min_agents=_GATE_C_SCK10["sc"]
+        )
+        n_violations = len(gate_c["violations"])
+        if gate_c["passed"]:
+            print(
+                f"[SCK10 Gate C] PASS — {gate_c['checked']} done sc job(s) "
+                f"all have \u2265{_GATE_C_SCK10['sc']} agents"
+            )
+        else:
+            print(
+                f"[SCK10 Gate C] FAIL — {n_violations} job(s) with "
+                f"<{_GATE_C_SCK10['sc']} agents (partial/stale checkpoint):"
+            )
+            for v in gate_c["violations"]:
+                print(
+                    f"  task_id={v['task_id']}  model_id={v['model_id']}  "
+                    f"seed={v['seed']}  agents={v['agent_count']}/{v['expected']}"
+                )
+        result = {**result, "gate_c_sck10": gate_c}
+        if not gate_c["passed"]:
+            raise RuntimeError(
+                f"[SCK10 Gate C] FAILED: {n_violations} sc job(s) have "
+                f"<{_GATE_C_SCK10['sc']} agent records. "
+                "Partial/stale checkpoint detected — re-run or clear the checkpoint."
+            )
+
+    return result
 
 
 # ── CLI / main ───────────────────────────────────────────────────────────────

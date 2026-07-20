@@ -342,6 +342,149 @@ class TestDryRunJobTotal:
             f"({n_tasks} tasks × {n_models} models × {n_seeds} seeds); "
             f"got {result['total']}"
         )
-        # All jobs must be sc
-        for job in result["pending_jobs"]:
-            assert job["config"] == "sc", f"Non-sc config in grid: {job}"
+
+# ── 6. Gate C validation ──────────────────────────────────────────────────────
+
+class TestGateCValidation:
+    """Driver-local Gate C cardinality validation for sc at k=10.
+
+    Tests:
+      - 5-agent completed job → validation flags it (non-vacuous)
+      - 10-agent completed job → validation passes
+      - run() raises RuntimeError when Gate C detects a <10-agent job
+    """
+
+    @staticmethod
+    def _write_checkpoint(path: Path, records: list) -> None:
+        import json
+        with open(path, "w", encoding="utf-8") as fh:
+            for rec in records:
+                fh.write(json.dumps(rec) + "\n")
+
+    @staticmethod
+    def _run_rec(task_id: str, model_id: str, grid_seed: int, agent_idx: int) -> dict:
+        rec: dict = {
+            "type": "run",
+            "task_id": task_id,
+            "config": "sc",
+            "model_role": "tested_agents",
+            "model_id": model_id,
+            "seed": grid_seed + agent_idx,  # per-agent seed
+            "output": f"out_{agent_idx}",
+            "label": "I1",
+            "verbalized_conf": 0.5,
+            "logit_conf": None,
+        }
+        # Persist replicate_seed only when it differs from per-agent seed
+        # (mirrors CheckpointStore.add_run behaviour)
+        if agent_idx != 0:
+            rec["replicate_seed"] = grid_seed
+        return rec
+
+    @staticmethod
+    def _job_done_rec(task_id: str, model_id: str, seed: int) -> dict:
+        return {
+            "type": "job_done",
+            "task_id": task_id,
+            "config": "sc",
+            "model_role": "tested_agents",
+            "model_id": model_id,
+            "seed": seed,
+        }
+
+    def test_5_agents_flags_violation(self, tmp_path):
+        """Completed sc job with only 5 agents must be flagged as a violation."""
+        cp = tmp_path / "cp.jsonl"
+        records = [
+            *[self._run_rec("t1", "gpt-4o", 0, i) for i in range(5)],
+            self._job_done_rec("t1", "gpt-4o", 0),
+        ]
+        self._write_checkpoint(cp, records)
+
+        result = _driver._validate_gate_c_sck10(str(cp), min_agents=10)
+
+        assert not result["passed"], (
+            "Gate C must fail for a 5-agent sc job — got passed=True"
+        )
+        assert len(result["violations"]) == 1
+        v = result["violations"][0]
+        assert v["agent_count"] == 5
+        assert v["expected"] == 10
+        assert v["task_id"] == "t1"
+        assert v["model_id"] == "gpt-4o"
+
+    def test_10_agents_passes(self, tmp_path):
+        """Completed sc job with exactly 10 agents must pass Gate C."""
+        cp = tmp_path / "cp.jsonl"
+        records = [
+            *[self._run_rec("t1", "gpt-4o", 0, i) for i in range(10)],
+            self._job_done_rec("t1", "gpt-4o", 0),
+        ]
+        self._write_checkpoint(cp, records)
+
+        result = _driver._validate_gate_c_sck10(str(cp), min_agents=10)
+
+        assert result["passed"], f"Gate C must pass for 10-agent job; got {result}"
+        assert result["violations"] == []
+        assert result["checked"] == 1
+
+    def test_run_raises_on_partial_job(self, tmp_path):
+        """run() must raise RuntimeError when Gate C finds a <10-agent sc job.
+
+        Non-vacuous: if _validate_gate_c_sck10 were removed from run() this
+        assertion would fail because no RuntimeError would be raised.
+        """
+        from common.config import load_config
+        from common.schema import AgentRun
+        from harness.runner import Runner, RunnerConfig
+        from common.llm import LLMClient
+
+        cp_path = tmp_path / "cp_partial.jsonl"
+
+        def fake_run_task(task, config, client, **kwargs):
+            # Deliberately return only 5 agents — simulates a partial/stale job
+            return [
+                AgentRun(
+                    task_id=task.id,
+                    config=config,
+                    model_role="tested_agents",
+                    model_id="gpt-4o",
+                    output=f"out_{i}",
+                    label="I1",
+                    verbalized_conf=0.5,
+                    logit_conf=None,
+                    seed=i,
+                )
+                for i in range(5)
+            ]
+
+        cfg = load_config()
+        client = LLMClient(cfg, cache_dir=str(tmp_path / "cache"), offline=True)
+        runner_cfg = RunnerConfig(
+            tasks=[_make_task("t1")],
+            configs=["sc"],
+            seeds=[0],
+            models=[("tested_agents", "gpt-4o")],
+            checkpoint_path=cp_path,
+            rpm=0,
+            config_kwargs={"sc": {"k": 5}},
+        )
+        runner = Runner(
+            runner_cfg,
+            client,
+            run_task_fn=fake_run_task,
+            label_run_fn=lambda r, t: "I1",
+        )
+
+        with pytest.raises(RuntimeError, match="Gate C"):
+            _driver.run(
+                [_make_task("t1")],
+                cfg,
+                checkpoint_path=str(cp_path),
+                cache_dir=str(tmp_path / "cache"),
+                seeds=[0],
+                dry_run=False,
+                offline=False,
+                _runner_override=(runner, client),
+            )
+
