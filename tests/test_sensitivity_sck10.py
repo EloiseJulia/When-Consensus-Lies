@@ -560,3 +560,128 @@ class TestGateCValidation:
                 _runner_override=(runner, client),
             )
 
+
+# ── 7. _proxy_reachable URL + behaviour ──────────────────────────────────────
+
+class TestProxyReachable:
+    """_proxy_reachable() must build the correct probe URL and classify errors.
+
+    Non-vacuous contract:
+      - When COPILOT_PROXY_BASE_URL already ends in /v1, the probed URL must
+        be <base>/models (NOT <base>/v1/models — no double /v1).
+      - An HTTPError (4xx/5xx) means the server IS reachable → True.
+      - A URLError / connection refused means the server is DOWN → False.
+    """
+
+    def test_probe_url_no_double_v1(self, monkeypatch):
+        """COPILOT_PROXY_BASE_URL='http://x/v1' → probe 'http://x/v1/models'."""
+        import urllib.error
+        import urllib.request
+
+        probed: List[str] = []
+
+        def fake_urlopen(url, timeout=None):
+            probed.append(url)
+            raise urllib.error.HTTPError(url, 200, "OK", {}, None)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        # Patch the constant inside the already-loaded driver module
+        import common.llm as _llm
+        monkeypatch.setattr(_llm, "COPILOT_PROXY_BASE_URL", "http://x/v1")
+
+        result = _driver._proxy_reachable()
+
+        assert len(probed) == 1, "urlopen should be called exactly once"
+        assert probed[0] == "http://x/v1/models", (
+            f"Expected 'http://x/v1/models'; got '{probed[0]}' — double /v1 bug"
+        )
+        assert result is True
+
+    def test_probe_url_trailing_slash_stripped(self, monkeypatch):
+        """COPILOT_PROXY_BASE_URL='http://x/v1/' (trailing slash) → 'http://x/v1/models'."""
+        import urllib.error
+        import urllib.request
+
+        probed: List[str] = []
+
+        def fake_urlopen(url, timeout=None):
+            probed.append(url)
+            raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        import common.llm as _llm
+        monkeypatch.setattr(_llm, "COPILOT_PROXY_BASE_URL", "http://x/v1/")
+
+        result = _driver._proxy_reachable()
+
+        assert probed[0] == "http://x/v1/models", (
+            f"Trailing slash not stripped correctly; got '{probed[0]}'"
+        )
+        assert result is True
+
+    def test_http_error_is_reachable(self, monkeypatch):
+        """HTTPError (server replied with 404/401) → _proxy_reachable() is True."""
+        import urllib.error
+        import urllib.request
+
+        def fake_urlopen(url, timeout=None):
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        import common.llm as _llm
+        monkeypatch.setattr(_llm, "COPILOT_PROXY_BASE_URL", "http://x/v1")
+
+        assert _driver._proxy_reachable() is True
+
+    def test_url_error_is_not_reachable(self, monkeypatch):
+        """URLError (connection refused / DNS failure) → _proxy_reachable() is False."""
+        import urllib.error
+        import urllib.request
+
+        def fake_urlopen(url, timeout=None):
+            raise urllib.error.URLError("Connection refused")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        import common.llm as _llm
+        monkeypatch.setattr(_llm, "COPILOT_PROXY_BASE_URL", "http://x/v1")
+
+        assert _driver._proxy_reachable() is False
+
+    def test_socket_timeout_is_not_reachable(self, monkeypatch):
+        """socket.timeout → _proxy_reachable() is False (not a live server)."""
+        import socket
+        import urllib.request
+
+        def fake_urlopen(url, timeout=None):
+            raise socket.timeout("timed out")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        import common.llm as _llm
+        monkeypatch.setattr(_llm, "COPILOT_PROXY_BASE_URL", "http://x/v1")
+
+        assert _driver._proxy_reachable() is False
+
+    def test_fallback_url_has_no_double_v1(self, monkeypatch):
+        """When common.llm import fails, fallback URL must be 'http://127.0.0.1:8313/v1/models'."""
+        import urllib.error
+        import urllib.request
+
+        probed: List[str] = []
+
+        def fake_urlopen(url, timeout=None):
+            probed.append(url)
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        # Force ImportError path by breaking COPILOT_PROXY_BASE_URL lookup
+        import common.llm as _llm
+        monkeypatch.setattr(_llm, "COPILOT_PROXY_BASE_URL", None)  # triggers AttributeError
+
+        result = _driver._proxy_reachable()
+
+        assert probed[0] == "http://127.0.0.1:8313/v1/models", (
+            f"Fallback URL wrong; got '{probed[0]}'"
+        )
+        assert result is True
+
