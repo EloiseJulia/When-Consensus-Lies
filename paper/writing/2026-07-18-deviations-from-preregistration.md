@@ -18,6 +18,8 @@
 | 07 | R1 null redefinition: label-shuffle (a math identity here) → R1a (k0-control) + R1b (uniform-over-interps); shuffle demoted to diagnostic | MORE stringent | Co-primary robustness null (not the headline; direct evidence carries it) | ✅ SIGNED + **owner personally ratified** (rows 57, 63) |
 | 08 | Pilot-calibrated final N: H1=40 / H2=14 / 54; grid single+SC-k5+homMAD-N5+hetMAD; 3 seeds; SC-k10+verifier scheduled secondary | Documents §10-delegated N | Sample size only | ✅ SIGNED at launch (row 65) |
 | 09 | Two ADDITIVE secondary analyses: P1 dependence estimators, P2 abstention detection | Additive (reviewer defenses) | No — secondary, post-hoc; primary unchanged | ✅ SIGNED at launch (rows 64–65) |
+| 10 | R2 cross-family construction: a SECOND-family (Anthropic claude-opus-4.8) constructed H1 subset so §9 R2 is computable | Operationalizes frozen R2 | Adds cross-constructed data; R2 rule unchanged | ✅ SIGNED (row 69) |
+| 11 | R2 interpretation + H1a/R2 PRIMARY-method scope (A08 primary only) + 1 construct-invalid item exclusion | Clarification (like A07/R1) | No — frozen metric/R2 rule unchanged | ✅ RATIFIED (row 72) |
 | (row 67) | Confirmatory run parallelized by domain (3× throughput) | Execution only | No — identical grid/seeds/metric | Not a deviation (N) |
 
 ## Per-amendment detail
@@ -80,3 +82,16 @@ for reproducibility; deviation = N.
   INTERACTION is empirically absent. Owner ruled (option A): DO NOT amend; test the pre-registered
   interaction honestly (expected null) and LEAD with the two-regime MAIN effect (disambiguator LOCATION,
   not model capability). This preserves pre-registration integrity while framing the strongest claim.
+
+## Confirmatory outcomes of the pre-registered decision rules (for "Deviations"/Results)
+Reported HONESTLY per the frozen rules (DECISION-LOG rows 72–73):
+- **H1a (aggregation amplifies CD): INCONCLUSIVE** — redundant aggregation neither amplifies nor rescues;
+  the fake-redundancy claim is carried by P1 (n_eff=1.10; independence counterfactual Δ=+0.245, CI excl. 0).
+- **R1a (k0-control): STRONGLY SUPPORTED** (Δ CI [0.733, 0.899]). **R1b (uniform-null): cd_primary
+  INCONCLUSIVE** (high binary baseline), **drop-I_perp SUPPORTED** — R1 rests on R1a + the independence cf.
+- **Row-35 (hetero>homo): NOT CONFIRMED** (Δ=−0.003) → reframed as cross-family = homogeneous (shared prior
+  spans families; supportive of the thesis, not the specific ordering).
+- **H2 interaction: UNCOMPUTABLE** (§8 crossed-RE non-convergence; expected-null; regime main effect carries it).
+- **R2 metric: INCONCLUSIVE**; construct-confound rebutted by cross-family single-agent CD 0.72–0.87 (A11).
+- **I_perp anomaly**: 2 items with incomplete foils → capable models hit an unenumerated interp → I_perp;
+  handled by the pre-registered drop-I_perp sensitivity (no post-hoc benchmark change).
