@@ -1,0 +1,65 @@
+{
+  "figure_id": "fig:overview2",
+  "viewBox": "0 0 1000 640",
+  "intended_width_in": 5.478,
+  "minimum_effective_font_pt": 7.5,
+  "palette": {
+    "wrong_h1": "#D55E00",
+    "wrong_h1_soft": "#FBEAE1",
+    "correct_h2": "#0072B2",
+    "correct_h2_soft": "#E2EEF6",
+    "executable_gold": "#E6A700",
+    "text_primary": "#1A1A1A",
+    "text_secondary": "#555555",
+    "neutral_border": "#C9CCD1",
+    "panel": "#FFFFFF",
+    "family_stripe_dark": "#8A8F98",
+    "family_stripe_light": "#B4B9C1"
+  },
+  "frozen_numbers": {
+    "CD_H1_display": "CD ≈ 0.53",
+    "CD_H2_display": "CD = 0",
+    "n_eff_display": "1 of 5",
+    "abstention_H1_display": "abstention ≈ 0.03%"
+  },
+  "claims": {
+    "C1": {
+      "claim": "H1 external context converges on the wrong foil.",
+      "evidence": "cd_primary=0.53 (H1)",
+      "elements": ["h1_outcome", "h1_cd_chip"],
+      "status": "verified"
+    },
+    "C2": {
+      "claim": "H2 derivable context resolves correctly across tiers.",
+      "evidence": "cd_primary=0.00 (H2, all classes)",
+      "elements": ["h2_outcome", "h2_cd_chip"],
+      "status": "verified"
+    },
+    "C3": {
+      "claim": "The ensemble collapses to one effective voice.",
+      "evidence": "n_eff=1.10, ICC=0.89 (H1)",
+      "elements": ["h1_collapse_arrow", "h1_neff_chip"],
+      "status": "verified"
+    },
+    "C4": {
+      "claim": "H2 remains independent and parallel.",
+      "evidence": "H2 CD=0 across classes",
+      "elements": ["h2_parallel_arrows"],
+      "status": "verified"
+    },
+    "C5": {
+      "claim": "The H1 failure is silent rather than uncertain.",
+      "evidence": "abstention_H1 approximately 0.03%",
+      "elements": ["silence_cue"],
+      "status": "verified"
+    },
+    "C6": {
+      "claim": "Verdicts use executable gold rather than an LLM judge.",
+      "evidence": "executable-gold harness",
+      "elements": ["h1_gold_check", "h2_gold_check"],
+      "status": "verified"
+    }
+  },
+  "alt_text": "The figure sends one underspecified prompt through the same five-agent roster, then forks on whether the deleted disambiguating clause is outside or inside the prompt. With the clause outside (H1), five-of-five agreement selects the foil, yielding a wrong verdict and only one effective voice; with it inside (H2), parallel agents select the target and are correct. The contrast shows that failure follows the clause's location rather than model capability.",
+  "source_data": "figures_data.json"
+}

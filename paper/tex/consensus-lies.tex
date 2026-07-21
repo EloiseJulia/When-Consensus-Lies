@@ -84,7 +84,7 @@ pre-registration}
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig_overview.pdf}
+\includegraphics[width=\textwidth]{fig_overview2.pdf}
 \caption{\textbf{Overview.} The same underspecified prompt and the same $k$ independent agents (three model
 families $\times$ capability tiers) fork into two regimes that differ \emph{only} by where the missing
 disambiguating clause lives. \textbf{H1\_external} (clause outside the retained prompt): agents
@@ -92,7 +92,9 @@ disambiguating clause lives. \textbf{H1\_external} (clause outside the retained 
 wrong, and the $k$-agent ensemble collapses to $\approx\!1$ effective independent judgment (fake redundancy,
 $\rho\!\to\!1$, $\neff\!=\!1.10$; $\cd\!\approx\!0.53$). \textbf{H2\_derivable} (clause inside the prompt):
 every tier resolves it ($\cd\!=\!0$). Correctness is set by an executable-gold check, not an LLM judge. The
-failure axis is the clause's \emph{location}, not model capability.}
+failure axis is the clause's \emph{location}, not model capability. All values are from the confirmatory run
+(\S\ref{sec:results}; H1: $\mathrm{ICC}=0.89$, mean pairwise wrong-answer agreement $=0.98$; abstention
+$\approx\!0.03\%$).}
 \label{fig:overview}
 \end{figure*}
 

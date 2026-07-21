@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="fig_overview2" xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640">
+  <title id="svg_title">When Consensus Lies overview</title>
+  <desc id="figdesc">The same underspecified prompt and agents fork according to where a deleted clause lives. External context produces unanimous but wrong agreement and one effective voice, while internal context produces unanimous correct agreement.</desc>
+
+  <!-- Title -->
+  <text id="title" x="500" y="42" text-anchor="middle" font-size="34" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="940" lengthAdjust="spacingAndGlyphs">Consensus ≠ correctness: same agents, one deleted clause, two fates</text>
+
+  <!-- Input -->
+  <rect id="prompt_box" x="30" y="110" width="225" height="140" rx="10" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <rect id="prompt_header_chip" x="42" y="122" width="201" height="30" rx="6" fill="#E2EEF6" stroke="#C9CCD1" stroke-width="1"/>
+  <text id="prompt_header" x="142.5" y="144" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Underspecified prompt</text>
+  <line id="prompt_line_1" x1="48" y1="169" x2="235" y2="169" stroke="#C9CCD1" stroke-width="3" stroke-linecap="round"/>
+  <line id="prompt_line_2" x1="48" y1="184" x2="212" y2="184" stroke="#C9CCD1" stroke-width="3" stroke-linecap="round"/>
+  <text id="prompt_deleted" x="48" y="211" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="187" lengthAdjust="spacingAndGlyphs">use the fiscal calendar</text>
+  <line id="prompt_deleted_strike" x1="46" y1="204" x2="237" y2="204" stroke="#D55E00" stroke-width="3"/>
+  <text id="prompt_deleted_tag" x="48" y="238" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">clause deleted</text>
+  <line id="prompt_to_agents_shaft" x1="255" y1="180" x2="269" y2="180" stroke="#555555" stroke-width="3"/>
+  <polygon id="prompt_to_agents_head" points="269,173 280,180 269,187" fill="#555555"/>
+
+  <rect id="knob" x="30" y="268" width="225" height="62" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text id="knob_label" x="142.5" y="291" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="205" lengthAdjust="spacingAndGlyphs">Where is the missing clause?</text>
+  <circle id="knob_out_dot" cx="45" cy="315" r="6" fill="#D55E00"/>
+  <text id="knob_out" x="56" y="322" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00" textLength="82" lengthAdjust="spacingAndGlyphs">outside → H1</text>
+  <circle id="knob_in_dot" cx="151" cy="315" r="6" fill="#0072B2"/>
+  <text id="knob_in" x="162" y="322" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2" textLength="78" lengthAdjust="spacingAndGlyphs">inside → H2</text>
+
+  <!-- Shared agents -->
+  <circle id="silence_cue_bubble" cx="290" cy="118" r="13" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <text id="silence_cue_question" x="290" y="125" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">?</text>
+  <line id="silence_cue_cross" x1="280" y1="108" x2="300" y2="128" stroke="#555555" stroke-width="2.5"/>
+  <text id="silence_cue" x="307" y="119" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">No one asks</text>
+  <text id="silence_cue_detail" x="307" y="142" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="133" lengthAdjust="spacingAndGlyphs">(abstention &#x2248; 0.03%)</text>
+
+  <rect id="agents_stack" x="275" y="150" width="165" height="300" rx="10" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.5"/>
+  <rect id="agent_1_tile" x="287" y="162" width="141" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect id="agent_1_family_stripe_1" x="287" y="162" width="5" height="46" fill="#8A8F98"/>
+  <rect id="agent_1_family_stripe_2" x="292" y="162" width="5" height="46" fill="#B4B9C1"/>
+  <rect id="agent_1_family_stripe_3" x="297" y="162" width="5" height="46" fill="#8A8F98"/>
+  <circle id="agent_1_head" cx="328" cy="177" r="7" fill="#B4B9C1" stroke="#555555" stroke-width="1.2"/>
+  <path id="agent_1_body" d="M315 199 Q328 184 341 199" fill="#FFFFFF" stroke="#555555" stroke-width="2"/>
+  <line id="agent_1_signal" x1="355" y1="185" x2="413" y2="185" stroke="#8A8F98" stroke-width="4" stroke-linecap="round"/>
+
+  <rect id="agent_2_tile" x="287" y="219" width="141" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect id="agent_2_family_stripe_1" x="287" y="219" width="5" height="46" fill="#B4B9C1"/>
+  <rect id="agent_2_family_stripe_2" x="292" y="219" width="5" height="46" fill="#8A8F98"/>
+  <rect id="agent_2_family_stripe_3" x="297" y="219" width="5" height="46" fill="#B4B9C1"/>
+  <circle id="agent_2_head" cx="328" cy="234" r="7" fill="#B4B9C1" stroke="#555555" stroke-width="1.2"/>
+  <path id="agent_2_body" d="M315 256 Q328 241 341 256" fill="#FFFFFF" stroke="#555555" stroke-width="2"/>
+  <line id="agent_2_signal" x1="355" y1="242" x2="413" y2="242" stroke="#8A8F98" stroke-width="4" stroke-linecap="round"/>
+
+  <rect id="agent_3_tile" x="287" y="276" width="141" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect id="agent_3_family_stripe_1" x="287" y="276" width="5" height="46" fill="#8A8F98"/>
+  <rect id="agent_3_family_stripe_2" x="292" y="276" width="5" height="46" fill="#8A8F98"/>
+  <rect id="agent_3_family_stripe_3" x="297" y="276" width="5" height="46" fill="#B4B9C1"/>
+  <circle id="agent_3_head" cx="328" cy="291" r="7" fill="#B4B9C1" stroke="#555555" stroke-width="1.2"/>
+  <path id="agent_3_body" d="M315 313 Q328 298 341 313" fill="#FFFFFF" stroke="#555555" stroke-width="2"/>
+  <line id="agent_3_signal" x1="355" y1="299" x2="413" y2="299" stroke="#8A8F98" stroke-width="4" stroke-linecap="round"/>
+
+  <rect id="agent_4_tile" x="287" y="333" width="141" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect id="agent_4_family_stripe_1" x="287" y="333" width="5" height="46" fill="#B4B9C1"/>
+  <rect id="agent_4_family_stripe_2" x="292" y="333" width="5" height="46" fill="#B4B9C1"/>
+  <rect id="agent_4_family_stripe_3" x="297" y="333" width="5" height="46" fill="#8A8F98"/>
+  <circle id="agent_4_head" cx="328" cy="348" r="7" fill="#B4B9C1" stroke="#555555" stroke-width="1.2"/>
+  <path id="agent_4_body" d="M315 370 Q328 355 341 370" fill="#FFFFFF" stroke="#555555" stroke-width="2"/>
+  <line id="agent_4_signal" x1="355" y1="356" x2="413" y2="356" stroke="#8A8F98" stroke-width="4" stroke-linecap="round"/>
+
+  <rect id="agent_5_tile" x="287" y="390" width="141" height="46" rx="8" fill="#FFFFFF" stroke="#C9CCD1" stroke-width="1.2"/>
+  <rect id="agent_5_family_stripe_1" x="287" y="390" width="5" height="46" fill="#8A8F98"/>
+  <rect id="agent_5_family_stripe_2" x="292" y="390" width="5" height="46" fill="#B4B9C1"/>
+  <rect id="agent_5_family_stripe_3" x="297" y="390" width="5" height="46" fill="#8A8F98"/>
+  <circle id="agent_5_head" cx="328" cy="405" r="7" fill="#B4B9C1" stroke="#555555" stroke-width="1.2"/>
+  <path id="agent_5_body" d="M315 427 Q328 412 341 427" fill="#FFFFFF" stroke="#555555" stroke-width="2"/>
+  <line id="agent_5_signal" x1="355" y1="413" x2="413" y2="413" stroke="#8A8F98" stroke-width="4" stroke-linecap="round"/>
+
+  <path id="agents_bracket" d="M270 158 L263 158 L263 442 L270 442" fill="none" stroke="#555555" stroke-width="2"/>
+  <text id="agents_bracket_label" x="357.5" y="478" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="165" lengthAdjust="spacingAndGlyphs">k independent agents &#xB7;</text>
+  <text id="agents_bracket_label_line_2" x="357.5" y="501" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">3 families &#xD7; tiers</text>
+  <line id="agents_to_fork_shaft" x1="440" y1="300" x2="453" y2="300" stroke="#555555" stroke-width="3"/>
+  <polygon id="agents_to_fork_head" points="453,293 464,300 453,307" fill="#555555"/>
+
+  <!-- Fork and lane backgrounds -->
+  <polygon id="fork_node" points="470,274 496,300 470,326 444,300" fill="#FFFFFF" stroke="#8A8F98" stroke-width="1.5"/>
+  <text id="fork_label" x="470" y="351" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="150" lengthAdjust="spacingAndGlyphs">Same prompt &#xB7; same agents</text>
+
+  <rect id="h1_lane_bg" x="505" y="66" width="375" height="270" rx="12" fill="#FBEAE1" stroke="#D55E00" stroke-opacity="0.4" stroke-width="1"/>
+  <text id="h1_lane_title" x="515" y="98" font-size="27" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00" textLength="380" lengthAdjust="spacingAndGlyphs">H1 &#x2014; clause OUTSIDE the prompt</text>
+  <line id="h1_lane_rule" x1="515" y1="108" x2="880" y2="108" stroke="#D55E00" stroke-opacity="0.4" stroke-width="1"/>
+
+  <rect id="h2_lane_bg" x="505" y="360" width="375" height="260" rx="12" fill="#E2EEF6" stroke="#0072B2" stroke-opacity="0.4" stroke-width="1"/>
+  <text id="h2_lane_title" x="515" y="392" font-size="27" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2" textLength="380" lengthAdjust="spacingAndGlyphs">H2 &#x2014; clause INSIDE the prompt</text>
+  <line id="h2_lane_rule" x1="515" y1="402" x2="880" y2="402" stroke="#0072B2" stroke-opacity="0.4" stroke-width="1"/>
+
+  <!-- H1 lane -->
+  <path id="h1_fork_connector" d="M488 282 Q500 240 510 150" fill="none" stroke="#D55E00" stroke-width="2"/>
+  <line id="h1_collapse_input_1" x1="510" y1="126" x2="542" y2="150" stroke="#D55E00" stroke-width="2"/>
+  <line id="h1_collapse_input_2" x1="510" y1="138" x2="542" y2="150" stroke="#D55E00" stroke-width="2"/>
+  <line id="h1_collapse_input_3" x1="510" y1="150" x2="542" y2="150" stroke="#D55E00" stroke-width="2"/>
+  <line id="h1_collapse_input_4" x1="510" y1="162" x2="542" y2="150" stroke="#D55E00" stroke-width="2"/>
+  <line id="h1_collapse_input_5" x1="510" y1="174" x2="542" y2="150" stroke="#D55E00" stroke-width="2"/>
+  <line id="h1_collapse_arrow" x1="540" y1="150" x2="584" y2="150" stroke="#D55E00" stroke-width="12" stroke-linecap="round"/>
+  <polygon id="h1_collapse_arrow_head" points="580,136 604,150 580,164" fill="#D55E00"/>
+  <text id="h1_collapse_rho" x="545" y="204" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">ρ→1</text>
+
+  <polygon id="h1_badge" points="650,116 659,124 671,121 676,132 688,135 686,147 694,156 686,165 688,177 676,180 671,191 659,188 650,196 641,188 629,191 624,180 612,177 614,165 606,156 614,147 612,135 624,132 629,121 641,124" fill="#D55E00"/>
+  <polygon id="h1_badge_star" points="650,132 656,146 672,147 660,157 664,173 650,164 636,173 640,157 628,147 644,146" fill="#FFFFFF"/>
+  <text id="h1_badge_label" x="650" y="220" text-anchor="middle" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">5 / 5 agree</text>
+  <text id="h1_badge_sub" x="650" y="243" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="150" lengthAdjust="spacingAndGlyphs">looks like consensus</text>
+  <line id="h1_badge_to_gold_shaft" x1="695" y1="150" x2="715" y2="150" stroke="#D55E00" stroke-width="3"/>
+  <polygon id="h1_badge_to_gold_head" points="715,143 726,150 715,157" fill="#D55E00"/>
+
+  <path id="h1_gold_check" d="M748 124 L772 124 M753 124 L753 138 L743 160 Q760 177 777 160 L767 138 L767 124" fill="#FFFFFF" stroke="#E6A700" stroke-width="3" stroke-linejoin="round"/>
+  <polygon id="h1_gold_star" points="760,140 764,149 774,150 766,156 769,166 760,160 751,166 754,156 746,150 756,149" fill="#E6A700"/>
+  <text id="h1_gold_label" x="700" y="267" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">Executable gold:</text>
+  <text id="h1_gold_label_line_2" x="740" y="290" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="160" lengthAdjust="spacingAndGlyphs">chose I1 (foil) ≠ I0</text>
+  <text id="h1_gold_note" x="590" y="290" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="130" lengthAdjust="spacingAndGlyphs">(no LLM judge)</text>
+  <line id="h1_gold_to_outcome_shaft" x1="788" y1="150" x2="815" y2="150" stroke="#D55E00" stroke-width="3"/>
+  <polygon id="h1_gold_to_outcome_head" points="815,143 826,150 815,157" fill="#D55E00"/>
+
+  <circle id="h1_outcome_circle" cx="865" cy="150" r="34" fill="#D55E00"/>
+  <line id="h1_outcome_cross_1" x1="850" y1="135" x2="880" y2="165" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+  <line id="h1_outcome_cross_2" x1="880" y1="135" x2="850" y2="165" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+  <text id="h1_outcome" x="865" y="220" text-anchor="middle" font-size="26" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">WRONG</text>
+  <text id="h1_outcome_sub" x="810" y="243" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="140" lengthAdjust="spacingAndGlyphs">silent convergent</text>
+  <text id="h1_outcome_sub_line_2" x="840" y="267" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">delusion</text>
+
+  <circle id="h1_neff_motif" cx="664.5" cy="315.5" r="4" fill="#D55E00"/>
+  <circle id="h1_neff_motif_dot_2" cx="672.5" cy="315.5" r="4" fill="#D55E00" fill-opacity="0.15"/>
+  <circle id="h1_neff_motif_dot_3" cx="680.5" cy="315.5" r="4" fill="#D55E00" fill-opacity="0.15"/>
+  <circle id="h1_neff_motif_dot_4" cx="688.5" cy="315.5" r="4" fill="#D55E00" fill-opacity="0.15"/>
+  <circle id="h1_neff_motif_dot_5" cx="696.5" cy="315.5" r="4" fill="#D55E00" fill-opacity="0.15"/>
+  <rect id="h1_neff_chip" x="706" y="301" width="169" height="29" rx="14.5" fill="#FFFFFF" stroke="#D55E00" stroke-width="1.5"/>
+  <text id="h1_neff_chip_label" x="790.5" y="323" text-anchor="middle" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00" textLength="151" lengthAdjust="spacingAndGlyphs">n_eff = 1 of 5 (ρ→1)</text>
+  <rect id="h1_cd_chip" x="515" y="301" width="145" height="29" rx="14.5" fill="#FFFFFF" stroke="#D55E00" stroke-width="1.5"/>
+  <text id="h1_cd_chip_label" x="587.5" y="323" text-anchor="middle" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#D55E00">CD &#x2248; 0.53</text>
+
+  <!-- H2 lane -->
+  <path id="h2_fork_connector" d="M488 318 Q500 365 510 435" fill="none" stroke="#0072B2" stroke-width="2"/>
+  <line id="h2_parallel_arrow_1" x1="510" y1="415" x2="582" y2="415" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_parallel_arrow_1_head" points="582,409 592,415 582,421" fill="#0072B2"/>
+  <line id="h2_parallel_arrow_2" x1="510" y1="425" x2="582" y2="425" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_parallel_arrow_2_head" points="582,419 592,425 582,431" fill="#0072B2"/>
+  <line id="h2_parallel_arrow_3" x1="510" y1="435" x2="582" y2="435" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_parallel_arrow_3_head" points="582,429 592,435 582,441" fill="#0072B2"/>
+  <line id="h2_parallel_arrow_4" x1="510" y1="445" x2="582" y2="445" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_parallel_arrow_4_head" points="582,439 592,445 582,451" fill="#0072B2"/>
+  <line id="h2_parallel_arrows" x1="510" y1="455" x2="582" y2="455" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_parallel_arrow_5_head" points="582,449 592,455 582,461" fill="#0072B2"/>
+
+  <polygon id="h2_badge" points="650,396 659,404 671,401 676,412 688,415 686,427 694,436 686,445 688,457 676,460 671,471 659,468 650,476 641,468 629,471 624,460 612,457 614,445 606,436 614,427 612,415 624,412 629,401 641,404" fill="#0072B2"/>
+  <polygon id="h2_badge_star" points="650,412 656,426 672,427 660,437 664,453 650,444 636,453 640,437 628,427 644,426" fill="#FFFFFF"/>
+  <text id="h2_badge_label" x="650" y="500" text-anchor="middle" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">5 / 5 agree</text>
+  <text id="h2_badge_sub" x="650" y="523" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="150" lengthAdjust="spacingAndGlyphs">genuine agreement</text>
+  <line id="h2_badge_to_gold_shaft" x1="695" y1="435" x2="715" y2="435" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_badge_to_gold_head" points="715,428 726,435 715,442" fill="#0072B2"/>
+
+  <path id="h2_gold_check" d="M748 409 L772 409 M753 409 L753 423 L743 445 Q760 462 777 445 L767 423 L767 409" fill="#FFFFFF" stroke="#E6A700" stroke-width="3" stroke-linejoin="round"/>
+  <polygon id="h2_gold_star" points="760,425 764,434 774,435 766,441 769,451 760,445 751,451 754,441 746,435 756,434" fill="#E6A700"/>
+  <text id="h2_gold_label" x="760" y="552" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="230" lengthAdjust="spacingAndGlyphs">Executable gold: chose I0 = target</text>
+  <text id="h2_gold_note" x="760" y="576" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555">(no LLM judge)</text>
+  <line id="h2_gold_to_outcome_shaft" x1="788" y1="435" x2="815" y2="435" stroke="#0072B2" stroke-width="3"/>
+  <polygon id="h2_gold_to_outcome_head" points="815,428 826,435 815,442" fill="#0072B2"/>
+
+  <circle id="h2_outcome_circle" cx="865" cy="435" r="34" fill="#0072B2"/>
+  <polyline id="h2_outcome_check" points="848,435 860,448 883,420" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text id="h2_outcome" x="865" y="500" text-anchor="middle" font-size="26" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">CORRECT</text>
+  <text id="h2_outcome_sub" x="845" y="523" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#555555" textLength="120" lengthAdjust="spacingAndGlyphs">every tier, incl. weak</text>
+  <rect id="h2_cd_chip" x="515" y="584" width="120" height="29" rx="14.5" fill="#FFFFFF" stroke="#0072B2" stroke-width="1.5"/>
+  <text id="h2_cd_chip_label" x="575" y="606" text-anchor="middle" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#0072B2">CD = 0</text>
+
+  <!-- Right-edge callout -->
+  <path id="callout_brace" d="M890 238 L884 238 L884 286 L878 302 L884 318 L884 366 L890 366" fill="none" stroke="#1A1A1A" stroke-width="2.5"/>
+  <text id="callout_l1" x="896" y="250" text-anchor="start" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="96" lengthAdjust="spacingAndGlyphs">Failure axis =</text>
+  <text id="callout_l2" x="896" y="276" text-anchor="start" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A">clause</text>
+  <text id="callout_l3" x="896" y="302" text-anchor="start" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="96" lengthAdjust="spacingAndGlyphs">LOCATION,</text>
+  <text id="callout_l4" x="896" y="328" text-anchor="start" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="96" lengthAdjust="spacingAndGlyphs">not model</text>
+  <text id="callout_l5" x="896" y="354" text-anchor="start" font-size="22" font-weight="700" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#1A1A1A" textLength="96" lengthAdjust="spacingAndGlyphs">capability</text>
+
+  <!-- Caption strip -->
+  <rect id="caption_strip" x="0" y="620" width="1000" height="20" fill="#FFFFFF"/>
+  <line id="caption_strip_rule" x1="20" y1="620" x2="980" y2="620" stroke="#C9CCD1" stroke-width="1"/>
+  <text id="caption_strip_label" x="500" y="635" text-anchor="middle" font-size="20" font-weight="600" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" fill="#333333" textLength="940" lengthAdjust="spacingAndGlyphs">A shared information boundary makes consensus fake: measure independence, not agreement</text>
+</svg>
