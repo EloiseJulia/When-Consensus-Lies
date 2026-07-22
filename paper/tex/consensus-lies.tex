@@ -42,8 +42,8 @@
 \begin{abstract}
 A growing class of \emph{same-prompt multi-model interfaces}---ChatHub, Open WebUI, PromptQuorum,
 MultipleChat, Poe, and others---lets a user send one prompt to several language models (GPT, Claude, Gemini,
-\dots) and read the parallel answers, a consensus verdict, or a synthesized reply as corroboration, and many
-market this plurality as a route to greater confidence~\cite{chathub2026,openwebui2026multimodel,promptquorum2026home,multiplechat2026,poe2024multibot}.
+\dots) and read the parallel answers, a consensus verdict, or a synthesized reply. Many market this
+plurality as a route to greater confidence~\cite{chathub2026,openwebui2026multimodel,promptquorum2026home,multiplechat2026,poe2024multibot}.
 The tacit inference is that model plurality yields perspective plurality, hence independent corroboration,
 hence higher trustworthiness. We show this inference can fail silently, because \emph{model diversity is not
 necessarily evidence diversity}: when models share one input, they can share one blind spot. In a
@@ -122,15 +122,16 @@ The appeal rests on an inference chain that is rarely stated but easy to reconst
 corroboration} $\Rightarrow$ \emph{higher trustworthiness}. The chain borrows the warrant of an old and
 specific idea. From the Condorcet Jury Theorem to the wisdom of crowds, aggregation improves reliability
 \emph{only when} the judgments being combined are competent and carry \emph{sufficiently independent}
-errors~\cite{condorcet,ladha1992}; social influence that erodes that independence produces confident
-convergence on error rather than accuracy~\cite{lorenz2011}. A same-prompt interface imports this warrant,
+errors~\cite{condorcet,ladha1992,surowiecki2004}; indeed, cognitive diversity---not sheer group size---is
+what lets a crowd outperform its ablest member~\cite{hongpage2004}, and social influence that erodes that
+independence produces confident convergence on error rather than accuracy~\cite{lorenz2011}. A same-prompt interface imports this warrant,
 but it also imports its precondition---and it is far from obvious that sending one prompt to five models
 produces five \emph{independent} interpretations of the task. We show that the middle links of the chain can
 break: \emph{different models do not guarantee independent interpretations or evidence}. Our headline is
 a slogan we thread throughout: \textbf{model diversity is not necessarily evidence diversity}. Same-prompt
 pluralism can create answer multiplicity without evidential independence.
 
-We show that it often does not, and we identify \emph{when}. Our study concerns \emph{underspecified}
+We identify \emph{when} it does---and when it does not---for a class of underspecified tasks. Our study concerns \emph{underspecified}
 inputs: inputs from which a decisive disambiguating clause has been omitted, so more than one
 interpretation is consistent with what remains---an everyday condition when context is lost across a handoff
 between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
@@ -259,19 +260,29 @@ convergence is warranted. \emph{Unresolved premise:} whether corroboration acros
 the grounding lost at a context handoff.
 
 \subsection{Reliance on aggregated AI advice}
-Overreliance on automation is a long-standing concern~\cite{parasuraman1997,skitka1999}; explanations help
-mainly when they lower the cost of \emph{verifying} the machine, not when they merely assert
-confidence~\cite{vasconcelos2023explanations}. A ``$5/5$ agents agree'' display is precisely the kind of cue
-that can increase reliance while adding little independent evidence. \emph{Unresolved premise:} whether
-consensus displays convey evidence or only the \emph{appearance} of it.
+Overreliance on automation is a long-standing concern~\cite{parasuraman1997,skitka1999} that persists with
+LLM assistance: people frequently accept AI output even when it is wrong, and recent HCI work shows the same
+pattern for LLM-based search and advice~\cite{spatharioti2025llmsearch}. Explanations and confidence displays
+do not reliably help; they help mainly when they lower the cost of \emph{verifying} the machine, not when
+they merely assert confidence~\cite{vasconcelos2023explanations,bansal2021whole}, and calibrating reliance
+generally requires deliberate interventions such as cognitive forcing functions or reliance-targeted
+designs~\cite{buccinca2021trust,bo2025rely}. Nor does simply adding more opinions
+guarantee a better outcome: a meta-analysis of human--AI teams finds that combinations often fail to
+outperform the stronger party alone~\cite{vaccaro2024combinations}. A ``$5/5$ agents agree'' display is
+precisely the kind of cue that can increase reliance while adding little independent evidence.
+\emph{Unresolved premise:} whether consensus displays convey evidence or only the \emph{appearance} of it.
 
 \subsection{Algorithmic monoculture and shared priors}
 When many decision-makers rely on the same model or data, individually accurate systems can reduce
-system-level welfare through correlated outcomes~\cite{kleinberg2021monoculture}. We identify a related
-\emph{within-ensemble} phenomenon: even nominally heterogeneous models can form an interpretive monoculture
-when decisive context is uniformly absent, and recent evidence shows LLM errors are correlated across
-providers and architectures, especially among stronger models~\cite{kim2025correlated}, with sycophancy and
-shared preference training as plausible sources~\cite{perez2022,sharma2024}.
+system-level welfare through correlated outcomes~\cite{kleinberg2021monoculture}. This risk is amplified by
+the foundation-model paradigm, in which many downstream systems inherit the priors of a few pretrained
+bases~\cite{bommasani2021foundation}. Consistent with a shared prior, alignment and instruction tuning
+measurably narrow the conceptual and linguistic diversity of model outputs~\cite{murthy2025alignment,
+guo2025diversity}, and writing with such models homogenizes what people produce~\cite{padmakumar2024writing}.
+We identify a related \emph{within-ensemble} phenomenon: even nominally heterogeneous models can form an
+interpretive monoculture when decisive context is uniformly absent, and recent evidence shows LLM errors are
+correlated across providers and architectures, especially among stronger models~\cite{kim2025correlated},
+with sycophancy and shared preference training as plausible sources~\cite{perez2022,sharma2024}.
 
 \subsection{LLM ensembles and multi-agent systems}
 Self-consistency samples multiple chains and votes~\cite{wang2023selfconsistency}; multi-agent debate can
