@@ -64,8 +64,8 @@ edited.
       reported as EXPLORATORY, never confirmatory. — DATE: 2026-07-22 (owner selection: "批准 Amendment 12")
 - [x] Owner acknowledges the run is $0 (local proxy) and additive (no frozen file / no confirmatory
       checkpoint touched). — DATE: 2026-07-22
-- [ ] SEPARATE owner GO immediately before the LIVE run (owner asked to confirm once more after the driver
-      is implemented + cross-family audited). — DATE: __________
+- [x] SEPARATE owner GO immediately before the LIVE run (owner asked to confirm once more after the driver
+      is implemented + cross-family audited). — DATE: 2026-07-22 (owner selection: "GO：现在开跑 C5+C7 live run")
 
 Amendment status: **RATIFIED (owner @EloiseJulia, 2026-07-22).** Implementation + cross-family audit proceed;
 the live run awaits the separate pre-launch owner GO above.
