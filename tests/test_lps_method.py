@@ -131,6 +131,77 @@ def test_H_ctx_empty_dims():
     assert res["flagged_dimension"] is None
 
 
+# ── 2b. Refinement 1: drop-I_perp H_ctx ──────────────────────────────────────
+
+def test_H_ctx_drops_iperp_format_breaker_yields_zero():
+    # A "language" pin: value 2 breaks the checker → I_perp; only 1 VALID label
+    # remains (< 2) → H_ctx = 0 under the drop-I_perp rule, though the OLD
+    # all-label rule would have reported >0 (I0 vs I_perp).
+    def fn(role, prompt, seed):
+        return "I0" if "Python" in prompt else "I_perp"
+    client = ScriptedClient(fn)
+    dims = [{"dimension": "language", "values": ["Python", "Java", "Ruby"]}]
+    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
+    d = res["per_dim"][0]
+    assert d["labels"] == ["I0", "I_perp", "I_perp"]
+    assert d["valid_labels"] == ["I0"]
+    assert d["H_ctx"] == pytest.approx(0.0)           # drop-I_perp, <2 valid → 0
+    assert d["H_ctx_all"] > 0.0                        # old rule was inflated
+    assert res["H_ctx_max"] == pytest.approx(0.0)
+    assert res["H_ctx_max_all"] > 0.0
+    assert res["flagged_dimension"] is None
+
+
+def test_H_ctx_dropiperp_genuine_switch_survives():
+    # Two VALID interpretations after excluding an I_perp → still a real switch.
+    seq = ["I0", "I1", "I_perp"]
+    holder = {"i": 0}
+    def fn(role, prompt, seed):
+        v = seq[holder["i"] % len(seq)]
+        holder["i"] += 1
+        return v
+    client = ScriptedClient(fn)
+    dims = [{"dimension": "threshold", "values": ["v1", "v2", "v3"]}]
+    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
+    d = res["per_dim"][0]
+    assert d["valid_labels"] == ["I0", "I1"]
+    assert d["H_ctx"] == pytest.approx(1.0)            # I0 vs I1 = 1 bit
+    assert res["flagged_dimension"] == "threshold"
+
+
+# ── 2c. Refinement 2: format/language/tooling dimension filter ───────────────
+
+def test_is_format_dim_filters_language_and_tooling():
+    assert lps._is_format_dim({"dimension": "programming language",
+                               "values": ["Python", "Java"]}) is True
+    assert lps._is_format_dim({"dimension": "library", "values": ["pandas", "numpy"]}) is True
+    assert lps._is_format_dim({"dimension": "output encoding",
+                               "values": ["utf-8", "ascii"]}) is True
+    # Values are all language names even if the dim name is neutral.
+    assert lps._is_format_dim({"dimension": "impl", "values": ["python", "java"]}) is True
+    # Genuine answer-semantic axes must NOT be filtered.
+    assert lps._is_format_dim({"dimension": "fiscal year start",
+                               "values": ["January", "April"]}) is False
+    assert lps._is_format_dim({"dimension": "date format convention",
+                               "values": ["ISO 8601", "US MM/DD/YYYY"]}) is False
+    assert lps._is_format_dim({"dimension": "rounding standard",
+                               "values": ["half-up", "half-even"]}) is False
+
+
+def test_surface_assumptions_backstop_drops_format_dims():
+    payload = (
+        '[{"dimension": "active user threshold", "values": ["7 days", "30 days"]},'
+        ' {"dimension": "programming language", "values": ["Python", "Java"]}]'
+    )
+    client = ScriptedClient(lambda role, prompt, seed: payload)
+    kept, dropped = lps.surface_assumptions_detailed(_dummy_task(), client, "m")
+    assert [d["dimension"] for d in kept] == ["active user threshold"]
+    assert [d["dimension"] for d in dropped] == ["programming language"]
+    # Default surface_assumptions applies the filter.
+    assert [d["dimension"] for d in lps.surface_assumptions(_dummy_task(), client, "m")] \
+        == ["active user threshold"]
+
+
 # ── 3. Assumption parsing ────────────────────────────────────────────────────
 
 def test_surface_assumptions_parses_fenced_json():

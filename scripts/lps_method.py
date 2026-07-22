@@ -59,6 +59,39 @@ DEFAULT_TAU = 0.5          # H_ctx flag threshold (bits) — pilot-calibrated
 DEFAULT_TAU_S = 0.5        # H_seed low-confidence ceiling (bits) — pilot-calibrated
 _ROLE = "tested_agents"    # generic answering role
 
+#: The ineligible "degenerate/noise" label. Refinement 1 (2026-07-23): H_ctx is
+#: computed over VALID enumerated interpretations only, EXCLUDING I_perp — mirror
+#: cd_primary's rule that I_perp is ineligible. A pin like "language=Java" /
+#: "output_format=…" breaks the executable-gold checker → I_perp, which spuriously
+#: inflated H_ctx even on H2/k0. This is a pilot-stage refinement of the DETECTOR's
+#: H_ctx, NOT a change to cd_primary or the frozen labeler.
+I_PERP = "I_perp"
+
+#: Refinement 2 backstop keyword filter: drop surfaced dimensions that are about
+#: programming language / library / tooling / output-encoding / display-formatting
+#: (they change HOW an answer is written, not WHAT the answer IS). Conservative —
+#: deliberately excludes bare "format"/"rounding"/"date format" tokens because
+#: those ARE genuine answer-semantic axes in the benchmark (e.g. date_format,
+#: rounding_standard). Matched as whole tokens against the dimension name/values.
+_FORMAT_TOOLING_TOKENS = frozenset(
+    """language languages programming python javascript typescript java kotlin
+    ruby php golang rust cpp csharp scala perl swift syntax library libraries
+    framework frameworks module modules import imports package packages
+    dependency dependencies tooling toolchain runtime interpreter compiler ide
+    encoding charset unicode utf ascii whitespace indentation codestyle""".split()
+)
+#: Multiword phrases (substring match on the lowercased dimension name).
+_FORMAT_TOOLING_PHRASES = (
+    "programming language", "output format", "output encoding", "file type",
+    "file format", "code style", "coding style", "display format",
+    "string formatting", "which language", "output scope", "return type wrapper",
+)
+#: Known language tokens: a dim whose VALUES are all languages is a language pick.
+_LANGUAGE_TOKENS = frozenset(
+    """python javascript typescript java kotlin ruby php golang go rust cpp c
+    csharp scala perl swift r matlab sql bash""".split()
+)
+
 
 # ── Generic prompts (NO gold; auditor-visible verbatim) ──────────────────────
 
@@ -70,10 +103,14 @@ ASSUMPTION_SURFACING_TEMPLATE = (
     "{prompt}\n"
     "----- END TASK -----\n\n"
     "Before answering, list the decision-relevant assumptions your answer would "
-    "depend on that are NOT fixed by the task text above. For each assumption, "
-    "give a short dimension name and 2 or 3 concrete alternative values it could "
-    "plausibly take. List at most {max_dims} dimensions, most decision-relevant "
-    "first.\n\n"
+    "depend on that are NOT fixed by the task text above.\n\n"
+    "List ONLY assumptions that change WHAT the correct answer IS (its value or "
+    "result). Do NOT list assumptions about how the answer is FORMATTED, rounded "
+    "for display, which programming language / library / tool is used, output "
+    "encoding, file type, or code style — those do not change the underlying "
+    "answer. For each assumption, give a short dimension name and 2 or 3 concrete "
+    "alternative values it could plausibly take. List at most {max_dims} "
+    "dimensions, most decision-relevant first.\n\n"
     "Respond with ONLY a JSON array, no prose, in exactly this shape:\n"
     "[{{\"dimension\": \"<short name>\", \"values\": [\"<v1>\", \"<v2>\"]}}]"
 )
@@ -253,19 +290,85 @@ def surface_assumptions(
     *,
     max_dims: int = DEFAULT_MAX_DIMS,
     seed: int = 0,
+    apply_filter: bool = True,
 ) -> List[Dict[str, Any]]:
     """Ask the model to self-generate decision-relevant unstated dimensions.
 
     GENERIC prompt (design §2 stage 1): uses ONLY ``task.prompt`` + ``task.domain``.
     Returns a list of ``{"dimension": str, "values": [str, ...]}`` (>= 2 values each).
     Never includes any gold/interpretation/key-question text.
+
+    Refinement 2 (2026-07-23): the prompt now instructs the model to list only
+    ANSWER-SEMANTIC axes (what the answer IS, not formatting/language/tooling), and
+    a backstop keyword filter drops any format/language/tooling dimension that slips
+    through (``apply_filter=True``). Use ``surface_assumptions_detailed`` to also
+    obtain the dropped dimensions for reporting.
+    """
+    kept, _dropped = surface_assumptions_detailed(
+        task, client, model, max_dims=max_dims, seed=seed, apply_filter=apply_filter
+    )
+    return kept
+
+
+def surface_assumptions_detailed(
+    task: Task,
+    client: Any,
+    model: str,
+    *,
+    max_dims: int = DEFAULT_MAX_DIMS,
+    seed: int = 0,
+    apply_filter: bool = True,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Like ``surface_assumptions`` but returns ``(kept, dropped)`` dimensions.
+
+    ``dropped`` are the surfaced dimensions removed by the format/language/tooling
+    backstop filter (Refinement 2), for transparent reporting.
     """
     prompt = ASSUMPTION_SURFACING_TEMPLATE.format(
         domain=task.domain, prompt=task.prompt, max_dims=max_dims
     )
     # Deterministic surfacing (temperature=0 style) for reproducibility.
     text = _complete_text(client, prompt=prompt, model=model, seed=seed, temperature=0.0)
-    return _normalise_dims(_extract_json_array(text), max_dims=max_dims)
+    dims = _normalise_dims(_extract_json_array(text), max_dims=max_dims)
+    if not apply_filter:
+        return dims, []
+    kept: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+    for dim in dims:
+        (dropped if _is_format_dim(dim) else kept).append(dim)
+    return kept, dropped
+
+
+def _tokens(text: str) -> List[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _is_format_dim(dim: Dict[str, Any]) -> bool:
+    """True iff the dimension is about language/tooling/output-encoding/format.
+
+    Refinement 2 backstop (EVALUATION-side of surfacing, never enters a prompt).
+    Conservative: matches whole-token language/tooling keywords, a few multiword
+    format phrases in the name, or a values-list that is entirely language names.
+    """
+    name = dim.get("dimension", "")
+    name_l = name.lower()
+    name_toks = set(_tokens(name))
+    if name_toks & _FORMAT_TOOLING_TOKENS:
+        return True
+    for phrase in _FORMAT_TOOLING_PHRASES:
+        if phrase in name_l:
+            return True
+    values = dim.get("values", []) or []
+    if values:
+        val_all_lang = True
+        for v in values:
+            vt = set(_tokens(str(v)))
+            if not (vt & _LANGUAGE_TOKENS):
+                val_all_lang = False
+                break
+        if val_all_lang:
+            return True
+    return False
 
 
 # ── Stage C: H_ctx (counterfactual pinning) ──────────────────────────────────
@@ -282,11 +385,19 @@ def H_ctx(
 
     For each surfaced dimension d_i with values {v_ij}, build a pinned prompt
     ``task.prompt ⊕ "assume d_i = v_ij"`` (model's OWN strings — no gold), answer,
-    and label. ``H_ctx(d_i)`` = semantic entropy (bits) over {labels_j}.
+    and label. Two entropies are reported per dimension:
+      * ``H_ctx``      — Refinement 1: semantic entropy (bits) over VALID labels
+        only (``I_perp`` EXCLUDED). If fewer than 2 valid (non-I_perp) pinned
+        answers remain, ``H_ctx = 0`` (a format/tool-breaker dimension cannot
+        demonstrate a switch AMONG VALID interpretations).
+      * ``H_ctx_all``  — the old rule (entropy over ALL labels incl. I_perp), kept
+        for before/after comparison only.
 
-    Returns ``{"per_dim", "H_ctx_max", "flagged_dimension"}`` where ``per_dim`` is a
-    list of ``{dimension, values, labels, H_ctx}`` and ``flagged_dimension`` is the
-    argmax-entropy dimension name (None if no dimensions).
+    ``H_ctx_max`` / ``flagged_dimension`` use the drop-I_perp ``H_ctx``.
+
+    Returns ``{"per_dim", "H_ctx_max", "H_ctx_max_all", "flagged_dimension"}`` where
+    ``per_dim`` items carry ``{dimension, values, labels, valid_labels, H_ctx,
+    H_ctx_all}``.
     """
     per_dim: List[Dict[str, Any]] = []
     for di, dim in enumerate(dims):
@@ -303,23 +414,33 @@ def H_ctx(
                 client, prompt=prompt, model=model, seed=seed, temperature=0.0
             )
             labels.append(_label_answer(text, task, model_id=model, seed=seed))
+        valid = [l for l in labels if l != I_PERP]
+        h_valid = semantic_entropy(valid) if len(valid) >= 2 else 0.0
         per_dim.append(
             {
                 "dimension": name,
                 "values": values,
                 "labels": labels,
-                "H_ctx": semantic_entropy(labels),
+                "valid_labels": valid,
+                "H_ctx": h_valid,
+                "H_ctx_all": semantic_entropy(labels),
             }
         )
 
     if not per_dim:
-        return {"per_dim": [], "H_ctx_max": 0.0, "flagged_dimension": None}
+        return {
+            "per_dim": [],
+            "H_ctx_max": 0.0,
+            "H_ctx_max_all": 0.0,
+            "flagged_dimension": None,
+        }
 
     best = max(per_dim, key=lambda d: d["H_ctx"])
     return {
         "per_dim": per_dim,
         "H_ctx_max": best["H_ctx"],
-        "flagged_dimension": best["dimension"],
+        "H_ctx_max_all": max(d["H_ctx_all"] for d in per_dim),
+        "flagged_dimension": best["dimension"] if best["H_ctx"] > 0 else None,
     }
 
 
@@ -349,7 +470,7 @@ def lpp_detect(
     seed_res = H_seed(
         task, client, model, k=k, temperature=temperature, base_seed=base_seed
     )
-    dims = surface_assumptions(
+    dims, dropped_dims = surface_assumptions_detailed(
         task, client, model, max_dims=max_dims, seed=base_seed
     )
     ctx_res = H_ctx(task, client, model, dims, base_seed=base_seed)
@@ -365,11 +486,13 @@ def lpp_detect(
         "ambiguity_level": task.ambiguity_level,
         "H_seed": h_seed,
         "H_ctx_max": h_ctx_max,
+        "H_ctx_max_all": ctx_res["H_ctx_max_all"],
         "flagged_dimension": ctx_res["flagged_dimension"],
         "is_flagged": is_flagged,
         "tau": tau,
         "tau_s": tau_s,
         "surfaced_dims": dims,
+        "filtered_dims": dropped_dims,
         "per_dim": ctx_res["per_dim"],
         "seed_labels": seed_res["labels"],
     }

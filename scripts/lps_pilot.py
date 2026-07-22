@@ -293,13 +293,25 @@ def _mean(xs: List[float]) -> Optional[float]:
 
 
 def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate the danger-quadrant key check + localization hit-rate."""
+    """Aggregate the danger-quadrant key check + localization hit-rate.
+
+    Refinements (2026-07-23):
+      * H_ctx here is the DROP-I_perp entropy (valid interpretations only). The
+        old all-label H_ctx is also aggregated as ``mean_H_ctx_all`` for contrast.
+      * Localization argmax uses the drop-I_perp H_ctx (via each result's
+        ``flagged_dimension``).
+      * The danger-quadrant target population is the genuinely CONVERGENT H1_k1
+        subset: H_seed <= the H2 median H_seed (low-H_seed). Separation is judged
+        on THAT subset vs H2 and k0.
+    """
     by_cat: Dict[str, Dict[str, List[float]]] = {}
     for r in results:
         cat = r.get("category", "other")
-        b = by_cat.setdefault(cat, {"H_seed": [], "H_ctx_max": [], "match": []})
+        b = by_cat.setdefault(cat, {"H_seed": [], "H_ctx": [], "H_ctx_all": [],
+                                    "match": []})
         b["H_seed"].append(r["H_seed"])
-        b["H_ctx_max"].append(r["H_ctx_max"])
+        b["H_ctx"].append(r["H_ctx_max"])
+        b["H_ctx_all"].append(r.get("H_ctx_max_all", r["H_ctx_max"]))
         if cat == "H1_k1":
             b["match"].append(1.0 if r.get("axis_match") else 0.0)
 
@@ -308,37 +320,75 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         summary["by_category"][cat] = {
             "n": len(b["H_seed"]),
             "mean_H_seed": _mean(b["H_seed"]),
-            "mean_H_ctx_max": _mean(b["H_ctx_max"]),
+            "mean_H_ctx_dropIperp": _mean(b["H_ctx"]),
+            "mean_H_ctx_all": _mean(b["H_ctx_all"]),
         }
-    h1 = summary["by_category"].get("H1_k1", {})
-    h2 = summary["by_category"].get("H2", {})
-    k0 = summary["by_category"].get("H1_k0", {})
+
     summary["localization_hit_rate_H1_k1"] = _mean(
         by_cat.get("H1_k1", {}).get("match", [])
     )
-    # Key check: DANGER quadrant appears iff mean H_ctx on H1_k1 exceeds H2 & k0
-    # while H_seed stays low on H1_k1.
+
+    # ── Genuinely-convergent H1_k1 subset (danger-quadrant target population) ──
+    h2_hseed = by_cat.get("H2", {}).get("H_seed", [])
+    h2_median = _median(h2_hseed)
+    conv = [r for r in results
+            if r.get("category") == "H1_k1"
+            and h2_median is not None and r["H_seed"] <= h2_median]
+    summary["h2_median_H_seed"] = h2_median
+    summary["H1_k1_convergent_subset"] = {
+        "n": len(conv),
+        "task_models": [f"{r['task_id']}|{r['model']}" for r in conv],
+        "mean_H_ctx_dropIperp": _mean([r["H_ctx_max"] for r in conv]),
+        "localization_hit_rate": _mean(
+            [1.0 if r.get("axis_match") else 0.0 for r in conv]
+        ),
+    }
+
+    h1_conv = summary["H1_k1_convergent_subset"]["mean_H_ctx_dropIperp"]
+    h2 = summary["by_category"].get("H2", {}).get("mean_H_ctx_dropIperp")
+    k0 = summary["by_category"].get("H1_k0", {}).get("mean_H_ctx_dropIperp")
+
     def _gt(a, b):
-        return (a is not None and b is not None and a > b)
-    summary["danger_quadrant_present"] = bool(
-        _gt(h1.get("mean_H_ctx_max"), h2.get("mean_H_ctx_max"))
-        and _gt(h1.get("mean_H_ctx_max"), k0.get("mean_H_ctx_max"))
+        return a is not None and b is not None and a > b
+
+    # Clean separation = convergent-H1 H_ctx strictly exceeds BOTH H2 and k0.
+    summary["danger_quadrant_separates"] = bool(_gt(h1_conv, h2) and _gt(h1_conv, k0))
+    # Specificity: how many H2 / k0 items are STILL flagged under the new rule.
+    summary["false_flags_H2"] = sum(
+        1 for r in results if r.get("category") == "H2" and r.get("is_flagged")
+    )
+    summary["false_flags_H1_k0"] = sum(
+        1 for r in results if r.get("category") == "H1_k0" and r.get("is_flagged")
     )
     return summary
 
 
+def _median(xs: List[float]) -> Optional[float]:
+    if not xs:
+        return None
+    s = sorted(xs)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
+
+
 def _print_table(results: List[Dict[str, Any]]) -> None:
-    print("\n" + "=" * 100)
-    print(f"{'item':<42}{'cat':<7}{'model':<16}{'H_seed':>8}{'H_ctx':>8}{'flag':>6}{'match':>7}")
-    print("-" * 100)
+    print("\n" + "=" * 112)
+    print(f"{'item':<42}{'cat':<7}{'model':<16}{'H_seed':>8}"
+          f"{'H_ctx':>8}{'H_ctxAll':>9}{'flag':>6}{'match':>7}{'filt':>6}")
+    print("-" * 112)
     for r in sorted(results, key=lambda x: (x.get("category", ""), x["task_id"], x["model"])):
         print(
             f"{r['task_id'][:41]:<42}{r.get('category',''):<7}{r['model'][:15]:<16}"
             f"{r['H_seed']:>8.3f}{r['H_ctx_max']:>8.3f}"
+            f"{r.get('H_ctx_max_all', r['H_ctx_max']):>9.3f}"
             f"{('Y' if r['is_flagged'] else '.'): >6}"
             f"{('Y' if r.get('axis_match') else '.'): >7}"
+            f"{len(r.get('filtered_dims', [])): >6}"
         )
-    print("=" * 100)
+    print("=" * 112)
+    print("  H_ctx = drop-I_perp (VALID interpretations only); H_ctxAll = old all-label rule.")
+    print("  filt = # surfaced dims dropped by the format/language/tooling backstop.")
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -406,11 +456,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     summary = summarize(results)
     print("\n[Pilot] Summary:")
     print(json.dumps(summary, indent=2))
-    dq = summary["danger_quadrant_present"]
-    print(f"\n[Pilot] DANGER quadrant present (mean H_ctx: H1 > H2 and H1 > k0)? "
-          f"{'YES' if dq else 'NO'}")
-    print(f"[Pilot] Localization hit-rate on H1_k1: "
-          f"{summary['localization_hit_rate_H1_k1']}")
+    sep = summary["danger_quadrant_separates"]
+    print(f"\n[Pilot] KEY CHECK — drop-I_perp H_ctx separates the CONVERGENT "
+          f"(low-H_seed) H1_k1 subset from H2 and k0? {'YES' if sep else 'NO'}")
+    print(f"[Pilot] False flags still present: H2={summary['false_flags_H2']} "
+          f"H1_k0={summary['false_flags_H1_k0']}")
+    print(f"[Pilot] Localization hit-rate (drop-I_perp argmax) on H1_k1: "
+          f"{summary['localization_hit_rate_H1_k1']}  | convergent subset: "
+          f"{summary['H1_k1_convergent_subset']['localization_hit_rate']}")
     print(f"[Pilot] Result: completed={result['completed']} skipped={result['skipped']} "
           f"checkpoint={result['checkpoint']}")
 
