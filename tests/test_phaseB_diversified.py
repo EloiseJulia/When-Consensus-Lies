@@ -501,3 +501,95 @@ def test_reporter_emits_deltas_and_abstention(cfg, tmp_path):
         div.CONFIG_ROLE_DIVERSIFIED,
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. BASELINE COVERAGE — the confirmatory baseline must load from the FULL
+#    confirmatory set (multi-source concat + raw-line dedup), not a subset.
+# ─────────────────────────────────────────────────────────────────────────────
+def test_reporter_baseline_concat_dedup_covers_full_item_set(cfg, tmp_path):
+    """A single subset source pairs only its own items; concatenating multiple
+    sources (with an exact-duplicate overlap) covers the FULL union after dedup.
+
+    This is the regression guard for the fixed bug: using one subset checkpoint
+    left n_delta_items tiny (3); the full multi-partition baseline must pair all
+    items (here 6)."""
+    import json
+    import math
+
+    import registered_run as rr
+
+    all_tasks = rr.load_tasks()
+    h1 = [
+        t for t in all_tasks
+        if t.regime == "H1_external"
+        and any((not i.is_target and i.id != "I_perp") for i in t.interpretations)
+    ]
+    assert len(h1) >= 6
+    six = h1[:6]
+    tasks_a, tasks_b = six[:3], six[3:6]
+    seeds = drv._default_seeds(cfg)
+
+    # Phase B checkpoint covering all 6 items.
+    pb_cp = tmp_path / ".run_partitions" / "cp_phaseB.jsonl"
+    drv.run(
+        six, cfg,
+        checkpoint_path=str(pb_cp),
+        cache_dir=str(tmp_path / ".llm_cache_phaseB"),
+        offline=True,
+    )
+    assert pb_cp.exists()
+
+    # Two partition-style baseline files (each a SUBSET of the item set).
+    base_a = tmp_path / "base_a.jsonl"
+    base_b = tmp_path / "base_b.jsonl"
+    _write_baseline_checkpoint(base_a, tasks_a, seeds)
+    _write_baseline_checkpoint(base_b, tasks_b, seeds)
+    # Inject an EXACT-DUPLICATE overlap: append base_a's raw lines into base_b too.
+    dup_lines = base_a.read_text(encoding="utf-8").splitlines(keepends=True)
+    with base_b.open("a", encoding="utf-8") as fb:
+        fb.writelines(dup_lines)
+
+    # (a) Single subset source → pairs only its own 3 items.
+    single = rep.compute_report(str(pb_cp), str(base_a), all_tasks)
+    s_h1 = single["contrasts"][single["contrasts"]["regime"] == "H1_external"]
+    assert int(s_h1["n_delta_items"].max()) == 3
+
+    # (b) Concatenated + deduped multi-source baseline → pairs the FULL 6-item
+    #     union (the duplicate base_a lines in base_b are collapsed, not doubled).
+    both = rep.compute_report(str(pb_cp), [str(base_a), str(base_b)], all_tasks)
+    b_h1 = both["contrasts"][both["contrasts"]["regime"] == "H1_external"]
+    assert len(b_h1) >= 1
+    for _, row in b_h1.iterrows():
+        assert row["n_delta_items"] == 6
+        assert row["baseline_method"] == "heterogeneous-MAD"
+        # All-foil baseline → CD 1.0; dedup must NOT change this (doubling agents
+        # in a homogeneous-foil cell would keep cd_primary at 1.0, but the item
+        # COUNT would be wrong without the union — the coverage assert above is
+        # the discriminating check).
+        assert row["baseline_mean_cd"] == 1.0
+        assert math.isfinite(row["mean_delta"])
+        assert math.isfinite(row["delta_ci_lo"])
+        assert row["delta_ci_lo"] <= row["delta_ci_hi"]
+
+
+def test_load_confirmatory_tidy_dedups_identical_records(cfg, tmp_path):
+    """_load_confirmatory_tidy must collapse byte-identical raw lines so an
+    overlapping subset source does not inflate a cell's agent count."""
+    import registered_run as rr
+
+    all_tasks = rr.load_tasks()
+    h1 = [
+        t for t in all_tasks
+        if t.regime == "H1_external"
+        and any((not i.is_target and i.id != "I_perp") for i in t.interpretations)
+    ][:2]
+    seeds = drv._default_seeds(cfg)
+    base = tmp_path / "b.jsonl"
+    _write_baseline_checkpoint(base, h1, seeds)
+
+    tidy_one = rep._load_confirmatory_tidy(str(base), all_tasks)
+    # Passing the SAME file twice must dedup back to the single-file row count.
+    tidy_dup = rep._load_confirmatory_tidy([str(base), str(base)], all_tasks)
+    assert len(tidy_one) == len(tidy_dup)
+    assert len(tidy_one) > 0
+
