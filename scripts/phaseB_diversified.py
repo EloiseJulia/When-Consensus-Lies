@@ -87,6 +87,61 @@ _SEED_STRIDE: int = 1000
 #: minimum cardinality is 1 (like `single` / `verifier`).
 _GATE_C_MIN_AGENTS: int = 1
 
+# ── Confirmatory / other-pass artifacts this driver must NEVER overwrite ──────
+# (BLOCKER guard — a live run with a bad --checkpoint/--cache-dir could otherwise
+#  clobber the confirmatory run's data.)
+_FORBIDDEN_CHECKPOINT_NAMES = frozenset({
+    "registered_run_checkpoint.jsonl",   # confirmatory full run
+    "pilot_gate_checkpoint.jsonl",       # §11 pilot gate
+    "cp_sck10.jsonl",                    # A08 sc-k10 sensitivity pass
+})
+_FORBIDDEN_CACHE_NAMES = frozenset({
+    ".llm_cache_registered_run",
+    ".llm_cache_pilot_gate",
+    ".llm_cache_sck10",
+    ".llm_cache_default_check_h2add",
+})
+
+
+def _validate_output_paths(checkpoint_path: str, cache_dir: str) -> None:
+    """Reject checkpoint/cache paths that could clobber another run's artifacts.
+
+    Guards (raise ValueError on violation):
+      - The checkpoint basename must not be a known confirmatory/other-pass
+        checkpoint, and the checkpoint must live under a ``.run_partitions``
+        directory OR a temp directory (the latter for tests).
+      - The cache basename must not be a known confirmatory/other-pass cache dir.
+    """
+    import tempfile
+
+    cp = Path(checkpoint_path).resolve()
+    if cp.name in _FORBIDDEN_CHECKPOINT_NAMES:
+        raise ValueError(
+            f"Refusing to use checkpoint {checkpoint_path!r}: name collides with a "
+            "confirmatory/other-pass artifact. Phase B must write its OWN checkpoint "
+            "(e.g. .run_partitions/cp_phaseB.jsonl)."
+        )
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    under_runparts = ".run_partitions" in cp.parts
+    try:
+        under_tmp = cp.is_relative_to(tmp_root)
+    except AttributeError:  # Python < 3.9 fallback
+        under_tmp = str(cp).startswith(str(tmp_root))
+    if not (under_runparts or under_tmp):
+        raise ValueError(
+            f"Refusing to use checkpoint {checkpoint_path!r}: it is not under a "
+            "'.run_partitions' directory (or a temp dir for tests). Phase B keeps "
+            "its checkpoint isolated from the confirmatory run."
+        )
+
+    cache = Path(cache_dir).resolve()
+    if cache.name in _FORBIDDEN_CACHE_NAMES:
+        raise ValueError(
+            f"Refusing to use cache dir {cache_dir!r}: name collides with a "
+            "confirmatory/other-pass LLM cache. Phase B must use its OWN cache "
+            "(e.g. .llm_cache_phaseB)."
+        )
+
 
 # ── Guards (mirror scripts/sensitivity_sck10.py) ─────────────────────────────
 
@@ -206,6 +261,11 @@ def run(
         seeds = _default_seeds(cfg)
     if configs is None:
         configs = list(_CONFIGS_PHASEB)
+
+    # BLOCKER guard: a real (non-dry-run) execution WRITES — never let it target
+    # a confirmatory/other-pass checkpoint or cache.  Dry-run is read-only.
+    if not dry_run:
+        _validate_output_paths(checkpoint_path, cache_dir)
 
     jobs = enumerate_jobs(tasks, configs, seeds)
 

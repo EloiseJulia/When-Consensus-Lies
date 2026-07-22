@@ -107,7 +107,8 @@ PROMPT_C7_R4_DEFAULTCHECK_V1 = """{task_prompt}
 
 State the default assumptions a solver would make here, and for each, whether the prompt actually fixes it."""
 
-#: C7 R5 Integrator (design §2 C7.R5, verbatim generic).
+#: C7 R5 Integrator (design §2 C7.R5, verbatim generic scaffolding + explicit
+#: detector-compatible abstain form).
 PROMPT_C7_R5_INTEGRATOR_V1 = """You are integrating several prior analyses of the same task.
 
 Task:
@@ -116,9 +117,24 @@ Task:
 Prior responses from four independent agents:
 {prior_responses}
 
-Do not treat agreement among the earlier responses as evidence of correctness. If the earlier analysis shows that a decision-relevant detail is unspecified, respond with a clarification request in the answer-format's abstain form; otherwise give the best final answer.
+Do not treat agreement among the earlier responses as evidence of correctness. If the earlier analysis shows that a decision-relevant detail is unspecified, respond with EXACTLY the following single line and nothing else:
+{abstain_form}
+Otherwise, give the best final answer in the required answer format.
 
 {answer_format_instruction}"""
+
+#: Explicit clarification/abstain string the FROZEN rule-based abstention
+#: detector (analysis/abstention.py) recognizes.  The phrase "cannot determine"
+#: matches the SIGNAL_CANNOT_DETERMINE rule
+#: ``(?:cannot|...)\s+(?:determine|...)`` (an UNguarded pattern), and
+#: "more information is required to determine" matches the SIGNAL_NEED_MORE_INFO
+#: rule ``more\s+(?:context|information|...)\s+(?:is\s+)?(?:needed|required|...)``.
+#: It is GENERIC (names no specific interpretation/axis/foil) → anti-leakage safe.
+ABSTAIN_FORM = (
+    "CLARIFICATION NEEDED: the task is ambiguous and I cannot determine which "
+    "interpretation is intended; more information is required to determine the "
+    "correct answer."
+)
 
 
 # ── Family/model resolution from config roles (no hardcoded roster) ──────────
@@ -311,6 +327,7 @@ def run_role_diversified(
     r5_prompt = PROMPT_C7_R5_INTEGRATOR_V1.format(
         task_prompt=task.prompt,
         prior_responses="\n\n".join(prior_blocks),
+        abstain_form=ABSTAIN_FORM,
         answer_format_instruction=fmt,
     )
     r5_completion = client.complete(

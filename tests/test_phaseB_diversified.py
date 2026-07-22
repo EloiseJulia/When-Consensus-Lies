@@ -34,6 +34,7 @@ from common.schema import Task, Interpretation, AgentRun
 
 import harness.diversified as div
 import scripts.phaseB_diversified as drv  # noqa: E402  (scripts/ import path set above)
+import scripts.phaseB_report as rep  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -288,3 +289,215 @@ def test_c7_integrator_identity(rec_client):
     runs = div.run_role_diversified(task, rec_client)
     assert runs[0].model_role == "tested_agents"
     assert runs[0].model_id == "claude-opus-4.8"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. BLOCKER — path guard rejects confirmatory checkpoint/cache overrides
+# ─────────────────────────────────────────────────────────────────────────────
+def test_guard_rejects_confirmatory_checkpoint(cfg, tmp_path):
+    import registered_run as rr
+
+    tasks = rr.load_tasks()[:1]
+    with pytest.raises(ValueError):
+        drv.run(
+            tasks,
+            cfg,
+            checkpoint_path="registered_run_checkpoint.jsonl",
+            cache_dir=str(tmp_path / ".llm_cache_phaseB"),
+            offline=True,
+        )
+
+
+def test_guard_rejects_confirmatory_cache(cfg, tmp_path):
+    import registered_run as rr
+
+    tasks = rr.load_tasks()[:1]
+    with pytest.raises(ValueError):
+        drv.run(
+            tasks,
+            cfg,
+            checkpoint_path=str(tmp_path / "cp_phaseB.jsonl"),
+            cache_dir=".llm_cache_registered_run",
+            offline=True,
+        )
+
+
+def test_guard_rejects_non_runpartitions_checkpoint(cfg):
+    import registered_run as rr
+
+    tasks = rr.load_tasks()[:1]
+    # A cwd-relative checkpoint that is neither under .run_partitions nor temp.
+    with pytest.raises(ValueError):
+        drv.run(
+            tasks,
+            cfg,
+            checkpoint_path="some_other_dir/cp_phaseB.jsonl",
+            cache_dir="some_other_dir/.llm_cache_phaseB",
+            offline=True,
+        )
+
+
+def test_guard_allows_run_partitions_path(cfg, tmp_path):
+    # A .run_partitions path (under a temp root) is allowed.
+    import registered_run as rr
+
+    tasks = rr.load_tasks()[:1]
+    cp = tmp_path / ".run_partitions" / "cp_phaseB.jsonl"
+    result = drv.run(
+        tasks,
+        cfg,
+        checkpoint_path=str(cp),
+        cache_dir=str(tmp_path / ".llm_cache_phaseB"),
+        offline=True,
+    )
+    assert result["status"] == "ok"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. MAJOR — R5 abstain form is recognized by the FROZEN detector, not I_perp-lost
+# ─────────────────────────────────────────────────────────────────────────────
+def test_r5_abstain_form_is_detected_as_abstention():
+    from analysis.abstention import detect_abstention
+
+    det = detect_abstention(div.ABSTAIN_FORM)
+    assert det["abstained"] is True
+    assert det["signal"] in ("CANNOT_DETERMINE", "NEED_MORE_INFO")
+
+
+def test_r5_clarification_labeled_iperp_but_flagged(cfg):
+    """A clarification is I_perp (CD-ineligible) yet VISIBLE to the detector."""
+    import registered_run as rr
+    from harness.label import label_run
+    from analysis.abstention import detect_abstention
+    from analysis.cd import cd_primary
+
+    task = next(t for t in rr.load_tasks() if t.domain == "policy_qa")
+    target = next((i.id for i in task.interpretations if i.is_target), "I0")
+
+    run_obj = AgentRun(
+        task_id=task.id,
+        config=div.CONFIG_ROLE_DIVERSIFIED,
+        model_role="tested_agents",
+        model_id="claude-opus-4.8",
+        output=div.ABSTAIN_FORM,
+        label="",
+        verbalized_conf=0.7,
+        logit_conf=None,
+        seed=cfg["seeds"]["global"],
+    )
+    lbl = label_run(run_obj, task)
+    # A clarification carries no numeric answer → I_perp (ineligible for CD).
+    assert lbl == "I_perp"
+    # ... but the FROZEN abstention detector still counts it as clarification.
+    assert detect_abstention(run_obj.output)["abstained"] is True
+    # I_perp is NOT counted as a convergent wrong interpretation.
+    assert cd_primary([lbl], target) == 0.0
+
+
+def test_r5_prompt_contains_abstain_form(rec_client):
+    task = _leak_task()
+    div.run_role_diversified(task, rec_client)
+    # The R5 integrator prompt (last recorded) must carry the exact abstain form.
+    assert any(div.ABSTAIN_FORM in p for p in rec_client.recorded_prompts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. MAJOR — reporter emits the P-B1/P-B2 deltas + CIs + abstention rates
+# ─────────────────────────────────────────────────────────────────────────────
+def _write_baseline_checkpoint(path: Path, tasks, seeds):
+    """Write a small confirmatory-style heterogeneous-MAD checkpoint (all foil)."""
+    import json
+
+    with path.open("w", encoding="utf-8") as fh:
+        for task in tasks:
+            foil = next(
+                (i.id for i in task.interpretations
+                 if not i.is_target and i.id != "I_perp"),
+                None,
+            )
+            if foil is None:
+                continue
+            for s in seeds:
+                for agent_idx in range(4):  # heterogeneous-MAD n_agents=4
+                    rec = {
+                        "type": "run",
+                        "task_id": task.id,
+                        "config": "heterogeneous-MAD",
+                        "model_role": "tested_agents",
+                        "model_id": "gpt-5.4",
+                        "output": f"baseline answer {agent_idx}",
+                        "label": foil,  # all agents converge on the SAME foil
+                        "verbalized_conf": 0.7,
+                        "logit_conf": None,
+                        "seed": s + agent_idx,
+                        "replicate_seed": s,
+                    }
+                    fh.write(json.dumps(rec) + "\n")
+
+
+def test_reporter_emits_deltas_and_abstention(cfg, tmp_path):
+    import registered_run as rr
+
+    all_tasks = rr.load_tasks()
+    h1_tasks = [
+        t for t in all_tasks
+        if t.regime == "H1_external"
+        and any((not i.is_target and i.id != "I_perp") for i in t.interpretations)
+    ][:3]
+    assert len(h1_tasks) == 3
+    seeds = drv._default_seeds(cfg)
+
+    # 1) Phase B checkpoint from the offline driver (labeled by frozen labeler).
+    pb_cp = tmp_path / ".run_partitions" / "cp_phaseB.jsonl"
+    drv.run(
+        h1_tasks,
+        cfg,
+        checkpoint_path=str(pb_cp),
+        cache_dir=str(tmp_path / ".llm_cache_phaseB"),
+        offline=True,
+    )
+    assert pb_cp.exists()
+
+    # 2) Baseline confirmatory (heterogeneous-MAD) checkpoint for the SAME items.
+    base_cp = tmp_path / "confirmatory.jsonl"
+    _write_baseline_checkpoint(base_cp, h1_tasks, seeds)
+
+    # 3) Report — reuse the FROZEN CD + bootstrap + abstention machinery.
+    report = rep.compute_report(
+        str(pb_cp),
+        str(base_cp),
+        all_tasks,  # pass full task list for metadata lookup
+    )
+
+    contrasts = report["contrasts"]
+    abstention = report["abstention"]
+
+    for col in ("config", "prediction", "regime", "mean_cd",
+                "baseline_mean_cd", "mean_delta", "delta_ci_lo",
+                "delta_ci_hi", "n_delta_items"):
+        assert col in contrasts.columns
+
+    # Both predictions present on the H1_external bed with 3 paired items each.
+    h1 = contrasts[contrasts["regime"] == "H1_external"]
+    pb1 = h1[h1["config"] == div.CONFIG_CROSS_VENDOR_SYNTHESIS].iloc[0]
+    pb2 = h1[h1["config"] == div.CONFIG_ROLE_DIVERSIFIED].iloc[0]
+    assert pb1["prediction"] == "P-B1"
+    assert pb2["prediction"] == "P-B2"
+    for row in (pb1, pb2):
+        assert row["n_delta_items"] == 3
+        assert row["baseline_method"] == "heterogeneous-MAD"
+        # Baseline all-foil → baseline_mean_cd == 1.0; deltas + CIs finite.
+        assert row["baseline_mean_cd"] == 1.0
+        import math
+        assert math.isfinite(row["mean_delta"])
+        assert math.isfinite(row["delta_ci_lo"])
+        assert math.isfinite(row["delta_ci_hi"])
+        assert row["delta_ci_lo"] <= row["delta_ci_hi"]
+
+    # Abstention table present with a rate column per config.
+    assert "abstention_rate" in abstention.columns
+    assert set(abstention["config"]) >= {
+        div.CONFIG_CROSS_VENDOR_SYNTHESIS,
+        div.CONFIG_ROLE_DIVERSIFIED,
+    }
+
