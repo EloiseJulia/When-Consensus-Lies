@@ -1,8 +1,10 @@
-# Pre-Registration Amendment 12 — Exploratory diversified-evidence conditions (DRAFT → owner ratification)
+# Pre-Registration Amendment 12 — Exploratory diversified-evidence conditions (RATIFIED)
 
-> **STATUS: DRAFT — UNSIGNED. Requires owner @EloiseJulia PERSONAL ratification before any run.**
-> The AI Manager MUST NOT self-sign "owner." No Phase-B run launches until the box in §6 is checked by the
-> owner personally.
+> **STATUS: RATIFIED by owner @EloiseJulia (2026-07-22).** The owner personally approved the two exploratory
+> conditions (C5, C7), their pre-committed prompts/roles/predictions, the anti-leakage guarantee, and their
+> EXPLORATORY (never-confirmatory) reporting. Design implementation + cross-family audit proceed; a SEPARATE
+> owner GO is required immediately before the live run (per the owner's instruction to "confirm once more
+> before launch"). The AI Manager did NOT self-sign owner.
 
 ## 0. Purpose & scope
 Registers two NEW, **post-hoc EXPLORATORY** computational conditions added AFTER the confirmatory run, to
@@ -57,11 +59,13 @@ significance. Implementation is ADDITIVE (new driver + module, separate checkpoi
 edited.
 
 ## 6. Ratification (owner-personal — REQUIRED before any run)
-- [ ] Owner @EloiseJulia personally ratifies the two exploratory conditions (C5, C7), their pre-committed
+- [x] Owner @EloiseJulia personally ratifies the two exploratory conditions (C5, C7), their pre-committed
       prompts/roles/predictions (design spec §2–§3), the anti-leakage guarantee (§2 here), and that they are
-      reported as EXPLORATORY, never confirmatory. — DATE: __________
-- [ ] Owner acknowledges the run is $0 (local proxy) and additive (no frozen file / no confirmatory
-      checkpoint touched). — DATE: __________
+      reported as EXPLORATORY, never confirmatory. — DATE: 2026-07-22 (owner selection: "批准 Amendment 12")
+- [x] Owner acknowledges the run is $0 (local proxy) and additive (no frozen file / no confirmatory
+      checkpoint touched). — DATE: 2026-07-22
+- [ ] SEPARATE owner GO immediately before the LIVE run (owner asked to confirm once more after the driver
+      is implemented + cross-family audited). — DATE: __________
 
-Amendment status: **DRAFT — awaiting owner @EloiseJulia personal ratification.** Until then, Phase B stays at
-design only; no driver runs live.
+Amendment status: **RATIFIED (owner @EloiseJulia, 2026-07-22).** Implementation + cross-family audit proceed;
+the live run awaits the separate pre-launch owner GO above.
