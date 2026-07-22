@@ -275,6 +275,23 @@ def test_population_weighted_estimates():
     assert pop["recall"] < raw_recall
 
 
+def test_population_f1_zero_when_precision_and_recall_zero():
+    # TP=0, FP=1, FN=1 → precision=0, recall=0 → F1 must be 0.0 (not NaN).
+    key = {
+        "p1": {"detector_positive": True, "stratum": STRATUM_POSITIVE, "stratum_pop": 1},
+        "i1": {"detector_positive": False, "stratum": STRATUM_IPERP, "stratum_pop": 1},
+    }
+    human = {"p1": 0, "i1": 1}  # positive is a false positive; negative is a false negative
+    pop = abstention_score.population_estimates(human, key)
+    assert pop["tp_pop"] == pytest.approx(0.0)
+    assert pop["fp_pop"] == pytest.approx(1.0)
+    assert pop["fn_pop"] == pytest.approx(1.0)
+    assert pop["precision"] == pytest.approx(0.0)
+    assert pop["recall"] == pytest.approx(0.0)
+    assert pop["f1"] == 0.0
+    assert not math.isnan(pop["f1"])
+
+
 def test_scorer_fails_on_blank_label(tmp_path: Path):
     sheet = tmp_path / "partial.csv"
     _write_sheet(sheet, [("r1", "1"), ("r2", ""), ("r3", "0")])

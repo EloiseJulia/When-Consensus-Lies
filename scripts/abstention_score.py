@@ -267,10 +267,12 @@ def population_estimates(
 
     precision = tp_pop / (tp_pop + fp_pop) if (tp_pop + fp_pop) else float("nan")
     recall = tp_pop / (tp_pop + fn_pop) if (tp_pop + fn_pop) else float("nan")
-    if precision == precision and recall == recall and (precision + recall) > 0:
-        f1 = 2 * precision * recall / (precision + recall)
+    if precision != precision or recall != recall:
+        f1 = float("nan")            # truly undefined (precision or recall undefined)
+    elif (precision + recall) == 0:
+        f1 = 0.0                     # both defined and zero → F1 is 0.0 (match prf())
     else:
-        f1 = float("nan")
+        f1 = 2 * precision * recall / (precision + recall)
 
     return {
         "tp_pop": tp_pop, "fp_pop": fp_pop, "fn_pop": fn_pop, "tn_pop": tn_pop,
