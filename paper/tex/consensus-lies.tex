@@ -11,7 +11,7 @@
 \acmVolume{9}
 \acmNumber{CSCW}
 \acmArticle{XXX}
-\acmMonth{4}
+\acmMonth{7}
 \acmYear{2026}
 \acmDOI{10.1145/XXXXXXX}
 \setcopyright{acmlicensed}
@@ -371,8 +371,11 @@ conversational influence. Table~\ref{tab:roster} lists the roster.
 \centering
 \small
 \caption{Frontier roster by model class and family (Copilot-proxy slugs, Amendment~06). Per-item family
-separation is enforced at run time. The R2 constructor and the verifier sit \emph{outside} the tested pool,
-so cross-family construction and verification never share a family with an evaluated agent.}
+separation is enforced at run time. The study spans \emph{two} independent benchmark constructors: the
+primary constructor (Microsoft) and the verifier sit \emph{outside} the tested pool, while the
+Amendment~10 R2 held-out subset is built by a \emph{second} family (Anthropic) that is itself among the
+tested families. R2 is computed only on cells whose tested family differs from the item's constructor, so no
+evaluated agent ever shares a family with the constructor of the item on which it is scored.}
 \label{tab:roster}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -392,7 +395,8 @@ Weak tier           & OpenAI    & \texttt{gpt-4o-mini} \\
                     & Anthropic & \texttt{claude-haiku-4.5} \\
                     & Google    & \texttt{gemini-3.5-flash} \\
 \midrule
-R2 constructor      & Microsoft & \texttt{mai-code-1-flash} \\
+Primary benchmark constructor & Microsoft & \texttt{mai-code-1-flash} \\
+R2 held-out constructor (Amdt~10) & Anthropic & \texttt{claude-opus-4.8} \\
 Verifier / auditor  & OpenAI    & \texttt{gpt-5.6-sol} \\
 \bottomrule
 \end{tabular}
@@ -566,10 +570,12 @@ that decisive information is missing. Consensus offers no internal warning.}
 \end{figure}
 
 \subsection{F5: The convergence is not an artifact of the benchmark's constructor}
-A skeptic might argue that convergence reflects a prior shared with whoever \emph{built} the traps. We
-reconstructed a held-out subset of H1 items with a \emph{different} constructor family (Anthropic) and
-re-ran it: models from the \emph{other} families (OpenAI, Google) converge on these Anthropic-constructed
-foils at single-agent \cd{} $=0.72$ (0.87 on construct-valid items). The convergence persists under
+A skeptic might argue that convergence reflects a prior shared with whoever \emph{built} the traps. The
+main benchmark is Microsoft-constructed (\texttt{mai-code-1-flash}, outside the tested pool), whereas this
+held-out R2 subset is Anthropic-constructed (Amendment~10), so the study spans two independent constructor
+families. We reconstructed a held-out subset of H1 items with a \emph{different} constructor family
+(Anthropic) and re-ran it: models from the \emph{other} families (OpenAI, Google) converge on these
+Anthropic-constructed foils at single-agent \cd{} $=0.72$ (0.87 on construct-valid items). The convergence persists under
 cross-family construction (\textbf{R2}); the pre-registered R2 aggregation-amplification metric was, like
 R1b below, statistically inconclusive on the primary metric, so we rest the confound rebuttal on the direct
 cross-family single-agent persistence and report the metric honestly.
