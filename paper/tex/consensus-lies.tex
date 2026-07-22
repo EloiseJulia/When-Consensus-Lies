@@ -308,7 +308,7 @@ the two nearest lines at the construct, manipulation, and metric levels: where K
 document that LLM errors are \emph{correlated} across providers as an observed property, and Yang et
 al.~\cite{yang2025underspecification} show that underspecification \emph{degrades} performance, we
 \emph{isolate a controlled, executable-gold axis}---the location of the disambiguator---that switches the
-failure on and off while holding the task, answer space, and verifier fixed, and we frame it as an
+failure on and off while holding the base task and executable verifier fixed, and we frame it as an
 \emph{interface-centered} question (when does displayed multi-model agreement warrant trust) with a
 convergent-delusion metric rather than a general error-correlation or accuracy claim. Our contribution is
 thus not to re-demonstrate that consensus can be wrong, but to
@@ -348,10 +348,12 @@ Table~\ref{tab:examples} illustrates the two regimes: in both, an unaware solver
 they differ in whether the retained prompt \emph{contains} what is needed to override it. We note that the 40
 \textbf{H1\_external} and 14 \textbf{H2\_derivable} items are \emph{different item families}, not paired
 minimal variants of identical tasks, so the H1-versus-H2 contrast is a broad regime comparison. The sharpest
-\emph{causal} evidence that the disambiguator's \emph{location} drives the failure comes instead from the
-\emph{within-item} $k{=}0$-vs-$k{\ge}1$ control (R1a, \S\ref{sec:results}), which holds the item fixed and
-deletes a single clause. Constructing matched paired variants (the same item shipped in both regimes) is
-future work.
+\emph{causal} evidence that the disambiguator's \emph{presence} drives the failure comes instead from the
+\emph{within-item} $k{=}0$-vs-$k{\ge}1$ control (R1a, \S\ref{sec:results}), which compares matched variants of
+the \emph{same base task} that differ in whether the disambiguating clause(s) are retained---one deleted
+clause at $k{=}1$ and additional deleted clauses as $k$ grows, which also opens further interpretations
+(combinatorial foils, Amendment~03)---holding the base task and domain fixed. Constructing fully matched
+paired H1/H2 variants (the same item shipped in both regimes) is future work.
 
 \begin{table}[t]
 \centering
@@ -512,7 +514,7 @@ $\Delta\cd=0.53$, consistent across all three metric variants (Table~\ref{tab:re
 number of deleted clauses $k$ (Figure~\ref{fig:phase}). A within-design
 manipulation check makes this decisive: on fully specified $k{=}0$ items \cd{} $=0.00$, and on $k\ge1$ items
 \cd{} $=0.82$ (difference 95\% CI $[0.73,0.90]$)---the same pipeline, labeler, and metric yield zero when
-the prompt is complete and high when a single clause is deleted (\textbf{R1a}), ruling out a labeler or
+the prompt is complete and high once one or more disambiguating clauses are deleted (\textbf{R1a}), ruling out a labeler or
 foil-count artifact.
 
 \begin{table}[t]
@@ -556,8 +558,11 @@ reasoners are trapped about as reliably as weaker, non-frontier models, and a he
 (\emph{cross-vendor comparison/aggregation}) converges about as strongly as a single model sampled repeatedly
 (\emph{repeated sampling}) (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
 $[-0.078,+0.058]$; not the ordering we predicted). Because a non-significant difference is not by itself
-evidence of equivalence, we ran two one-sided tests (TOST) at pre-stated margins---the Amendment~08 minimum
-detectable effect $\Delta\cd=0.15$ and a stricter $0.10$. Cross-family and homogeneous convergence are
+evidence of equivalence, we ran a \emph{post-hoc secondary} equivalence analysis: two one-sided tests (TOST)
+at pre-stated margins---the Amendment~08 minimum
+detectable effect $\Delta\cd=0.15$ and a stricter $0.10$---on the method-matched paired item-level estimate
+($\Delta\cd=-0.020$, 95\% CI $[-0.067,0.027]$; distinct from the frozen pooled row-35 reference
+$\Delta\cd=-0.003$, which the TOST does not test). Cross-family and homogeneous convergence are
 statistically equivalent at both $\pm0.15$ ($p<0.001$) and $\pm0.10$ ($p=0.0007$), and the reasoning and
 weak tiers are equivalent at both margins ($p=0.006$); the weak-versus-heterogeneous contrast is equivalent
 at $\pm0.15$ ($p=0.014$) but \emph{not} at the stricter $\pm0.10$ ($p=0.145$), which we flag rather than
@@ -643,7 +648,8 @@ held-out R2 subset is Anthropic-constructed (Amendment~10), so the study spans t
 families. We reconstructed a held-out subset of H1 items with a \emph{different} constructor family
 (Anthropic) and re-ran it: models from the \emph{other} families (OpenAI, Google) converge on these
 Anthropic-constructed foils at single-agent \cd{} $=0.72$ (0.87 on construct-valid items). To show this is
-genuine cross-\emph{model} convergence and not a within-cell single-agent error rate, we measure per-item
+genuine cross-\emph{model} convergence and not a within-cell single-agent error rate, we ran a
+\emph{post-hoc secondary} analysis measuring per-item
 cross-model label \emph{concentration} on the R2 subset, using single-agent labels only from tested models
 whose family differs from the Anthropic constructor. On the ambiguous ($k\ge1$) items, the mean per-item
 concentration is $0.711$ (item-level bootstrap 95\% CI $[0.400,0.978]$), and on $4/6$ of them at least two
@@ -725,10 +731,12 @@ interventions leave the already-resolved regime intact ($\cd=0.000$).
 
 This is a pre-registered honest \emph{null} that \emph{strengthens} the paper's thesis: under a shared
 information boundary, neither changing the aggregation \emph{recipe} (synthesis) nor imposing generic
-epistemic \emph{roles} over the same shared prompt reduces convergent delusion. The failure is driven by the
-information boundary, not by how the shared answers are aggregated; effective remedies must diversify the
-\emph{inputs}/evidence, not merely the vendors or the roles. We state this modestly and do not claim to have
-found a solution.
+epistemic \emph{roles} over the same shared prompt reduced convergent delusion in the two interventions we
+tested. On this evidence the failure appears to be driven by the information boundary rather than by how the
+shared answers are aggregated; this motivates---but does not prove---the \emph{hypothesis} that effective
+remedies must diversify the \emph{inputs}/evidence rather than merely the vendors or the roles. We tested
+only these two interventions, state this modestly, and do not claim to have found a solution or that all
+same-input interventions are insufficient.
 
 %% =====================================================================
 \section{Discussion}
@@ -780,9 +788,9 @@ evidence and interpretations, not merely model providers.} Viewpoint diversity p
 \emph{inputs},
 retrieval paths, and representations---not merely different vendors behind the same prompt; this is the
 closing design principle, because swapping providers leaves the shared blind spot intact. Our exploratory
-Phase B conditions (\S\ref{sec:phaseB}) reinforce the point with \emph{computational} evidence: neither
-cross-vendor synthesis nor a generic role-diversified workflow reduced convergent delusion, so interventions
-that keep the same shared input are, on our evidence, insufficient.
+Phase B conditions (\S\ref{sec:phaseB}) are consistent with this direction: the two interventions we tested
+(cross-vendor synthesis and one generic role-diversified workflow) did not reduce convergent delusion,
+suggesting---though not establishing---that interventions which keep the same shared input may be insufficient.
 (5)~\emph{Preserve provenance across handoffs}, so that the context needed to disambiguate is not silently
 dropped. (6)~\emph{Elicit clarification.} Since agents rarely ask, interfaces---or their designers---must
 build the clarification-seeking that the models omit. (7)~\emph{Maintain dissent channels} rather than
