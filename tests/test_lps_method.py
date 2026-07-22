@@ -107,14 +107,98 @@ def test_H_seed_degenerate_zero_entropy():
     assert res["H_seed"] == 0.0
 
 
-def test_H_ctx_per_dimension_entropy_and_argmax():
-    # dim A: values→[I0,I0] (0 bits); dim B: values→[I0,I1] (1 bit) → argmax=B.
+def _sig_by_text(monkeypatch):
+    """Monkeypatch answer_signature so the signature IS the returned text
+    (except the literal 'BROKEN', which is treated as unparseable → None)."""
+    monkeypatch.setattr(lps, "answer_signature",
+                        lambda task, text: None if text == "BROKEN" else text)
+
+
+def test_H_ctx_mutual_equiv_distinct_results_high(monkeypatch):
+    # Refinement: three pins yield three DIFFERENT results that disagree with
+    # each other → 3 clusters → H_ctx = log2(3), even though NONE matches gold
+    # (the signatures R1/R2/R3 are arbitrary, never compared to a gold answer).
+    _sig_by_text(monkeypatch)
+
     def fn(role, prompt, seed):
-        return "I1" if "B_VALUE_2" in prompt else "I0"
+        if "V2" in prompt:
+            return "R2"
+        if "V3" in prompt:
+            return "R3"
+        return "R1"
+    client = ScriptedClient(fn)
+    dims = [{"dimension": "typical measure", "values": ["V1_mean", "V2_median", "V3_mode"]}]
+    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
+    d = res["per_dim"][0]
+    assert d["n_parseable"] == 3
+    assert d["n_clusters"] == 3
+    assert d["H_ctx"] == pytest.approx(math.log2(3))
+    assert res["flagged_dimension"] == "typical measure"
+
+
+def test_H_ctx_mutual_equiv_same_result_zero(monkeypatch):
+    # An in-prompt-fixed / nonexistent dimension: every pin gives the SAME result
+    # → 1 cluster → H_ctx = 0 (no false flag).
+    _sig_by_text(monkeypatch)
+    client = ScriptedClient(lambda role, prompt, seed: "SAME")
+    dims = [{"dimension": "irrelevant", "values": ["a", "b", "c"]}]
+    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
+    d = res["per_dim"][0]
+    assert d["n_parseable"] == 3
+    assert d["n_clusters"] == 1
+    assert d["H_ctx"] == pytest.approx(0.0)
+    assert res["flagged_dimension"] is None
+
+
+def test_H_ctx_excludes_unrunnable_pins(monkeypatch):
+    # A broken/unrunnable pin (e.g. language=Java breaking the harness) is EXCLUDED
+    # — it does not inflate H_ctx as its own singleton cluster. Here two pins are
+    # BROKEN → only 1 parseable remains → H_ctx = 0.
+    _sig_by_text(monkeypatch)
+
+    def fn(role, prompt, seed):
+        return "R1" if "V1" in prompt else "BROKEN"
+    client = ScriptedClient(fn)
+    dims = [{"dimension": "language", "values": ["V1_py", "V2_java", "V3_ruby"]}]
+    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
+    d = res["per_dim"][0]
+    assert d["signatures"] == ["R1", None, None]
+    assert d["n_parseable"] == 1
+    assert d["H_ctx"] == pytest.approx(0.0)   # <2 parseable → 0, no singleton inflation
+    assert res["flagged_dimension"] is None
+
+
+def test_H_ctx_excludes_unrunnable_keeps_genuine_switch(monkeypatch):
+    # One BROKEN pin excluded, two remaining pins DISAGREE → genuine switch = 1 bit.
+    _sig_by_text(monkeypatch)
+
+    def fn(role, prompt, seed):
+        if "V1" in prompt:
+            return "RA"
+        if "V2" in prompt:
+            return "RB"
+        return "BROKEN"
+    client = ScriptedClient(fn)
+    dims = [{"dimension": "threshold", "values": ["V1", "V2", "V3_broken"]}]
+    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
+    d = res["per_dim"][0]
+    assert d["n_parseable"] == 2
+    assert d["H_ctx"] == pytest.approx(1.0)
+    assert res["flagged_dimension"] == "threshold"
+
+
+def test_H_ctx_argmax_across_dims(monkeypatch):
+    # dim A: all same (0 bits); dim B: two distinct (1 bit) → argmax = B.
+    _sig_by_text(monkeypatch)
+
+    def fn(role, prompt, seed):
+        if "dimB" in prompt:
+            return "RB2" if "BV2" in prompt else "RB1"
+        return "RA"
     client = ScriptedClient(fn)
     dims = [
-        {"dimension": "dimA", "values": ["A_VALUE_1", "A_VALUE_2"]},
-        {"dimension": "dimB", "values": ["B_VALUE_1", "B_VALUE_2"]},
+        {"dimension": "dimA", "values": ["AV1", "AV2"]},
+        {"dimension": "dimB", "values": ["BV1", "BV2"]},
     ]
     res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
     per = {d["dimension"]: d["H_ctx"] for d in res["per_dim"]}
@@ -131,45 +215,50 @@ def test_H_ctx_empty_dims():
     assert res["flagged_dimension"] is None
 
 
-# ── 2b. Refinement 1: drop-I_perp H_ctx ──────────────────────────────────────
+# ── 2b. Gold-free answer_signature executor (real, deterministic) ────────────
 
-def test_H_ctx_drops_iperp_format_breaker_yields_zero():
-    # A "language" pin: value 2 breaks the checker → I_perp; only 1 VALID label
-    # remains (< 2) → H_ctx = 0 under the drop-I_perp rule, though the OLD
-    # all-label rule would have reported >0 (I0 vs I_perp).
-    def fn(role, prompt, seed):
-        return "I0" if "Python" in prompt else "I_perp"
-    client = ScriptedClient(fn)
-    dims = [{"dimension": "language", "values": ["Python", "Java", "Ruby"]}]
-    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
-    d = res["per_dim"][0]
-    assert d["labels"] == ["I0", "I_perp", "I_perp"]
-    assert d["valid_labels"] == ["I0"]
-    assert d["H_ctx"] == pytest.approx(0.0)           # drop-I_perp, <2 valid → 0
-    assert d["H_ctx_all"] > 0.0                        # old rule was inflated
-    assert res["H_ctx_max"] == pytest.approx(0.0)
-    assert res["H_ctx_max_all"] > 0.0
-    assert res["flagged_dimension"] is None
+def _fenced(code: str) -> str:
+    return f"```python\n{code}\n```"
 
 
-def test_H_ctx_dropiperp_genuine_switch_survives():
-    # Two VALID interpretations after excluding an I_perp → still a real switch.
-    seq = ["I0", "I1", "I_perp"]
-    holder = {"i": 0}
-    def fn(role, prompt, seed):
-        v = seq[holder["i"] % len(seq)]
-        holder["i"] += 1
-        return v
-    client = ScriptedClient(fn)
-    dims = [{"dimension": "threshold", "values": ["v1", "v2", "v3"]}]
-    res = lps.H_ctx(_dummy_task(), client, "m", dims, base_seed=0)
-    d = res["per_dim"][0]
-    assert d["valid_labels"] == ["I0", "I1"]
-    assert d["H_ctx"] == pytest.approx(1.0)            # I0 vs I1 = 1 bit
-    assert res["flagged_dimension"] == "threshold"
+def _real_task(task_id: str):
+    import registered_run as rr
+    tasks = {t.id: t for t in rr.load_tasks()}
+    return tasks[task_id]
 
 
-# ── 2c. Refinement 2: format/language/tooling dimension filter ───────────────
+def test_answer_signature_code_execution_distinguishes_behaviour():
+    # Gold-FREE: two code answers with DIFFERENT behaviour on the task's own inputs
+    # get DIFFERENT signatures; identical code gets the SAME signature. Never
+    # compared to the gold answer.
+    task = _real_task("code_quarter_001_k0")  # entrypoint: quarter(month)
+    calendar = _fenced("def quarter(month):\n    return (month - 1) // 3 + 1")
+    fiscal = _fenced(
+        "def quarter(month):\n    return ((month - 4) % 12) // 3 + 1"
+    )
+    sig_cal = lps.answer_signature(task, calendar)
+    sig_fis = lps.answer_signature(task, fiscal)
+    sig_cal2 = lps.answer_signature(task, calendar)
+    assert sig_cal is not None and sig_fis is not None
+    assert sig_cal != sig_fis          # different behaviour → different clusters
+    assert sig_cal == sig_cal2         # deterministic
+
+
+def test_answer_signature_code_unparseable_returns_none():
+    task = _real_task("code_quarter_001_k0")
+    assert lps.answer_signature(task, "I cannot write that code.") is None
+
+
+def test_answer_signature_numeric_cent_tolerance():
+    task = _real_task("policy_overtime_001_k0")
+    # The frozen extractor accepts only the structured contract (JSON 'amount'
+    # or a 'FINAL ANSWER: $...' money line); answer_signature reuses it gold-free.
+    assert lps.answer_signature(task, '{"amount": 123.45}') == "num:12345"
+    assert lps.answer_signature(task, '{"amount": 123.45}') == \
+        lps.answer_signature(task, 'FINAL ANSWER: $123.45')
+    assert lps.answer_signature(task, '{"amount": 99.99}') != \
+        lps.answer_signature(task, '{"amount": 123.45}')
+    assert lps.answer_signature(task, "no number here") is None
 
 def test_is_format_dim_filters_language_and_tooling():
     assert lps._is_format_dim({"dimension": "programming language",

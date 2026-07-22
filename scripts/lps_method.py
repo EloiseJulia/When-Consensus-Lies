@@ -11,9 +11,35 @@ Probing (LPP) detector defined in
 Two uncertainty axes, per (item, model):
   * ``H_seed`` — semantic entropy of the answer distribution under RESAMPLING the
     SAME underspecified prompt (temperature>0, k samples). The SOTA signal.
+    Clustering here is the FROZEN labeler's enumerated interpretations (exact).
   * ``H_ctx``  — answer dispersion under COUNTERFACTUAL PINNING of a candidate
     unstated dimension the model itself surfaced. High ``H_ctx`` ⇒ the answer
     depends on a dimension the prompt did not fix.
+
+H_ctx CLUSTERING — MUTUAL ANSWER-EQUIVALENCE (gold-FREE; 2026-07-23 refinement):
+    The pinned answers for a dimension are clustered by comparing them TO EACH
+    OTHER (not to the gold answer):
+      * numeric domains (policy_qa): each answer's numeric RESULT is extracted
+        with the labeler's answer-EXTRACTION only (NOT its gold-matcher) and
+        clustered by value-equality at cent tolerance.
+      * code domains (code_spec, data_analysis): each candidate is EXECUTED on the
+        task's own discriminating test inputs via the FROZEN execution harness
+        (read-only reuse of ``bench.<domain>._runner``'s isolated bootstrap) and
+        clustered by OUTPUT equality — two answers are equivalent iff they produce
+        identical outputs on every input.
+      * an answer that is unparseable/unrunnable (e.g. a "language=Java" pin that
+        breaks the harness) is EXCLUDED from the clustering (contributes nothing,
+        never its own singleton).
+    ``H_ctx(d_i)`` = entropy (bits) over the resulting equivalence CLUSTERS across
+    the PARSEABLE pins; if fewer than 2 parseable answers remain, ``H_ctx = 0``.
+
+    WHY (root cause the earlier pilots exposed): self-generated counterfactual pin
+    values live OFF the gold-enumerated interpretation grid, so gold-membership
+    labeling collapsed genuine switches to I_perp → ~0 signal. Mutual equivalence
+    detects that pinning "typical=mean" vs "=median" vs "=mode" yields three
+    DIFFERENT results that disagree WITH EACH OTHER → 3 clusters → high H_ctx, even
+    though none matches gold; while an in-prompt-fixed (H2) or nonexistent (k0)
+    dimension yields the SAME result regardless of the pin → 1 cluster → low H_ctx.
 
 DANGER quadrant = high ``H_ctx`` AND low ``H_seed`` (confident latent-premise
 ambiguity — the SOTA blind spot this study targets).
@@ -22,21 +48,23 @@ ANTI-LEAKAGE (inviolable, design §2/§6): every prompt the model sees is
 GENERIC — it uses ONLY ``task.prompt`` (+ the coarse domain name) and, for
 pinning, the model's OWN self-generated dimension/value strings. NONE of
 ``task.interpretations`` (id / gold_check), ``task.key_questions``,
-``task.latent_spec``, or any target/foil text ever enters a prompt. The gold
-axis (``key_questions``) is used ONLY for EVALUATION/reporting downstream.
+``task.latent_spec``, or any target/foil text ever enters a prompt. The mutual-
+equivalence clustering compares the PINNED ANSWERS to each other only — it never
+reads the gold answer. The gold axis (``key_questions``) is used ONLY for
+EVALUATION/reporting downstream.
 
-"Semantic clustering" is EXACT (not embedding-approximate): each distinct
-enumerated interpretation label from the FROZEN labeler
-(``harness.label.label_run``) is its own semantic cluster, and ``I_perp`` is its
-own cluster. Entropy is reported in BITS (log base 2).
+Entropy is reported in BITS (log base 2).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -371,7 +399,174 @@ def _is_format_dim(dim: Dict[str, Any]) -> bool:
     return False
 
 
-# ── Stage C: H_ctx (counterfactual pinning) ──────────────────────────────────
+# ── Gold-FREE answer-equivalence signatures (mutual clustering) ──────────────
+# These extract an answer's RESULT/BEHAVIOR without ever comparing to the gold
+# answer: numeric domains reuse the labeler's numeric EXTRACTION; code domains
+# EXECUTE the candidate on the task's own discriminating inputs (read-only reuse
+# of the FROZEN bench ``_runner`` isolated bootstrap) and use the OUTPUT tuple.
+
+_EXEC_TIMEOUT_SECONDS = 5.0
+
+
+def _numeric_signature(output_text: str) -> Optional[str]:
+    """Signature for numeric answers: extracted value at cent tolerance.
+
+    Reuses the labeler's answer-EXTRACTION ONLY (``_extract_numeric_from_output``
+    after ``_strip_reasoning``) — NEVER its gold-matcher. Returns None when no
+    numeric answer is parseable (→ excluded from clustering).
+    """
+    from harness.label import _extract_numeric_from_output, _strip_reasoning
+
+    amount = _extract_numeric_from_output(_strip_reasoning(output_text))
+    if amount is None:
+        return None
+    return f"num:{int(round(amount * 100))}"  # cent tolerance
+
+
+def _task_code_inputs(task: Task) -> Tuple[List[Any], Optional[str]]:
+    """Union of the task's discriminating test inputs + the shared entrypoint.
+
+    Read-only reuse of the frozen domain checkers (their ``.test_cases`` inputs
+    are exactly the interpretation-distinguishing inputs). Gold outputs are
+    ignored — only the INPUTS and the entrypoint are used.
+    """
+    if task.domain == "code_spec":
+        from bench.code_spec import get_checkers_and_candidates
+    elif task.domain == "data_analysis":
+        from bench.data_analysis import get_checkers_and_candidates
+    else:
+        return [], None
+    try:
+        checkers, _, _ = get_checkers_and_candidates(task.domain, task)
+    except (ValueError, KeyError, RuntimeError):
+        return [], None  # unknown/synthetic task → no discriminating inputs
+    inputs: List[Any] = []
+    seen: set = set()
+    entrypoint: Optional[str] = None
+    for checker in checkers.values():
+        entrypoint = getattr(checker, "entrypoint", entrypoint)
+        for inp, _expected in getattr(checker, "test_cases", []):
+            key = repr(inp)
+            if key not in seen:
+                seen.add(key)
+                inputs.append(inp)
+    return inputs, entrypoint
+
+
+def _run_code_outputs(
+    domain: str, code: str, entrypoint: str, inputs: List[Any]
+) -> Optional[str]:
+    """Execute *code* on each input via the frozen bootstrap; return output tuple.
+
+    Reuses ``bench.<domain>._runner.CANDIDATE_BOOTSTRAP`` (the SAME isolated worker
+    the gold harness uses) so execution semantics are identical. Returns a stable
+    string signature of the ordered outputs, or None if the candidate fails to
+    produce a clean result on ANY input (→ unrunnable → excluded).
+    """
+    if domain == "code_spec":
+        from bench.code_spec._runner import CANDIDATE_BOOTSTRAP
+    elif domain == "data_analysis":
+        from bench.data_analysis._runner import CANDIDATE_BOOTSTRAP
+    else:
+        return None
+
+    results: List[str] = []
+    sandbox = tempfile.mkdtemp(prefix="lps_exec_")
+    try:
+        bootstrap_path = os.path.join(sandbox, "_candidate_bootstrap.py")
+        with open(bootstrap_path, "w", encoding="utf-8") as fh:
+            fh.write(CANDIDATE_BOOTSTRAP)
+        clean_env = {
+            key: val
+            for key, val in os.environ.items()
+            if not key.startswith("PYTHON")
+            and key not in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
+        }
+        for inp in inputs:
+            multi = isinstance(inp, tuple)
+            worker_input = {
+                "candidate": code,
+                "entrypoint": entrypoint,
+                "input": list(inp) if multi else inp,
+                "multi": multi,
+            }
+            fd_in, in_path = tempfile.mkstemp(prefix="lps_in_", suffix=".json", dir=sandbox)
+            os.close(fd_in)
+            fd_out, out_path = tempfile.mkstemp(prefix="lps_out_", suffix=".json", dir=sandbox)
+            os.close(fd_out)
+            with open(in_path, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(worker_input))
+            cmd = [sys.executable, "-S", "-E", "-B", bootstrap_path, in_path, out_path]
+            try:
+                if sys.platform == "win32":
+                    subprocess.run(
+                        cmd, cwd=sandbox, env=clean_env, timeout=_EXEC_TIMEOUT_SECONDS,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        creationflags=0x00000200,
+                    )
+                else:
+                    subprocess.run(
+                        cmd, cwd=sandbox, env=clean_env, timeout=_EXEC_TIMEOUT_SECONDS,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+            except (subprocess.TimeoutExpired, OSError):
+                return None
+            try:
+                with open(out_path, "r", encoding="utf-8") as fh:
+                    out = json.load(fh)
+            except (OSError, ValueError):
+                return None
+            if out.get("status") != "ok":
+                return None
+            try:
+                results.append(json.dumps(out.get("result"), sort_keys=True, default=repr))
+            except (TypeError, ValueError):
+                results.append(repr(out.get("result")))
+    finally:
+        _rmtree_quiet(sandbox)
+    return "code:" + "||".join(results)
+
+
+def _rmtree_quiet(path: str) -> None:
+    import shutil
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def answer_signature(task: Task, output_text: str) -> Optional[str]:
+    """Gold-FREE equivalence signature of a single answer, or None if unparseable.
+
+    Two answers are mutually equivalent iff their signatures are equal. Compares
+    answers to EACH OTHER only — the gold answer is never consulted.
+    """
+    domain = task.domain
+    if domain == "policy_qa":
+        return _numeric_signature(output_text)
+    if domain in ("code_spec", "data_analysis"):
+        from harness.label import _extract_code_candidates
+
+        cands = _extract_code_candidates(output_text)
+        if not cands:
+            return None
+        inputs, entrypoint = _task_code_inputs(task)
+        if not inputs or not entrypoint:
+            return None
+        sigs: set = set()
+        for code in cands:
+            sig = _run_code_outputs(domain, code, entrypoint, inputs)
+            if sig is None:
+                return None  # any unrunnable block → whole answer excluded
+            sigs.add(sig)
+        if len(sigs) != 1:
+            return None  # disagreeing blocks → ambiguous → excluded
+        return sigs.pop()
+    return None
+
+
+# ── Stage C: H_ctx (counterfactual pinning, mutual-equivalence clustering) ────
 
 def H_ctx(
     task: Task,
@@ -381,29 +576,30 @@ def H_ctx(
     *,
     base_seed: int = 0,
 ) -> Dict[str, Any]:
-    """Per-dimension semantic entropy under counterfactual pinning.
+    """Per-dimension answer dispersion under counterfactual pinning.
 
     For each surfaced dimension d_i with values {v_ij}, build a pinned prompt
-    ``task.prompt ⊕ "assume d_i = v_ij"`` (model's OWN strings — no gold), answer,
-    and label. Two entropies are reported per dimension:
-      * ``H_ctx``      — Refinement 1: semantic entropy (bits) over VALID labels
-        only (``I_perp`` EXCLUDED). If fewer than 2 valid (non-I_perp) pinned
-        answers remain, ``H_ctx = 0`` (a format/tool-breaker dimension cannot
-        demonstrate a switch AMONG VALID interpretations).
-      * ``H_ctx_all``  — the old rule (entropy over ALL labels incl. I_perp), kept
-        for before/after comparison only.
+    ``task.prompt ⊕ "assume d_i = v_ij"`` (model's OWN strings — no gold) and
+    answer. Two entropies are reported per dimension:
+      * ``H_ctx``      — MUTUAL-EQUIVALENCE entropy (bits): cluster the pinned
+        answers by answer-to-answer equivalence via ``answer_signature`` (gold-
+        FREE); unparseable/unrunnable answers are EXCLUDED. If fewer than 2
+        parseable answers remain, ``H_ctx = 0``.
+      * ``H_ctx_all``  — legacy gold-label rule (entropy over the FROZEN labeler's
+        labels incl. I_perp), kept for before/after comparison only.
 
-    ``H_ctx_max`` / ``flagged_dimension`` use the drop-I_perp ``H_ctx``.
+    ``H_ctx_max`` / ``flagged_dimension`` use the mutual-equivalence ``H_ctx``.
 
     Returns ``{"per_dim", "H_ctx_max", "H_ctx_max_all", "flagged_dimension"}`` where
-    ``per_dim`` items carry ``{dimension, values, labels, valid_labels, H_ctx,
-    H_ctx_all}``.
+    ``per_dim`` items carry ``{dimension, values, labels, signatures, n_parseable,
+    n_clusters, H_ctx, H_ctx_all}``.
     """
     per_dim: List[Dict[str, Any]] = []
     for di, dim in enumerate(dims):
         name = dim["dimension"]
         values = dim["values"]
         labels: List[str] = []
+        signatures: List[Optional[str]] = []
         for vj, value in enumerate(values):
             prompt = PINNING_TEMPLATE.format(
                 prompt=task.prompt, dimension=name, value=value
@@ -414,15 +610,18 @@ def H_ctx(
                 client, prompt=prompt, model=model, seed=seed, temperature=0.0
             )
             labels.append(_label_answer(text, task, model_id=model, seed=seed))
-        valid = [l for l in labels if l != I_PERP]
-        h_valid = semantic_entropy(valid) if len(valid) >= 2 else 0.0
+            signatures.append(answer_signature(task, text))
+        parseable = [s for s in signatures if s is not None]
+        h_ctx = semantic_entropy(parseable) if len(parseable) >= 2 else 0.0
         per_dim.append(
             {
                 "dimension": name,
                 "values": values,
                 "labels": labels,
-                "valid_labels": valid,
-                "H_ctx": h_valid,
+                "signatures": signatures,
+                "n_parseable": len(parseable),
+                "n_clusters": len(set(parseable)),
+                "H_ctx": h_ctx,
                 "H_ctx_all": semantic_entropy(labels),
             }
         )
