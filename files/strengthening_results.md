@@ -48,27 +48,27 @@ Test statistic: paired-difference t-based TOST (df = n_items - 1). Item-level pa
 Tier mean cd_primary (H1_external): reasoning=0.5043, weak=0.4874, heterogeneous=0.5437.
 
 ### (a) heterogeneous-MAD vs homogeneous-MAD
-### heterogeneous-MAD vs homogeneous-MAD (row-35)
+#### heterogeneous-MAD vs homogeneous-MAD (row-35)
 - n items (paired): 40; observed Δ = **-0.0196**; 95% CI [-0.0666, 0.0274].
 - Pooled row-35 reference (frozen contrast): Δ = -0.0033 (hetero 0.5437 − homo 0.5470).
   - TOST ±0.15: 90% CI [-0.0587, 0.0196], p_TOST = 0.0000 → **✅ EQUIVALENT**.
   - TOST ±0.1: 90% CI [-0.0587, 0.0196], p_TOST = 0.0007 → **✅ EQUIVALENT**.
 
 ### (b) capability-tier CD invariance
-### reasoning vs weak (capability-tier CD)
+#### reasoning vs weak (capability-tier CD)
 - n items (paired): 40; observed Δ = **0.0169**; 95% CI [-0.0465, 0.0803].
 - Mean CD: 0.5043 vs 0.4874.
   - TOST ±0.15: 90% CI [-0.0359, 0.0697], p_TOST = 0.0001 → **✅ EQUIVALENT**.
   - TOST ±0.1: 90% CI [-0.0359, 0.0697], p_TOST = 0.0058 → **✅ EQUIVALENT**.
 
-### reasoning vs heterogeneous (capability-tier CD)
+#### reasoning vs heterogeneous (capability-tier CD)
 - n items (paired): 40; observed Δ = **-0.0394**; 95% CI [-0.0855, 0.0067].
 - ⚠️ heterogeneous tier carries only the heterogeneous-MAD method; this comparison is not method-matched
 - Mean CD: 0.5043 vs 0.5437.
   - TOST ±0.15: 90% CI [-0.0778, -0.0010], p_TOST = 0.0000 → **✅ EQUIVALENT**.
   - TOST ±0.1: 90% CI [-0.0778, -0.0010], p_TOST = 0.0057 → **✅ EQUIVALENT**.
 
-### weak vs heterogeneous (capability-tier CD)
+#### weak vs heterogeneous (capability-tier CD)
 - n items (paired): 40; observed Δ = **-0.0563**; 95% CI [-0.1387, 0.0261].
 - ⚠️ heterogeneous tier carries only the heterogeneous-MAD method; this comparison is not method-matched
 - Mean CD: 0.4874 vs 0.5437.
