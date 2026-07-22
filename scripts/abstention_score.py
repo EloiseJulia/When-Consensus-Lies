@@ -85,14 +85,48 @@ def load_human_labels(path: Path, *, label_col: str = "human_label") -> Dict[str
     return labels
 
 
-def load_key(path: Path) -> Dict[str, bool]:
-    """Load {row_id → detector_positive(bool)} from the hidden key file."""
+def load_key(path: Path) -> Dict[str, Dict[str, object]]:
+    """Load the hidden key: {row_id → {detector_positive, stratum, stratum_pop}}.
+
+    Strict: fails loudly on a blank/duplicate row_id or a malformed
+    ``detector_positive`` verdict (never coerces silently).
+    """
     rows = _read_csv(path)
-    out: Dict[str, bool] = {}
-    for row in rows:
+    if not rows:
+        raise SystemExit(f"ERROR: {path} has no data rows.")
+    for req in ("row_id", "detector_positive", "stratum", "stratum_pop"):
+        if req not in rows[0]:
+            raise SystemExit(f"ERROR: {path} missing required column {req!r} "
+                             f"(columns: {list(rows[0].keys())}).")
+
+    out: Dict[str, Dict[str, object]] = {}
+    for i, row in enumerate(rows):
         rid = (row.get("row_id") or "").strip()
-        val = (row.get("detector_positive") or "").strip().lower()
-        out[rid] = val in {"true", "1", "yes"}
+        if not rid:
+            raise SystemExit(f"ERROR: {path} row {i + 2} has a blank row_id.")
+        if rid in out:
+            raise SystemExit(f"ERROR: duplicate row_id {rid!r} in {path}.")
+        raw = (row.get("detector_positive") or "").strip().lower()
+        if raw in {"true", "1"}:
+            dp = True
+        elif raw in {"false", "0"}:
+            dp = False
+        else:
+            raise SystemExit(
+                f"ERROR: {path} row {i + 2} (row_id {rid}) has a malformed "
+                f"detector_positive verdict {row.get('detector_positive')!r}; "
+                f"expected true/false.")
+        try:
+            pop = int(str(row.get("stratum_pop")).strip())
+        except (TypeError, ValueError):
+            raise SystemExit(
+                f"ERROR: {path} row {i + 2} (row_id {rid}) has a malformed "
+                f"stratum_pop {row.get('stratum_pop')!r}; expected an integer.")
+        out[rid] = {
+            "detector_positive": dp,
+            "stratum": (row.get("stratum") or "").strip(),
+            "stratum_pop": pop,
+        }
     return out
 
 
@@ -121,8 +155,9 @@ def cohen_kappa(labels_a: Dict[str, int], labels_b: Dict[str, int]) -> Tuple[flo
     pa1 = sum(a) / n
     pb1 = sum(b) / n
     pe = pa1 * pb1 + (1 - pa1) * (1 - pb1)
-    if pe == 1.0:
-        return (1.0 if po == 1.0 else 0.0, n)
+    if pe >= 1.0:
+        # Degenerate: both coders used a single category → kappa undefined.
+        return (float("nan"), n)
     return ((po - pe) / (1 - pe), n)
 
 
@@ -158,6 +193,93 @@ def prf(cm: Dict[str, int]) -> Dict[str, float]:
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
+def population_estimates(
+    human: Dict[str, int],
+    key: Dict[str, Dict[str, object]],
+    z: float = 1.959963984540054,
+) -> Dict[str, object]:
+    """Design-correct (inverse-inclusion weighted) population estimates.
+
+    The sample is STRATIFIED: detector-positives are a census; I_perp and
+    parseable detector-negatives are sub-sampled from much larger pools. Raw
+    TP/(TP+FN) therefore understates population recall (I_perp over-sampled) and
+    the pooled Wilson CI is not a population rate. Here each sampled row is
+    weighted by its stratum inverse inclusion probability ``w_h = N_h / n_h``
+    (N_h = ``stratum_pop`` from the key, n_h = sampled rows in that stratum).
+
+    Population precision is exact (all detector-positives are a census, w=1).
+    Recall / F1 use the weighted (Horvitz–Thompson) false-negative estimate.
+    The abstention rate is a stratified estimator with a stratified
+    survey-variance 95% CI (finite-population corrected).
+    """
+    # Aggregate sampled rows by stratum.
+    strata: Dict[str, Dict[str, float]] = {}
+    for rid, h in human.items():
+        info = key[rid]
+        s = str(info["stratum"])
+        d = bool(info["detector_positive"])
+        g = strata.setdefault(s, {
+            "N": float(info["stratum_pop"]), "n": 0.0,
+            "h1": 0.0, "tp": 0.0, "fp": 0.0, "fn": 0.0, "tn": 0.0,
+        })
+        # N_h must be consistent within a stratum.
+        g["N"] = max(g["N"], float(info["stratum_pop"]))
+        g["n"] += 1
+        if h == 1:
+            g["h1"] += 1
+        if d and h == 1:
+            g["tp"] += 1
+        elif d and h == 0:
+            g["fp"] += 1
+        elif (not d) and h == 1:
+            g["fn"] += 1
+        else:
+            g["tn"] += 1
+
+    tp_pop = fp_pop = fn_pop = tn_pop = 0.0
+    per_stratum = []
+    N_total = 0.0
+    rate_num = 0.0  # sum_h N_h * p_h
+    var = 0.0
+    for s, g in sorted(strata.items()):
+        N_h, n_h = g["N"], g["n"]
+        w_h = N_h / n_h if n_h else float("nan")
+        tp_pop += g["tp"] * w_h
+        fp_pop += g["fp"] * w_h
+        fn_pop += g["fn"] * w_h
+        tn_pop += g["tn"] * w_h
+        p_h = g["h1"] / n_h if n_h else float("nan")
+        N_total += N_h
+        rate_num += N_h * p_h
+        fpc = (1 - n_h / N_h) if N_h else 0.0
+        if n_h > 1:
+            var += (N_h ** 2) * fpc * (p_h * (1 - p_h) / (n_h - 1))
+        per_stratum.append({
+            "stratum": s, "N_h": int(N_h), "n_h": int(n_h),
+            "weight": w_h, "human_abstain": int(g["h1"]), "p_h": p_h,
+        })
+
+    var = var / (N_total ** 2) if N_total else float("nan")
+    se = math.sqrt(var) if var == var and var >= 0 else float("nan")
+    rate = rate_num / N_total if N_total else float("nan")
+    rate_ci = (max(0.0, rate - z * se), min(1.0, rate + z * se)) \
+        if se == se else (float("nan"), float("nan"))
+
+    precision = tp_pop / (tp_pop + fp_pop) if (tp_pop + fp_pop) else float("nan")
+    recall = tp_pop / (tp_pop + fn_pop) if (tp_pop + fn_pop) else float("nan")
+    if precision == precision and recall == recall and (precision + recall) > 0:
+        f1 = 2 * precision * recall / (precision + recall)
+    else:
+        f1 = float("nan")
+
+    return {
+        "tp_pop": tp_pop, "fp_pop": fp_pop, "fn_pop": fn_pop, "tn_pop": tn_pop,
+        "precision": precision, "recall": recall, "f1": f1,
+        "abstention_rate": rate, "abstention_rate_ci": rate_ci,
+        "N_total": int(N_total), "per_stratum": per_stratum,
+    }
+
+
 # ── Report ───────────────────────────────────────────────────────────────────
 
 def _fmt(x: float) -> str:
@@ -170,32 +292,61 @@ def build_report(
     abst_k: int,
     abst_n: int,
     abst_ci: Tuple[float, float],
+    pop: Dict[str, object],
     kappa: Optional[Tuple[float, int]] = None,
 ) -> str:
     lines: List[str] = []
     lines.append("# Abstention detector — human validation results\n")
-    lines.append(f"Rows scored (coder1 ∩ key): **{cm['n']}**\n")
+    lines.append(f"Rows scored (coder1 == key, exact id match): **{cm['n']}**\n")
     lines.append("## Confusion matrix (detector = prediction, human = truth)\n")
     lines.append("Positive class = abstention / clarification.\n")
     lines.append("| | human=1 (abstain) | human=0 (answer) |")
     lines.append("|---|---|---|")
     lines.append(f"| **detector=1** | TP = {cm['tp']} | FP = {cm['fp']} |")
     lines.append(f"| **detector=0** | FN = {cm['fn']} | TN = {cm['tn']} |\n")
-    lines.append("## Detector performance vs human\n")
+
+    lines.append("## A. Raw within-sample numbers (UNWEIGHTED)\n")
+    lines.append("> These treat the stratified sample as if it were a simple "
+                 "random sample. They are NOT population estimates — I_perp is "
+                 "over-sampled and parseable under-sampled.\n")
     lines.append(f"- Precision: **{_fmt(scores['precision'])}**")
     lines.append(f"- Recall:    **{_fmt(scores['recall'])}**")
-    lines.append(f"- F1:        **{_fmt(scores['f1'])}**\n")
-    lines.append("## Human abstention rate (in-sample)\n")
+    lines.append(f"- F1:        **{_fmt(scores['f1'])}**")
     rate = abst_k / abst_n if abst_n else float("nan")
-    lines.append(f"- {abst_k} / {abst_n} rows coded as abstention "
-                 f"= **{_fmt(rate)}**")
-    lines.append(f"- Wilson 95% CI: **[{_fmt(abst_ci[0])}, {_fmt(abst_ci[1])}]**")
-    lines.append("\n> NOTE: the sample is STRATIFIED (positives + I_perp + parseable),")
-    lines.append("> so this in-sample rate is NOT a population abstention rate.")
-    lines.append("> It summarises the coded validation set only.\n")
+    lines.append(f"- In-sample abstention rate: {abst_k}/{abst_n} = "
+                 f"**{_fmt(rate)}**  (Wilson 95% CI "
+                 f"[{_fmt(abst_ci[0])}, {_fmt(abst_ci[1])}])\n")
+
+    lines.append("## B. Population-weighted estimates (DESIGN-CORRECT)\n")
+    lines.append("> Each sampled row is weighted by its stratum inverse "
+                 "inclusion probability w_h = N_h / n_h. Detector-positives are "
+                 "a census (w=1) so precision is EXACT; recall / F1 / abstention "
+                 "rate use the weighted (Horvitz–Thompson) estimates.\n")
+    lines.append(f"- Population size N = {pop['N_total']}")
+    lines.append(f"- Est. population counts: "
+                 f"TP={pop['tp_pop']:.1f}, FP={pop['fp_pop']:.1f}, "
+                 f"FN={pop['fn_pop']:.1f}, TN={pop['tn_pop']:.1f}")
+    lines.append(f"- Precision (exact): **{_fmt(pop['precision'])}**")
+    lines.append(f"- Recall (weighted): **{_fmt(pop['recall'])}**")
+    lines.append(f"- F1 (weighted):     **{_fmt(pop['f1'])}**")
+    rci = pop["abstention_rate_ci"]
+    lines.append(f"- Population abstention rate (stratified/Horvitz–Thompson): "
+                 f"**{_fmt(pop['abstention_rate'])}** "
+                 f"(stratified survey 95% CI [{_fmt(rci[0])}, {_fmt(rci[1])}])\n")
+
+    lines.append("### Stratum design\n")
+    lines.append("| stratum | N_h (pop) | n_h (sampled) | weight | human=1 | p_h |")
+    lines.append("|---|---|---|---|---|---|")
+    for s in pop["per_stratum"]:
+        lines.append(f"| {s['stratum']} | {s['N_h']} | {s['n_h']} | "
+                     f"{_fmt(s['weight'])} | {s['human_abstain']} | {_fmt(s['p_h'])} |")
+    lines.append("")
+
     if kappa is not None:
         lines.append("## Inter-rater agreement (coder1 vs coder2)\n")
-        lines.append(f"- Cohen's kappa: **{_fmt(kappa[0])}** over {kappa[1]} shared rows\n")
+        kv = "n/a (undefined — both coders single-category)" if kappa[0] != kappa[0] \
+            else f"**{_fmt(kappa[0])}**"
+        lines.append(f"- Cohen's kappa: {kv} over {kappa[1]} shared rows\n")
     return "\n".join(lines)
 
 
@@ -213,25 +364,35 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     human = load_human_labels(Path(args.sheet))
-    detector = load_key(Path(args.key))
+    key = load_key(Path(args.key))
 
-    missing = set(human) - set(detector)
-    if missing:
-        raise SystemExit(f"ERROR: {len(missing)} coded row_id(s) not in key: "
+    # Fix 3: require EXACT row-id set equality between the filled sheet and key.
+    missing = set(key) - set(human)   # coded rows deleted from the sheet
+    extra = set(human) - set(key)     # rows in the sheet not present in the key
+    if missing or extra:
+        parts = ["ERROR: coding sheet row_ids do not exactly match the key."]
+        if missing:
+            parts.append(f"  {len(missing)} key row(s) MISSING from the sheet: "
                          f"{sorted(missing)[:10]}")
+        if extra:
+            parts.append(f"  {len(extra)} sheet row(s) NOT in the key: "
+                         f"{sorted(extra)[:10]}")
+        raise SystemExit("\n".join(parts))
 
+    detector = {rid: bool(info["detector_positive"]) for rid, info in key.items()}
     cm = confusion(human, detector)
     scores = prf(cm)
     abst_k = sum(1 for r in human if human[r] == 1)
     abst_n = len(human)
     abst_ci = wilson_ci(abst_k, abst_n)
+    pop = population_estimates(human, key)
 
     kappa = None
     if args.coder2:
         human2 = load_human_labels(Path(args.coder2))
         kappa = cohen_kappa(human, human2)
 
-    report = build_report(cm, scores, abst_k, abst_n, abst_ci, kappa)
+    report = build_report(cm, scores, abst_k, abst_n, abst_ci, pop, kappa)
     print(report)
 
     if args.out:

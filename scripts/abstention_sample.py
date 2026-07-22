@@ -73,12 +73,44 @@ _IDENTITY_FIELDS = ("task_id", "config", "model_role", "model_id", "seed")
 #: A parseable interpretation label is I followed by digits (I0..I7); NOT I_perp.
 _PARSEABLE_RE = re.compile(r"^I\d+$")
 
+# ── Interpretation-id masking (blinding) ─────────────────────────────────────
+# Bare interpretation identifiers (I0..I7, I_perp) and "Interpretation I<n>
+# (name)" phrases correlate with the hidden executable label and would partially
+# de-blind the coder. We MASK them in the coder-facing text while preserving the
+# abstention-relevant substance (did the agent answer vs ask for clarification).
+_INTERP_PHRASE_RE = re.compile(
+    r"\bInterpretation\s+I\d+(?:\s*\([^)\n]{0,80}\))?", re.IGNORECASE)
+_IPERP_RE = re.compile(r"\bI_perp\b")
+_BARE_INTERP_RE = re.compile(r"\bI[0-7]\b")
+
+#: Regex used by tests / re-scan to detect residual interpretation-id leakage.
+LEAKAGE_SCAN_RE = re.compile(r"\bI[0-7]\b|\bI_perp\b|\bInterpretation\s+I\d")
+
+
+def mask_interpretation_ids(text: str) -> str:
+    """Mask interpretation identifiers (I0..I7 / I_perp / "Interpretation I<n>").
+
+    Applied ONLY to the coder-facing ``task_prompt`` and ``model_output`` in the
+    coding sheet. The hidden key retains the original label. Ordering matters:
+    the full "Interpretation I<n> (name)" phrase is masked before bare ids so the
+    parenthetical interpretation name is also removed.
+    """
+    if not text:
+        return text
+    t = _INTERP_PHRASE_RE.sub("[interpretation]", text)
+    t = _IPERP_RE.sub("[interpretation]", t)
+    t = _BARE_INTERP_RE.sub("[option]", t)
+    return t
+
+
 # Coding-sheet columns (BLINDED — must never leak detector/label/model metadata).
 CODING_COLUMNS = ["row_id", "domain", "task_prompt", "model_output", "human_label"]
 
-# Hidden key columns (for scoring only).
+# Hidden key columns (for scoring only). ``stratum_pop`` is the stratum's
+# POPULATION size N_h (used by the scorer for design-correct, inverse-inclusion
+# weighted recall / abstention-rate estimates).
 KEY_COLUMNS = [
-    "row_id", "detector_positive", "label", "stratum",
+    "row_id", "detector_positive", "label", "stratum", "stratum_pop",
     "task_id", "config", "model_id", "seed",
 ]
 
@@ -196,6 +228,15 @@ def stratified_sample(
     # Shuffle so strata are not ordered/guessable.
     rng.shuffle(combined)
 
+    # Stratum POPULATION sizes N_h (the full sampling frame per stratum).
+    # positives = census; iperp/parseable pools already exclude positives and
+    # together partition ALL detector-negatives (every label is I0..I7 or I_perp).
+    stratum_pop = {
+        STRATUM_POSITIVE: len(positives),
+        STRATUM_IPERP: len(iperp_pool),
+        STRATUM_PARSEABLE: len(parseable_pool),
+    }
+
     coding_rows: List[Dict] = []
     key_rows: List[Dict] = []
     for stratum, e in combined:
@@ -204,8 +245,8 @@ def stratified_sample(
         coding_rows.append({
             "row_id": e["row_id"],
             "domain": domain,
-            "task_prompt": prompt,
-            "model_output": rec.get("output", ""),
+            "task_prompt": mask_interpretation_ids(prompt),
+            "model_output": mask_interpretation_ids(rec.get("output", "")),
             "human_label": "",  # BLANK — filled by the human coder.
         })
         key_rows.append({
@@ -213,6 +254,7 @@ def stratified_sample(
             "detector_positive": e["detector_positive"],
             "label": e["label"],
             "stratum": stratum,
+            "stratum_pop": stratum_pop[stratum],
             "task_id": rec.get("task_id"),
             "config": rec.get("config"),
             "model_id": rec.get("model_id"),
@@ -283,6 +325,11 @@ Yes → 1, No → 0.
 
 Fill EVERY row. Do not leave any `human_label` blank. Do not open
 `abstention_key.csv` — it contains the detector verdict and would break blinding.
+
+NOTE: to keep the task blind, interpretation identifiers have been masked in the
+text as `[option]` / `[interpretation]`. This does not affect your judgement —
+you are only deciding whether the agent answered (0) or withheld its answer
+pending clarification (1).
 """
 
 
@@ -347,11 +394,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     assert not leaked, f"BLINDING VIOLATION: coding sheet leaks {leaked}"
     assert all(r["human_label"] == "" for r in coding_rows), "human_label must be blank"
 
+    # Re-scan the coder-facing text for residual interpretation-id leakage.
+    hits = []
+    for r in coding_rows:
+        for col in ("task_prompt", "model_output"):
+            m = LEAKAGE_SCAN_RE.search(r.get(col) or "")
+            if m:
+                hits.append((r["row_id"], col, m.group(0)))
+    if hits:
+        raise AssertionError(
+            f"BLINDING VIOLATION: {len(hits)} interpretation-id leak(s) remain, "
+            f"e.g. {hits[:5]}")
+
     print("\nWrote:")
     print(f"  coding sheet : {sheet_path}  (columns: {CODING_COLUMNS})")
     print(f"  hidden key   : {key_path}  (columns: {KEY_COLUMNS})")
     print(f"  instructions : {instr_path}")
-    print("\nBlinding OK: human_label is blank; no detector/label/model columns in sheet.")
+    print("\nBlinding OK: human_label blank; no detector/label/model columns; "
+          "0 interpretation-id (I0–I7 / I_perp / 'Interpretation I<n>') leaks "
+          "in task_prompt or model_output.")
     return 0
 
 

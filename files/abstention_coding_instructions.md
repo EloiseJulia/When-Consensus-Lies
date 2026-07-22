@@ -39,3 +39,8 @@ Yes → 1, No → 0.
 
 Fill EVERY row. Do not leave any `human_label` blank. Do not open
 `abstention_key.csv` — it contains the detector verdict and would break blinding.
+
+NOTE: to keep the task blind, interpretation identifiers have been masked in the
+text as `[option]` / `[interpretation]`. This does not affect your judgement —
+you are only deciding whether the agent answered (0) or withheld its answer
+pending clarification (1).
