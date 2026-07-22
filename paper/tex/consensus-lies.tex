@@ -371,11 +371,12 @@ conversational influence. Table~\ref{tab:roster} lists the roster.
 \centering
 \small
 \caption{Frontier roster by model class and family (Copilot-proxy slugs, Amendment~06). Per-item family
-separation is enforced at run time. The study spans \emph{two} independent benchmark constructors: the
-primary constructor (Microsoft) and the verifier sit \emph{outside} the tested pool, while the
-Amendment~10 R2 held-out subset is built by a \emph{second} family (Anthropic) that is itself among the
-tested families. R2 is computed only on cells whose tested family differs from the item's constructor, so no
-evaluated agent ever shares a family with the constructor of the item on which it is scored.}
+separation is enforced at run time. The primary benchmark constructor (Microsoft \texttt{mai-code-1-flash})
+sits \emph{outside} the tested pool. The Amendment~10 R2 held-out subset is built by a \emph{second} family
+(Anthropic) that is itself among the tested families; R2 is computed only on cells whose tested family
+differs from the item's constructor, so no evaluated agent shares a family with the constructor of the item
+on which it is scored. Per-item family separation likewise ensures the OpenAI verifier/auditor never scores
+an item from its own family.}
 \label{tab:roster}
 \begin{tabular}{@{}lll@{}}
 \toprule
