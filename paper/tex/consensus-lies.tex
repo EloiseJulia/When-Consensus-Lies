@@ -23,13 +23,14 @@
 \graphicspath{{figures/}}
 \usepackage{xcolor}
 \newcommand{\todo}[1]{\textcolor{red}{[\textbf{TODO:} #1]}}
+\providecommand{\checkmark}{\ensuremath{\surd}}
 \newcommand{\cd}{\textsf{CD}}
 \newcommand{\iperp}{\ensuremath{I_\perp}}
 \newcommand{\neff}{\ensuremath{n_{\mathrm{eff}}}}
 
 \begin{document}
 
-\title{When Consensus Lies: Fake Redundancy and Silent Convergent Delusion in AI-Assisted Collective Judgment}
+\title[One Prompt, Many Models, One Blind Spot]{One Prompt, Many Models, One Blind Spot: Fake Redundancy in Multi-Model AI Interfaces}
 
 \author{Anonymous Author(s)}
 \affiliation{%
@@ -39,11 +40,13 @@
 }
 
 \begin{abstract}
-Groups and organizations increasingly treat \emph{agreement among multiple AI systems} as corroboration:
-we sample a language model repeatedly, pool several models from different vendors, or stage multi-agent
-``debates,'' and read the resulting consensus as a warrant for a decision. The epistemic value of such
-consensus rests on an assumption inherited from the wisdom of crowds---that the judgments being aggregated
-carry \emph{sufficiently independent} evidence. We show that this assumption can fail silently. In a
+A growing class of \emph{same-prompt multi-model interfaces}---ChatHub, Open WebUI, PromptQuorum,
+MultipleChat, Poe, and others---lets a user send one prompt to several language models (GPT, Claude, Gemini,
+\dots) and read the parallel answers, a consensus verdict, or a synthesized reply as corroboration, and many
+market this plurality as a route to greater confidence~\cite{chathub2026,openwebui2026multimodel,promptquorum2026home,multiplechat2026,poe2024multibot}.
+The tacit inference is that model plurality yields perspective plurality, hence independent corroboration,
+hence higher trustworthiness. We show this inference can fail silently, because \emph{model diversity is not
+necessarily evidence diversity}: when models share one input, they can share one blind spot. In a
 pre-registered study on a reconstructed, executable-gold benchmark of \emph{underspecified} tasks, we
 manipulate a single factor---whether the decisive disambiguating information lies \emph{outside} or
 \emph{inside} the retained prompt---and measure not just accuracy but the \emph{correlation} of errors
@@ -55,8 +58,9 @@ $\approx\!0.03\%$); a nominal $k$-agent ensemble supplies the evidence of $\appr
 models---resolves it (rate $=\!0.00$). A second benchmark constructed by a \emph{different} model family
 rules out a shared-prior-with-the-constructor artifact. We name this failure \emph{fake redundancy}: under a
 shared information boundary, nominally diverse agents form an \emph{interpretive monoculture}, and consensus
-stops being evidence of correctness. We derive implications for how collaborative systems should aggregate,
-display, and place trust in AI judgments---measuring \emph{dependence} rather than counting \emph{agreement}.
+stops being evidence of correctness. We derive implications for multi-model interfaces: they should surface
+\emph{evidential dependence}---whether answers rest on the same, possibly incomplete, input---rather than
+displaying agent count.
 \end{abstract}
 
 \begin{CCSXML}
@@ -64,6 +68,9 @@ display, and place trust in AI judgments---measuring \emph{dependence} rather th
  <concept><concept_id>10003120.10003130.10011762</concept_id>
   <concept_desc>Human-centered computing~Collaborative and social computing theory, concepts and paradigms</concept_desc>
   <concept_significance>500</concept_significance></concept>
+ <concept><concept_id>10003120.10003121.10011748</concept_id>
+  <concept_desc>Human-centered computing~Empirical studies in HCI</concept_desc>
+  <concept_significance>300</concept_significance></concept>
  <concept><concept_id>10003120.10003130.10011765</concept_id>
   <concept_desc>Human-centered computing~Collaborative and social computing systems and tools</concept_desc>
   <concept_significance>300</concept_significance></concept>
@@ -73,12 +80,13 @@ display, and place trust in AI judgments---measuring \emph{dependence} rather th
 </ccs2012>
 \end{CCSXML}
 \ccsdesc[500]{Human-centered computing~Collaborative and social computing theory, concepts and paradigms}
+\ccsdesc[300]{Human-centered computing~Empirical studies in HCI}
 \ccsdesc[300]{Human-centered computing~Collaborative and social computing systems and tools}
 \ccsdesc[300]{Computing methodologies~Artificial intelligence}
 
-\keywords{collective intelligence, wisdom of crowds, consensus, common ground, algorithmic monoculture,
-human--AI collaboration, large language models, multi-agent systems, error correlation, automation bias,
-pre-registration}
+\keywords{multi-model interfaces, model comparison, same-prompt querying, evidential independence,
+trust and reliance, human--AI interaction, consensus, algorithmic monoculture, large language models,
+multi-agent systems, error correlation, automation bias, pre-registration}
 
 \maketitle
 
@@ -101,20 +109,26 @@ $\approx\!0.03\%$).}
 %% =====================================================================
 \section{Introduction}
 \label{sec:intro}
-When people must decide under uncertainty, they seek \emph{corroboration}: they consult multiple sources,
-solicit second opinions, and trust a conclusion more when independent parties agree. This practice is
-increasingly automated. Software teams triage incidents with several model ``reviewers''; analysts pool
-outputs from different vendors' assistants; emerging agentic pipelines sample a model many times and take
-the majority, or stage multi-agent debate, and surface the result to a person as ``$5/5$ agents agree.''
-In each case, \emph{agreement among AI systems is read as a signal that the answer can be trusted}.
+A growing class of interfaces invites people to consult many AI models at once. In a
+\emph{same-prompt multi-model interface}, the user types one prompt, the interface broadcasts it to several
+language models---GPT, Claude, Gemini, and others---and returns the answers side by side, a computed
+consensus verdict, or a single synthesized reply~\cite{chathub2026,openwebui2026multimodel,promptquorum2026home,multiplechat2026,poe2024multibot,googleaistudio2024compare}.
+Several of these tools present plurality as an epistemic feature, not merely a convenience: querying
+several models is marketed as a way to ``gain confidence,'' reduce hallucination, or ``let them vote'' on the
+best answer. The result is surfaced to a person much like a corroboration cue---``$4/4$ models agree.''
 
-The epistemic warrant for this practice is old and specific. From the Condorcet Jury Theorem to the wisdom
-of crowds, aggregation improves reliability \emph{only when} the judgments being combined are competent and
-carry \emph{sufficiently independent} errors~\cite{condorcet,ladha1992}; social influence that erodes that
-independence produces confident convergence on error rather than accuracy~\cite{lorenz2011}. Aggregating AI
-judgments imports this warrant, but it also imports its precondition---and it is far from obvious that
-querying a model five times, or pooling five vendors, produces five \emph{independent} interpretations of
-the task.
+The appeal rests on an inference chain that is rarely stated but easy to reconstruct:
+\emph{model plurality} $\Rightarrow$ \emph{perspective plurality} $\Rightarrow$ \emph{independent
+corroboration} $\Rightarrow$ \emph{higher trustworthiness}. The chain borrows the warrant of an old and
+specific idea. From the Condorcet Jury Theorem to the wisdom of crowds, aggregation improves reliability
+\emph{only when} the judgments being combined are competent and carry \emph{sufficiently independent}
+errors~\cite{condorcet,ladha1992}; social influence that erodes that independence produces confident
+convergence on error rather than accuracy~\cite{lorenz2011}. A same-prompt interface imports this warrant,
+but it also imports its precondition---and it is far from obvious that sending one prompt to five models
+produces five \emph{independent} interpretations of the task. We show that the middle links of the chain can
+break: \emph{different models do not guarantee independent interpretations or evidence}. Our headline is
+a slogan we thread throughout: \textbf{model diversity is not necessarily evidence diversity}. Same-prompt
+pluralism can create answer multiplicity without evidential independence.
 
 We show that it often does not, and we identify \emph{when}. Our study concerns \emph{underspecified}
 inputs: inputs from which a decisive disambiguating clause has been omitted, so more than one
@@ -131,32 +145,38 @@ result). We call the wrong-consensus failure
 redundancy that supplies no independent evidence because all agents inherit the same lossy representation of
 the task.
 
-This reframes a question at the heart of CSCW. Aggregating AI advice is not merely an accuracy problem; it
-is a question about whether our collaborative infrastructures preserve the \emph{epistemic independence}
-that makes consensus meaningful. When nominally diverse agents share an information boundary, they can form
-an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture} whose agreement is an artifact of a shared
-prior rather than corroborating evidence---and, because the failure is silent, nothing in the system's
-behavior distinguishes it from genuine agreement.
+This reframes a question at the heart of human--AI interaction. Reading multi-model agreement is not merely
+an accuracy problem; it is a question about whether the interfaces we build preserve the \emph{epistemic
+independence} that makes consensus meaningful. When nominally diverse agents share an information boundary,
+they can form an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture} whose agreement is an
+artifact of a shared prior rather than corroborating evidence---and, because the failure is silent, nothing
+in the interface's ``models agree'' display distinguishes it from genuine agreement.
 
 \paragraph{Contributions.} This paper makes four contributions.
 \begin{itemize}
-  \item \textbf{Empirical.} Pre-registered evidence that independently queried LLM agents, spanning
-  capability tiers \emph{and} three model families, silently converge on the same incorrect interpretation
-  when a decisive disambiguator is omitted from the retained prompt---and that this failure vanishes when
-  the disambiguator is present. The failure is capability-invariant and cross-family, not an artifact of a
-  single model or vendor.
-  \item \textbf{Methodological.} An \emph{executable-gold} protocol that manipulates whether the
-  disambiguator crosses the prompt boundary and measures \emph{correlated error}---not merely individual
-  accuracy---so that correctness is established independently of model agreement and no LLM judge is in the
-  loop.
-  \item \textbf{Conceptual.} \emph{Fake redundancy} as a failure mode of AI aggregation, operationalized
-  through classical dependence estimators (pairwise wrong-answer agreement, intraclass correlation, and
-  effective ensemble size), showing when a nominally $k$-agent system supplies $\approx\!1$ independent
-  judgment.
-  \item \textbf{Design.} Implications for AI-mediated collaborative decision systems: consensus displays
-  should expose interpretive and evidential \emph{dependence} rather than agent count; systems should elicit
-  competing interpretations before aggregating answers, preserve contextual provenance across handoffs, and
-  route to human review when agreement is high but contextual completeness is uncertain.
+\item \textbf{Conceptual and interaction-paradigm.} We identify the hidden assumption in same-prompt
+multi-model interfaces---that agreement across models is independent corroboration---and name
+\emph{fake redundancy}: under a shared information boundary, model plurality yields answer multiplicity
+without evidential independence. A landscape audit (\S\ref{sec:interfaces}) shows that a growing class of
+interfaces offers comparison, consensus, and synthesis affordances yet rarely signals that all models
+share the same, possibly incomplete, input.
+\item \textbf{Empirical.} Pre-registered evidence that independently queried LLM agents, spanning
+capability tiers \emph{and} three model families, silently converge on the same incorrect interpretation
+when a decisive disambiguator is omitted from the shared prompt---and that this failure vanishes when the
+disambiguator is present. Described with product-facing condition names (single-model assistance vs.\
+repeated sampling vs.\ cross-vendor comparison/aggregation vs.\ interpretation-first comparison;
+\S\ref{sec:study}), the failure is capability-invariant and cross-family: model diversity and capability
+do not restore interpretive independence.
+\item \textbf{Methodological.} An \emph{executable-gold} protocol that manipulates whether the
+disambiguator crosses the prompt boundary and measures \emph{correlated error}---not merely individual
+accuracy---so that correctness is established independently of model agreement and no LLM judge is in the
+loop. Dependence is operationalized through classical estimators (pairwise wrong-answer agreement,
+intraclass correlation, and effective ensemble size), showing when a nominally $k$-agent system supplies
+$\approx\!1$ independent judgment.
+\item \textbf{Design.} A \emph{dependence-aware multi-model interface} concept plus design implications:
+instead of ``$4/4$ models agree,'' surface shared-input, missing-context, shared-interpretation, and
+alternative-interpretation signals and a request-clarification action. Grounded in the landscape gap, this
+is framed as design implications and a proposed concept; its evaluation is future work.
 \end{itemize}
 We report our pre-registered hypotheses honestly, including those that were not supported, and treat the
 capability/family nulls as theoretically informative: they are what makes the failure a property of the
@@ -166,6 +186,54 @@ capability/family nulls as theoretically informative: they are what makes the fa
 \section{Consensus, Grounding, and AI-Mediated Collective Judgment}
 \label{sec:related}
 We organize related work around the assumptions our study tests, rather than around technologies.
+
+\subsection{Same-prompt multi-model comparison interfaces}
+\label{sec:interfaces}
+A growing class of multi-model interfaces lets users query multiple AI language models with the same prompt
+and read their responses together. A landscape analysis of nine such platforms---among them
+ChatHub~\cite{chathub2026}, Open WebUI's multi-model mode~\cite{openwebui2026multimodel},
+PromptQuorum~\cite{promptquorum2026home,promptquorum2026blog}, MultipleChat~\cite{multiplechat2026},
+Poe's multi-bot chat~\cite{poe2024multibot}, and Google AI Studio's Compare
+Mode~\cite{googleaistudio2024compare}---finds a recurring interaction pattern: one prompt is broadcast to
+several named models, and the answers are presented in parallel, sometimes accompanied by a computed
+consensus verdict, an automatic vote, or a synthesized single reply. Several platforms present this
+plurality as an epistemic feature, framing multiple perspectives as a route to greater confidence or reduced
+hallucination.
+
+The analysis surfaces a systematic \emph{asymmetry} in what these interfaces support (Table~\ref{tab:audit}).
+Output-side plurality---broadcasting, side-by-side comparison, consensus scoring, synthesis---is richly
+provided; input-side adequacy is not. Across the platforms audited, none warned that a submitted prompt might
+be missing information needed to answer, none asked models to disclose their interpretation of an ambiguous
+task before answering, and none framed the shared-input condition as a \emph{limitation} on the independence
+of the resulting answers---so that a
+shared, underspecified prompt yields dependent, not independent, evidence. We treat this as a landscape
+analysis of publicly documented affordances, not market research, and make no claims about platform
+popularity, usage, or real-world harm.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Landscape analysis of same-prompt multi-model interfaces (public materials, accessed 2026-07-22;
+full audit in supplementary material). Output-side plurality is common; input-side adequacy signals are
+absent. $\checkmark$ present, $\sim$ partial/implicit, $\times$ absent.}
+\label{tab:audit}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Affordance & Broadcast \& compare & Consensus / vote & Synthesis & Input-adequacy signal \\
+\midrule
+ChatHub~\cite{chathub2026}                       & $\checkmark$ & $\times$ & $\times$ & $\times$ \\
+Open WebUI~\cite{openwebui2026multimodel}        & $\checkmark$ & $\times$ & $\checkmark$ & $\times$ \\
+PromptQuorum~\cite{promptquorum2026home}         & $\checkmark$ & $\checkmark$ & $\times$ & $\times$ \\
+MultipleChat~\cite{multiplechat2026}             & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\times$ \\
+Poe~\cite{poe2024multibot}                       & $\checkmark$ & $\times$ & $\times$ & $\times$ \\
+Google AI Studio~\cite{googleaistudio2024compare}& $\checkmark$ & $\times$ & $\times$ & $\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This asymmetry motivates our study: when several models receive the same context-deficient prompt, what an
+interface presents as independent corroboration may be structurally dependent evidence that the interface
+does not disclose.
 
 \subsection{When does aggregation help? Independence and its erosion}
 The Condorcet Jury Theorem's optimistic conclusion---that majority accuracy approaches one as a group
@@ -212,7 +280,7 @@ to majorities~\cite{choi2025conformity}, and degrade under peer pressure~\cite{w
 prompts are common and destabilizing~\cite{yang2025underspecification}. Our contribution is not to
 re-demonstrate that consensus can be wrong; it is to \emph{isolate a controlled axis}---the location of the
 disambiguator---that switches the failure on and off while holding the task, answer space, and verifier
-fixed, and to connect it to the CSCW question of when aggregated AI judgment can be trusted.
+fixed, and to connect it to the human--AI interaction question of when multi-model agreement can be trusted.
 
 %% =====================================================================
 \section{Research Questions and Hypotheses}
@@ -320,9 +388,18 @@ Verifier / auditor  & OpenAI    & \texttt{gpt-5.6-sol} \\
 \end{table}
 
 \subsection{Conditions and estimands}
-Primary aggregation conditions: single-agent baseline; self-consistency ($k{=}5$); homogeneous
-majority/debate ($N{=}5$); and heterogeneous cross-family debate. A scheduled secondary sensitivity pass adds
-self-consistency $k{=}10$ (\S\ref{sec:results}) and a verifier condition. Our primary
+We keep the frozen internal condition names and add product-facing labels (in brackets) that map each
+condition to a real same-prompt interface behavior. Primary aggregation conditions: single-agent baseline
+[\emph{single-model assistance}: one model answers once]; self-consistency ($k{=}5$) [\emph{repeated
+sampling}: one model resampled, majority]; homogeneous majority/debate ($N{=}5$) [\emph{same-vendor
+ensemble}: $\rho\!\to\!1$ baseline]; and heterogeneous cross-family debate [\emph{cross-vendor
+comparison/aggregation}: different vendors, same prompt, aggregated]. A scheduled secondary sensitivity pass
+adds self-consistency $k{=}10$ (\S\ref{sec:results}) and a verifier condition [\emph{verifier-augmented}:
+a secondary check pass]; an interpretation-diverse condition [\emph{interpretation-first comparison}: agents
+disclose their task interpretation before answering] probes whether eliciting interpretations exposes the
+fork. The cross-vendor comparison condition is the strongest real-world platform analogue in our design; a
+pure \emph{synthesis} condition (one extra model merges all answers) and a \emph{role-diversified} workflow
+are future computational conditions (\S\ref{sec:limitations}), not run here. Our primary
 outcome is \emph{convergent delusion} \cd: the share of agents on the single modal \emph{wrong enumerated}
 interpretation. Formally, for a cell of $N$ agents with interpretation labels $L_1,\dots,L_N$, target $I_0$,
 and off-axis label $I_\perp$,
@@ -405,8 +482,9 @@ zero at every $k$. The failure is a property of the information boundary, not of
 \subsection{F2: Capability and model-family diversity do not restore interpretive independence}
 The H1\_external failure is essentially flat across model classes (Table~\ref{tab:regime},
 Figure~\ref{fig:capability}): frontier
-reasoners are trapped as reliably as legacy-weak models, and a heterogeneous cross-family pool converges as
-strongly as a single model sampled repeatedly (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
+reasoners are trapped as reliably as legacy-weak models, and a heterogeneous cross-family pool
+(\emph{cross-vendor comparison/aggregation}) converges as strongly as a single model sampled repeatedly
+(\emph{repeated sampling}) (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
 $[-0.078,+0.058]$; not the ordering we predicted). Vendor and capability diversity did not translate into
 \emph{viewpoint} diversity: the shared prior spans families.
 
@@ -554,23 +632,30 @@ and agents. The silence of the failure compounds this: without an internal warni
 more confidence.
 
 %% =====================================================================
-\section{Implications for CSCW and Collaborative AI Systems}
+\section{Design Implications for Multi-Model Interfaces}
 \label{sec:implications}
-We separate recommendations by evidential strength. Directly supported by our findings: (1)~\emph{Measure
-dependence, not agreement.} Systems that aggregate AI judgments should estimate error dependence during
-validation and surface effective ensemble size, not agent count; a ``$5/5$ agree'' display can be
-\emph{replaced} by a dependence-aware uncertainty display. (2)~\emph{Aggregate interpretations before
-answers.} Because the failure is interpretive, eliciting each agent's task \emph{interpretation} before
-soliciting an answer can expose latent forks that a final vote hides. (3)~\emph{Route on contextual
+We separate recommendations by evidential strength. Directly supported by our findings:
+(1)~\emph{Show a dependence-aware consensus display, not an agreement count.} The core design move is to
+replace ``$4/4$ models agree'' with a panel that reports whether the answers can be trusted as independent
+evidence. A dependence-aware display would surface: \textbf{shared input} = Yes (all models received the same
+prompt); \textbf{context completeness} = Uncertain (the prompt may be missing a decisive convention); the
+\textbf{common interpretation} the models adopted alongside at least one \textbf{alternative interpretation}
+consistent with the input; and a \textbf{recommended action} = request the missing convention before relying
+on the answer. This turns the interface's headline from agent count into evidential dependence, and is the
+concrete form of the dependence-aware multi-model interface concept. (2)~\emph{Aggregate interpretations
+before answers.} Because the failure is interpretive, eliciting each agent's task \emph{interpretation}
+before soliciting an answer can expose latent forks that a final vote hides. (3)~\emph{Route on contextual
 completeness.} Trigger human review when consensus is high \emph{but} contextual completeness is
 uncertain---high agreement is least informative exactly when the input is underspecified. Supported by our
-findings together with prior CSCW work on reliance~\cite{vasconcelos2023explanations}: (4)~\emph{Diversify
-information, not just vendors.} Viewpoint diversity requires diverse \emph{inputs}, retrieval paths, and
-representations, not merely different model providers. (5)~\emph{Preserve provenance across handoffs}, so
-that the context needed to disambiguate is not silently dropped. (6)~\emph{Elicit clarification.} Since
-agents rarely ask, systems---or their designers---must build the clarification-seeking that the models omit.
-(7)~\emph{Maintain dissent channels} rather than forcing early convergence. (8)~\emph{Audit for interpretive
-monoculture} across a fleet, not only per-model accuracy.
+findings together with prior work on reliance~\cite{vasconcelos2023explanations}: (4)~\emph{Diversify
+evidence and interpretations, not merely model providers.} Viewpoint diversity requires diverse \emph{inputs},
+retrieval paths, and representations---not merely different vendors behind the same prompt; this is the
+closing design principle, because swapping providers leaves the shared blind spot intact.
+(5)~\emph{Preserve provenance across handoffs}, so that the context needed to disambiguate is not silently
+dropped. (6)~\emph{Elicit clarification.} Since agents rarely ask, interfaces---or their designers---must
+build the clarification-seeking that the models omit. (7)~\emph{Maintain dissent channels} rather than
+forcing early convergence. (8)~\emph{Audit for interpretive monoculture} across a fleet, not only per-model
+accuracy.
 
 %% =====================================================================
 \section{Limitations, Ethics, and Open Science}
@@ -581,6 +666,16 @@ high-stakes domains are \emph{implications}, not tested deployments. Construct v
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
 pre-registered drop-\iperp{} sensitivity. The abstention detector is rule-based and pending human
 validation. Generalization beyond the three domains and the tested roster is future work.
+\paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
+work. First, a \emph{human-subjects study} (a within-subjects design of roughly 50 participants) would test
+whether cross-model agreement raises adoption, whether that causes over-reliance when models share a wrong
+interpretation, and whether a dependence-aware interface increases clarification-seeking; we have a design
+sketch but have not run it, and it would require IRB review. Second, \emph{additional computational
+conditions}---cross-vendor \emph{synthesis} (one extra model merges all answers) and \emph{role-diversified}
+evidence workflows---would test whether diversifying evidence and interpretations, rather than vendors,
+reduces wrong consensus; these were not part of the frozen confirmatory run. Third, the proposed
+dependence-aware multi-model interface is a concept and remains to be \emph{built and evaluated}. We make no
+claim that any of these were carried out.
 \paragraph{Ethics.} The study involves \emph{no human subjects}: all data are model-generated responses to
 synthetic benchmark tasks, and the ``simulated users'' are scripted, not people. The benchmark contains no
 personal, sensitive, or copyrighted material; each item is an author-constructed underspecified task with an
@@ -603,9 +698,9 @@ When collaborative systems aggregate AI judgments, they inherit an assumption th
 to violate: that agreement reflects independent evidence. Under underspecification, that assumption fails
 silently---nominally diverse agents form an interpretive monoculture, a $k$-agent ensemble collapses to one
 effective voice, and confident consensus becomes an artifact of a shared prior rather than a warrant for a
-decision. The fix is not more agents but a different question. For CSCW, designing trustworthy AI-mediated
-collective judgment means measuring \emph{independence}, preserving \emph{context}, and treating consensus
-as a hypothesis to be checked---not as proof.
+decision. The fix is not more agents but a different question. For multi-model interface design, supporting
+trustworthy human--AI judgment means measuring \emph{independence}, preserving \emph{context}, and treating
+consensus as a hypothesis to be checked---not as proof.
 
 \begin{acks}
 \todo{Anonymized for review.}
