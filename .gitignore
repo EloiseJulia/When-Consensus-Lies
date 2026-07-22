@@ -8,4 +8,8 @@ __pycache__/
 default_check_checkpoint.jsonl
 default_check_summary.jsonl
 default_check_table.txt
+# Study 2 LPS pilot live-run artifacts (EXPLORATORY, never committed)
+.llm_cache_lps_pilot/
+.run_partitions/
+lps_pilot_run.log
 *.pyc
