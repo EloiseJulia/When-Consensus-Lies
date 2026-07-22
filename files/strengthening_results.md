@@ -12,9 +12,19 @@
 
 R2 Anthropic-constructed subset (`cp_r2_xf.jsonl`), single-agent labels from tested models with family ≠ Anthropic, across distinct models/seeds. Per-item **concentration** = frozen A04 `cd_primary` (modal-wrong ENUMERATED-foil share; `I_perp` ineligible as modal but kept in the denominator).
 
+> **k0 controls disclosure:** 6 of 12 items are k0 CONTROLS (ambiguity_level==0): concentration is 0 BY DESIGN (no deleted axis to converge on), NOT an observed failure. The k1-stratified aggregate (k0 excluded) is the substantive cross-model-convergence result.
+
 **Cross-family (non-Anthropic)** — models: gemini-3.1-pro-preview, gemini-3.5-flash, gpt-4o-mini, gpt-5.4, gpt-5.6-sol; families: google, openai.
 
-- Items: **12**; agents/item (max): see item table.
+### ⭐ SUBSTANTIVE — k1-stratified (ambiguity_level ≥ 1, k0 controls excluded) (n=6 items)
+- Mean per-item concentration: **0.7111** (median 0.9333, range [0.0000, 1.0000]).
+- Item-level bootstrap 95% CI of the mean: **[0.4000, 0.9778]**.
+- Mean # distinct models on the modal wrong foil: **3.667**; mean # distinct families: **1.500**.
+- Items with any wrong-foil convergence: 5/6.
+- **Fraction of items where ≥2 DISTINCT non-Anthropic families concentrate on the SAME wrong foil: 0.6667** (4/6).
+- Fraction of items where ≥2 distinct models concentrate on the same wrong foil: 0.8333 (5/6).
+
+### All-item aggregate (includes k0 structural-zero controls, for completeness) (n=12 items)
 - Mean per-item concentration: **0.3556** (median 0.0000, range [0.0000, 1.0000]).
 - Item-level bootstrap 95% CI of the mean: **[0.1167, 0.6222]**.
 - Mean # distinct models on the modal wrong foil: **1.833**; mean # distinct families: **0.750**.
@@ -22,24 +32,24 @@ R2 Anthropic-constructed subset (`cp_r2_xf.jsonl`), single-agent labels from tes
 - **Fraction of items where ≥2 DISTINCT non-Anthropic families concentrate on the SAME wrong foil: 0.3333** (4/12).
 - Fraction of items where ≥2 distinct models concentrate on the same wrong foil: 0.4167 (5/12).
 
-**Same-family (Anthropic) reference** (NOT part of the cross-family estimate) — models: claude-haiku-4.5, claude-opus-4.8: mean concentration 0.2639, ≥2-families fraction 0.0000.
+**Same-family (Anthropic) reference** (NOT part of the cross-family estimate) — models: claude-haiku-4.5, claude-opus-4.8: k1 mean concentration 0.5278, k1 ≥2-families fraction 0.0000 (all-item mean 0.2639).
 
-Interpretation: multiple INDEPENDENT non-Anthropic models/families landing on the SAME specific wrong foil per item is genuine cross-MODEL convergence — not a within-cell N=1 error-rate tautology.
+Interpretation: on the k1 ambiguous items (the k0 controls are 0 by design), multiple INDEPENDENT non-Anthropic models/families land on the SAME specific wrong foil — genuine cross-MODEL convergence, not a within-cell N=1 error-rate tautology.
 
-| task | concentration | modal_wrong_foil | n_agents | n_models_on_foil | n_families_on_foil |
-|---|---|---|---|---|---|
-| r2xf_code_intdiv_001_k0 | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_code_intdiv_001_k1_integer_division | 1.0000 | I1 | 15 | 5 | 2 |
-| r2xf_code_weekday_001_k0 | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_code_weekday_001_k1_weekday_numbering | 0.8667 | I1 | 15 | 5 | 2 |
-| r2xf_data_argmax_001_k0 | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_data_argmax_001_k1_position_base | 1.0000 | I1 | 15 | 5 | 2 |
-| r2xf_data_sortids_001_k0 | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_data_sortids_001_k1_id_sort_order | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_policy_days_001_k0 | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_policy_days_001_k1_day_count | 0.4000 | I1 | 15 | 2 | 1 |
-| r2xf_policy_weeks_001_k0 | 0.0000 | — | 15 | 0 | 0 |
-| r2xf_policy_weeks_001_k1_week_definition | 1.0000 | I1 | 15 | 5 | 2 |
+| task | k | concentration | modal_wrong_foil | n_agents | n_models_on_foil | n_families_on_foil |
+|---|---|---|---|---|---|---|
+| r2xf_code_intdiv_001_k0 | k0 (control) | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_code_intdiv_001_k1_integer_division | k1 | 1.0000 | I1 | 15 | 5 | 2 |
+| r2xf_code_weekday_001_k0 | k0 (control) | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_code_weekday_001_k1_weekday_numbering | k1 | 0.8667 | I1 | 15 | 5 | 2 |
+| r2xf_data_argmax_001_k0 | k0 (control) | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_data_argmax_001_k1_position_base | k1 | 1.0000 | I1 | 15 | 5 | 2 |
+| r2xf_data_sortids_001_k0 | k0 (control) | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_data_sortids_001_k1_id_sort_order | k1 | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_policy_days_001_k0 | k0 (control) | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_policy_days_001_k1_day_count | k1 | 0.4000 | I1 | 15 | 2 | 1 |
+| r2xf_policy_weeks_001_k0 | k0 (control) | 0.0000 | — | 15 | 0 | 0 |
+| r2xf_policy_weeks_001_k1_week_definition | k1 | 1.0000 | I1 | 15 | 5 | 2 |
 
 ## Analysis 2 — TOST equivalence tests (blind-review #8)
 

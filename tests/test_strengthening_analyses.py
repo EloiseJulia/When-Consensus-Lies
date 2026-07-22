@@ -20,28 +20,29 @@ from scripts import strengthening_analyses as SA
 def _r2_single_fixture() -> pd.DataFrame:
     """Minimal R2 single-agent tidy table: 2 items x 3 non-Anthropic models
     (openai gpt-5.4, google gemini-3.1-pro-preview, openai gpt-4o-mini) + 1
-    Anthropic reference model, 1 seed. Item A: all three non-Anthropic agents
-    converge on wrong foil I1 (concentration=1.0, 2 families). Item B: all
-    correct (I0)."""
+    Anthropic reference model, 1 seed. Item A (k1, ambiguous): all three
+    non-Anthropic agents converge on wrong foil I1 (concentration=1.0, 2
+    families). Item B (k0 CONTROL, ambiguity_level==0): all correct (I0),
+    concentration 0 by design."""
     rows = []
 
-    def add(task, model, label, target="I0"):
+    def add(task, model, label, target="I0", amb=1):
         rows.append({
             SA._ITEM: task, SA._METHOD: "single", SA._MODEL_CLASS: "unknown",
             SA._SEED: 0, SA._LABEL: label, SA._TARGET: target,
-            SA._REGIME: "H1_external", "ambiguity_k": 1, SA._MODEL: model,
+            SA._REGIME: "H1_external", "ambiguity_k": amb, SA._MODEL: model,
         })
 
-    # Item A — cross-model convergence on I1.
-    add("itemA", "gpt-5.4", "I1")
-    add("itemA", "gemini-3.1-pro-preview", "I1")
-    add("itemA", "gpt-4o-mini", "I1")
-    add("itemA", "claude-opus-4.8", "I2")  # Anthropic reference (separate)
-    # Item B — all correct.
-    add("itemB", "gpt-5.4", "I0")
-    add("itemB", "gemini-3.1-pro-preview", "I0")
-    add("itemB", "gpt-4o-mini", "I0")
-    add("itemB", "claude-opus-4.8", "I0")
+    # Item A — k1 ambiguous; cross-model convergence on I1.
+    add("itemA_k1", "gpt-5.4", "I1", amb=1)
+    add("itemA_k1", "gemini-3.1-pro-preview", "I1", amb=1)
+    add("itemA_k1", "gpt-4o-mini", "I1", amb=1)
+    add("itemA_k1", "claude-opus-4.8", "I2", amb=1)  # Anthropic reference (separate)
+    # Item B — k0 structural control; all correct.
+    add("itemB_k0", "gpt-5.4", "I0", amb=0)
+    add("itemB_k0", "gemini-3.1-pro-preview", "I0", amb=0)
+    add("itemB_k0", "gpt-4o-mini", "I0", amb=0)
+    add("itemB_k0", "claude-opus-4.8", "I0", amb=0)
     return pd.DataFrame(rows)
 
 
@@ -93,27 +94,47 @@ def test_analysis1_keys_and_shapes():
                 "boot_ci_lo", "boot_ci_hi", "frac_items_ge2_families_on_foil",
                 "mean_n_families_on_modal_foil", "distinct_families"):
         assert key in cf
-    # 2 items; item table one row per item.
+    # 2 items; item table one row per item, carrying ambiguity metadata.
     assert cf["n_items"] == 2
     assert len(res["item_table"]) == 2
+    assert all("ambiguity_level" in r and "is_k0_control" in r
+               for r in res["item_table"])
     # Same-family Anthropic reference reported separately.
     assert res["same_family_reference"]["n_items"] == 2
+    # k1-stratified aggregates + k0 disclosure keys present.
+    for key in ("cross_family_k1", "same_family_reference_k1",
+                "k0_disclosure", "n_k0_controls"):
+        assert key in res
+    # 1 k0 control in the fixture; k1 stratum excludes it (1 item remains).
+    assert res["n_k0_controls"] == 1
+    assert res["cross_family_k1"]["n_items"] == 1
+    assert res["same_family_reference_k1"]["n_items"] == 1
 
 
 def test_analysis1_cross_model_convergence_values():
     r2 = _r2_single_fixture()
     res = SA.analysis1_cross_model_concentration(r2)
     cf = res["cross_family"]
-    # Item A concentration = 3/3 = 1.0 on foil I1 (frozen cd_primary); item B = 0.
+    cf_k1 = res["cross_family_k1"]
+    # Item A (k1) concentration = 3/3 = 1.0 on foil I1 (frozen cd_primary);
+    # item B (k0 control) = 0.
     tbl = {r["task"]: r for r in res["item_table"]}
-    assert tbl["itemA"]["concentration"] == pytest.approx(1.0)
-    assert tbl["itemA"]["modal_wrong_foil"] == "I1"
-    assert tbl["itemA"]["n_families_on_modal_foil"] == 2  # openai + google
-    assert tbl["itemB"]["concentration"] == pytest.approx(0.0)
-    assert tbl["itemB"]["modal_wrong_foil"] is None
-    # Aggregate: mean = 0.5; exactly 1/2 items have >=2 families on the foil.
+    assert tbl["itemA_k1"]["concentration"] == pytest.approx(1.0)
+    assert tbl["itemA_k1"]["modal_wrong_foil"] == "I1"
+    assert tbl["itemA_k1"]["n_families_on_modal_foil"] == 2  # openai + google
+    assert tbl["itemA_k1"]["is_k0_control"] is False
+    assert tbl["itemB_k0"]["concentration"] == pytest.approx(0.0)
+    assert tbl["itemB_k0"]["modal_wrong_foil"] is None
+    assert tbl["itemB_k0"]["is_k0_control"] is True
+    # All-item aggregate: mean = 0.5 (k0 zero drags it down); 1/2 items >=2 families.
     assert cf["mean_concentration"] == pytest.approx(0.5)
     assert cf["frac_items_ge2_families_on_foil"] == pytest.approx(0.5)
+    # k1-stratified aggregate EXCLUDES the k0 control: mean = 1.0; 1/1 >=2 families.
+    assert cf_k1["n_items"] == 1
+    assert cf_k1["mean_concentration"] == pytest.approx(1.0)
+    assert cf_k1["frac_items_ge2_families_on_foil"] == pytest.approx(1.0)
+    # No k0 control task appears in the k1 stratum item accounting.
+    assert cf_k1["n_items"] < cf["n_items"]
     # Anthropic excluded from cross-family models.
     assert "anthropic" not in cf["distinct_families"]
 

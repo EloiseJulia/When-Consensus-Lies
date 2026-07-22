@@ -98,6 +98,7 @@ _SEED = COLS["seed"]
 _LABEL = COLS["label"]
 _TARGET = COLS["target"]
 _REGIME = COLS["regime"]
+_AMBIGUITY_K = COLS["ambiguity_k"]
 _MODEL = "model"
 
 # Confirmatory per-domain partition filenames (combined == the confirmatory grid).
@@ -237,9 +238,19 @@ def analysis1_cross_model_concentration(
     The Anthropic (same-family) single cells are computed identically and returned
     separately as a reference (they are NOT part of the cross-family estimate).
 
-    Returns a dict with the cross-family aggregate, the item-level table, an
-    item-level bootstrap CI of the mean concentration, and the Anthropic
-    same-family reference aggregate.
+    IMPORTANT (k0 structural controls): the R2 subset pairs each item with a k0
+    CONTROL (ambiguity_level == 0, ``_k0`` id suffix) and a k1 AMBIGUOUS variant.
+    k0 controls have NO deleted interpretive axis, so their cross-model
+    concentration is **0 BY DESIGN** — nothing to converge on — NOT an observed
+    failure to converge. Including them deflates the aggregate. We therefore
+    report BOTH the all-item aggregate (for completeness) AND a **k1-stratified**
+    aggregate (ambiguity_level >= 1, k0 controls excluded), which is the
+    substantive cross-model-convergence result. k0/k1 is read from the FROZEN
+    ``ambiguity_level`` metadata (the ``ambiguity_k`` tidy column).
+
+    Returns a dict with the all-item + k1-stratified cross-family aggregates, the
+    item-level table (carrying ``ambiguity_level``), an item-level bootstrap CI of
+    the mean concentration, and the Anthropic same-family reference aggregates.
     """
     df = r2_tidy[r2_tidy[_METHOD] == single_method].copy()
     df["family"] = df[_MODEL].map(family_of)
@@ -258,8 +269,18 @@ def analysis1_cross_model_concentration(
             else:
                 n_models = 0
                 n_fams = 0
+            amb = g[_AMBIGUITY_K].iloc[0] if _AMBIGUITY_K in g.columns else None
+            try:
+                amb_val = int(amb) if amb is not None and not pd.isna(amb) else None
+            except (TypeError, ValueError):
+                amb_val = None
+            # Fallback to the id suffix if metadata is absent.
+            if amb_val is None:
+                amb_val = 0 if str(task_id).endswith("_k0") else 1
             rows.append({
                 "task": task_id,
+                "ambiguity_level": amb_val,
+                "is_k0_control": amb_val == 0,
                 "concentration": conc,
                 "modal_wrong_foil": foil,
                 "n_agents": len(labels),
@@ -306,18 +327,38 @@ def analysis1_cross_model_concentration(
                 set(m for r in rows for m in [])) or None,
         }
 
-    cross_agg = _aggregate(cross_rows, "cross_family_non_anthropic")
-    same_agg = _aggregate(same_rows, "same_family_anthropic_reference")
-    cross_agg["distinct_models"] = sorted(cross[_MODEL].unique().tolist())
-    cross_agg["distinct_families"] = sorted(cross["family"].unique().tolist())
-    same_agg["distinct_models"] = sorted(same[_MODEL].unique().tolist())
+    def _k1(rows: List[Dict]) -> List[Dict]:
+        return [r for r in rows if r["ambiguity_level"] >= 1]
+
+    cross_agg = _aggregate(cross_rows, "cross_family_non_anthropic_all_items")
+    cross_agg_k1 = _aggregate(_k1(cross_rows), "cross_family_non_anthropic_k1")
+    same_agg = _aggregate(same_rows, "same_family_anthropic_reference_all_items")
+    same_agg_k1 = _aggregate(_k1(same_rows), "same_family_anthropic_reference_k1")
+
+    cross_dm = sorted(cross[_MODEL].unique().tolist())
+    cross_df = sorted(cross["family"].unique().tolist())
+    for agg in (cross_agg, cross_agg_k1):
+        agg["distinct_models"] = cross_dm
+        agg["distinct_families"] = cross_df
+    for agg in (same_agg, same_agg_k1):
+        agg["distinct_models"] = sorted(same[_MODEL].unique().tolist())
+
+    n_k0 = sum(1 for r in cross_rows if r["is_k0_control"])
 
     return {
         "analysis": "cross_model_label_concentration_R2",
         "kind": "SECONDARY / post-hoc (blind-review #6)",
         "exclude_family": exclude_family,
-        "cross_family": cross_agg,
+        "k0_disclosure": (
+            f"{n_k0} of {len(cross_rows)} items are k0 CONTROLS "
+            "(ambiguity_level==0): concentration is 0 BY DESIGN (no deleted axis "
+            "to converge on), NOT an observed failure. The k1-stratified aggregate "
+            "(k0 excluded) is the substantive cross-model-convergence result."),
+        "n_k0_controls": n_k0,
+        "cross_family": cross_agg,           # all items (retained for completeness)
+        "cross_family_k1": cross_agg_k1,     # SUBSTANTIVE (k0 controls excluded)
         "same_family_reference": same_agg,
+        "same_family_reference_k1": same_agg_k1,
         "item_table": cross_rows,
     }
 
@@ -530,6 +571,8 @@ def to_markdown(rep: Dict) -> str:
     L.append("")
 
     # Analysis 1
+    cf_k1 = a1["cross_family_k1"]
+    sf_k1 = a1["same_family_reference_k1"]
     L.append("## Analysis 1 — per-item cross-MODEL label concentration (blind-review #6)")
     L.append("")
     L.append("R2 Anthropic-constructed subset (`cp_r2_xf.jsonl`), single-agent labels "
@@ -538,43 +581,58 @@ def to_markdown(rep: Dict) -> str:
              "ENUMERATED-foil share; `I_perp` ineligible as modal but kept in the "
              "denominator).")
     L.append("")
+    L.append(f"> **k0 controls disclosure:** {a1['k0_disclosure']}")
+    L.append("")
     L.append(f"**Cross-family (non-Anthropic)** — models: "
              f"{', '.join(cf.get('distinct_models', []))}; "
              f"families: {', '.join(cf.get('distinct_families', []))}.")
     L.append("")
-    L.append(f"- Items: **{cf['n_items']}**; agents/item (max): "
-             f"see item table.")
-    L.append(f"- Mean per-item concentration: **{_fmt(cf['mean_concentration'])}** "
-             f"(median {_fmt(cf['median_concentration'])}, range "
-             f"[{_fmt(cf['min_concentration'])}, {_fmt(cf['max_concentration'])}]).")
-    L.append(f"- Item-level bootstrap 95% CI of the mean: "
-             f"**[{_fmt(cf['boot_ci_lo'])}, {_fmt(cf['boot_ci_hi'])}]**.")
-    L.append(f"- Mean # distinct models on the modal wrong foil: "
-             f"**{_fmt(cf['mean_n_models_on_modal_foil'], 3)}**; "
-             f"mean # distinct families: **{_fmt(cf['mean_n_families_on_modal_foil'], 3)}**.")
-    L.append(f"- Items with any wrong-foil convergence: {cf['n_items_with_wrong_foil']}/"
-             f"{cf['n_items']}.")
-    L.append(f"- **Fraction of items where ≥2 DISTINCT non-Anthropic families "
-             f"concentrate on the SAME wrong foil: "
-             f"{_fmt(cf['frac_items_ge2_families_on_foil'])}** "
-             f"({cf['n_items_ge2_families_on_foil']}/{cf['n_items']}).")
-    L.append(f"- Fraction of items where ≥2 distinct models concentrate on the same "
-             f"wrong foil: {_fmt(cf['frac_items_ge2_models_on_foil'])} "
-             f"({cf['n_items_ge2_models_on_foil']}/{cf['n_items']}).")
-    L.append("")
+
+    def _cf_lines(agg: Dict, header: str, emphasise: bool) -> None:
+        star = "⭐ " if emphasise else ""
+        L.append(f"### {star}{header} (n={agg['n_items']} items)")
+        L.append(f"- Mean per-item concentration: **{_fmt(agg['mean_concentration'])}** "
+                 f"(median {_fmt(agg['median_concentration'])}, range "
+                 f"[{_fmt(agg['min_concentration'])}, {_fmt(agg['max_concentration'])}]).")
+        L.append(f"- Item-level bootstrap 95% CI of the mean: "
+                 f"**[{_fmt(agg['boot_ci_lo'])}, {_fmt(agg['boot_ci_hi'])}]**.")
+        L.append(f"- Mean # distinct models on the modal wrong foil: "
+                 f"**{_fmt(agg['mean_n_models_on_modal_foil'], 3)}**; "
+                 f"mean # distinct families: "
+                 f"**{_fmt(agg['mean_n_families_on_modal_foil'], 3)}**.")
+        L.append(f"- Items with any wrong-foil convergence: "
+                 f"{agg['n_items_with_wrong_foil']}/{agg['n_items']}.")
+        L.append(f"- **Fraction of items where ≥2 DISTINCT non-Anthropic families "
+                 f"concentrate on the SAME wrong foil: "
+                 f"{_fmt(agg['frac_items_ge2_families_on_foil'])}** "
+                 f"({agg['n_items_ge2_families_on_foil']}/{agg['n_items']}).")
+        L.append(f"- Fraction of items where ≥2 distinct models concentrate on the same "
+                 f"wrong foil: {_fmt(agg['frac_items_ge2_models_on_foil'])} "
+                 f"({agg['n_items_ge2_models_on_foil']}/{agg['n_items']}).")
+        L.append("")
+
+    _cf_lines(cf_k1, "SUBSTANTIVE — k1-stratified (ambiguity_level ≥ 1, k0 controls "
+                     "excluded)", emphasise=True)
+    _cf_lines(cf, "All-item aggregate (includes k0 structural-zero controls, for "
+                  "completeness)", emphasise=False)
+
     L.append(f"**Same-family (Anthropic) reference** (NOT part of the cross-family "
              f"estimate) — models: {', '.join(sf.get('distinct_models', []))}: "
-             f"mean concentration {_fmt(sf.get('mean_concentration'))}, "
-             f"≥2-families fraction {_fmt(sf.get('frac_items_ge2_families_on_foil'))}.")
+             f"k1 mean concentration {_fmt(sf_k1.get('mean_concentration'))}, "
+             f"k1 ≥2-families fraction "
+             f"{_fmt(sf_k1.get('frac_items_ge2_families_on_foil'))} "
+             f"(all-item mean {_fmt(sf.get('mean_concentration'))}).")
     L.append("")
-    L.append("Interpretation: multiple INDEPENDENT non-Anthropic models/families landing "
-             "on the SAME specific wrong foil per item is genuine cross-MODEL convergence "
-             "— not a within-cell N=1 error-rate tautology.")
+    L.append("Interpretation: on the k1 ambiguous items (the k0 controls are 0 by "
+             "design), multiple INDEPENDENT non-Anthropic models/families land on the "
+             "SAME specific wrong foil — genuine cross-MODEL convergence, not a "
+             "within-cell N=1 error-rate tautology.")
     L.append("")
-    L.append("| task | concentration | modal_wrong_foil | n_agents | n_models_on_foil | n_families_on_foil |")
-    L.append("|---|---|---|---|---|---|")
+    L.append("| task | k | concentration | modal_wrong_foil | n_agents | n_models_on_foil | n_families_on_foil |")
+    L.append("|---|---|---|---|---|---|---|")
     for r in a1["item_table"]:
-        L.append(f"| {r['task']} | {_fmt(r['concentration'])} | "
+        ktag = "k0 (control)" if r.get("is_k0_control") else f"k{r.get('ambiguity_level')}"
+        L.append(f"| {r['task']} | {ktag} | {_fmt(r['concentration'])} | "
                  f"{r['modal_wrong_foil'] or '—'} | {r['n_agents']} | "
                  f"{r['n_models_on_modal_foil']} | {r['n_families_on_modal_foil']} |")
     L.append("")
