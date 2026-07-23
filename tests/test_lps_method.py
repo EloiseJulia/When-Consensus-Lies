@@ -97,8 +97,13 @@ def test_H_seed_entropy_from_scripted_labels():
     res = lps.H_seed(_dummy_task(), client, "m", k=4, temperature=0.7, base_seed=0)
     assert res["labels"] == ["I0", "I0", "I1", "I1"]
     assert res["H_seed"] == pytest.approx(1.0)
-    # All seed-resample prompts are exactly task.prompt (no added text).
-    assert client.recorded_prompts == ["Do the thing."] * 4
+    # Every seed-resample prompt = task.prompt + the executable answer contract
+    # (coverage fix); the contract carries no gold and is identical across k.
+    assert len(client.recorded_prompts) == 4
+    for p in client.recorded_prompts:
+        assert p.startswith("Do the thing.")
+        assert lps._answer_contract("code_spec") in p
+    assert len(set(client.recorded_prompts)) == 1  # identical across resamples
 
 
 def test_H_seed_degenerate_zero_entropy():
@@ -429,6 +434,93 @@ def test_anti_leakage_via_lpp_detect(monkeypatch):
     res = lps.lpp_detect(task, client, "m", k=3, base_seed=0)
     assert "H_seed" in res and "H_ctx_max" in res
     _assert_no_sentinels(client.recorded_prompts)
+
+
+# ── 2c. Executable answer contract (coverage fix) ────────────────────────────
+
+def test_answer_contract_stdlib_clause_for_code_domains():
+    for dom in ("code_spec", "data_analysis"):
+        c = lps._answer_contract(dom)
+        assert "```python" in c
+        assert "standard library" in c.lower()
+    # policy_qa gets the money/JSON contract, no stdlib clause.
+    pol = lps._answer_contract("policy_qa")
+    assert "FINAL ANSWER" in pol
+    assert "standard library" not in pol.lower()
+
+
+def test_contract_appended_to_seed_and_pinning_prompts():
+    def fn(role, prompt, seed):
+        if "JSON array" in prompt:
+            return '[{"dimension": "threshold", "values": ["v1", "v2"]}]'
+        return "I0"
+    client = ScriptedClient(fn)
+    task = _dummy_task(domain="code_spec")
+    contract = lps._answer_contract("code_spec")
+
+    lps.H_seed(task, client, "m", k=2, base_seed=0)
+    seed_prompts = list(client.recorded_prompts)
+    assert seed_prompts and all(contract in p for p in seed_prompts)
+
+    client.recorded_prompts.clear()
+    dims = lps.surface_assumptions(task, client, "m")
+    lps.H_ctx(task, client, "m", dims, base_seed=0)
+    pin_prompts = [p for p in client.recorded_prompts if "assume" in p.lower()]
+    assert pin_prompts and all(contract in p for p in pin_prompts)
+
+
+# ── 2d. PRIMARY item-level flag logic (H_ctx>0 AND H_seed low) ───────────────
+
+def _detect_client(pin_map, seed_text_fn):
+    """Client for lpp_detect: JSON dims for surfacing, pin_map[value] for pins,
+    seed_text_fn(seed) for seed-resamples."""
+    def fn(role, prompt, seed):
+        if "JSON array" in prompt:
+            return '[{"dimension": "threshold", "values": ["V1", "V2"]}]'
+        if "assume" in prompt.lower():
+            return pin_map["V2"] if "V2" in prompt else pin_map["V1"]
+        return seed_text_fn(seed)
+    return ScriptedClient(fn)
+
+
+def test_item_flag_true_when_hctx_positive_and_hseed_low(monkeypatch):
+    _sig_by_text(monkeypatch)
+    # Distinct pin results → H_ctx>0; constant seed answer → H_seed=0 → FLAG.
+    client = _detect_client({"V1": "RA", "V2": "RB"}, lambda seed: "SAME")
+    res = lps.lpp_detect(_dummy_task(), client, "m", k=5, base_seed=0)
+    assert res["H_ctx_max"] > 0.0
+    assert res["H_seed"] == pytest.approx(0.0)
+    assert res["is_flagged"] is True
+    assert res["flagged_dimension"] == "threshold"
+
+
+def test_item_flag_false_when_hseed_high(monkeypatch):
+    _sig_by_text(monkeypatch)
+    # Distinct pin results → H_ctx>0, BUT seed answer alternates → H_seed high →
+    # NOT the danger quadrant (openly uncertain), so item is NOT flagged.
+    client = _detect_client({"V1": "RA", "V2": "RB"}, lambda seed: f"S{seed % 2}")
+    res = lps.lpp_detect(_dummy_task(), client, "m", k=5, base_seed=0, tau_s=0.5)
+    assert res["H_ctx_max"] > 0.0
+    assert res["H_seed"] > 0.5
+    assert res["is_flagged"] is False
+
+
+def test_item_flag_false_when_hctx_zero(monkeypatch):
+    _sig_by_text(monkeypatch)
+    # Pins all agree → H_ctx=0 → not flagged even though H_seed is low.
+    client = _detect_client({"V1": "SAME", "V2": "SAME"}, lambda seed: "SAME")
+    res = lps.lpp_detect(_dummy_task(), client, "m", k=5, base_seed=0)
+    assert res["H_ctx_max"] == pytest.approx(0.0)
+    assert res["is_flagged"] is False
+
+
+def test_lpp_detect_reports_coverage_counts(monkeypatch):
+    # V1 parseable, V2 unparseable (BROKEN) → coverage 1/2 for the one dim.
+    _sig_by_text(monkeypatch)
+    client = _detect_client({"V1": "RA", "V2": "BROKEN"}, lambda seed: "SAME")
+    res = lps.lpp_detect(_dummy_task(), client, "m", k=3, base_seed=0)
+    assert res["n_pins_total"] == 2
+    assert res["n_parseable_total"] == 1
 
 
 # ── axis_match heuristic (reporting-only) ────────────────────────────────────

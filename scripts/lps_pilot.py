@@ -308,20 +308,29 @@ def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     for r in results:
         cat = r.get("category", "other")
         b = by_cat.setdefault(cat, {"H_seed": [], "H_ctx": [], "H_ctx_all": [],
-                                    "match": []})
+                                    "match": [], "flag": [], "parse": [], "pins": []})
         b["H_seed"].append(r["H_seed"])
         b["H_ctx"].append(r["H_ctx_max"])
         b["H_ctx_all"].append(r.get("H_ctx_max_all", r["H_ctx_max"]))
+        b["flag"].append(1.0 if r.get("is_flagged") else 0.0)
+        b["parse"].append(r.get("n_parseable_total", 0))
+        b["pins"].append(r.get("n_pins_total", 0))
         if cat == "H1_k1":
             b["match"].append(1.0 if r.get("axis_match") else 0.0)
 
     summary: Dict[str, Any] = {"by_category": {}}
     for cat, b in by_cat.items():
+        n_pins = sum(b["pins"])
         summary["by_category"][cat] = {
             "n": len(b["H_seed"]),
+            "n_flagged": int(sum(b["flag"])),
+            "flag_rate": _mean(b["flag"]),
             "mean_H_seed": _mean(b["H_seed"]),
             "mean_H_ctx_dropIperp": _mean(b["H_ctx"]),
             "mean_H_ctx_all": _mean(b["H_ctx_all"]),
+            "pins_parseable": int(sum(b["parse"])),
+            "pins_total": int(n_pins),
+            "coverage": (sum(b["parse"]) / n_pins) if n_pins else None,
         }
 
     summary["localization_hit_rate_H1_k1"] = _mean(
@@ -373,22 +382,25 @@ def _median(xs: List[float]) -> Optional[float]:
 
 
 def _print_table(results: List[Dict[str, Any]]) -> None:
-    print("\n" + "=" * 112)
+    print("\n" + "=" * 120)
     print(f"{'item':<42}{'cat':<7}{'model':<16}{'H_seed':>8}"
-          f"{'H_ctx':>8}{'H_ctxAll':>9}{'flag':>6}{'match':>7}{'filt':>6}")
-    print("-" * 112)
+          f"{'H_ctx':>8}{'flag':>6}{'match':>7}{'cover':>8}{'filt':>6}")
+    print("-" * 120)
     for r in sorted(results, key=lambda x: (x.get("category", ""), x["task_id"], x["model"])):
+        cov = f"{r.get('n_parseable_total', 0)}/{r.get('n_pins_total', 0)}"
         print(
             f"{r['task_id'][:41]:<42}{r.get('category',''):<7}{r['model'][:15]:<16}"
             f"{r['H_seed']:>8.3f}{r['H_ctx_max']:>8.3f}"
-            f"{r.get('H_ctx_max_all', r['H_ctx_max']):>9.3f}"
             f"{('Y' if r['is_flagged'] else '.'): >6}"
             f"{('Y' if r.get('axis_match') else '.'): >7}"
+            f"{cov:>8}"
             f"{len(r.get('filtered_dims', [])): >6}"
         )
-    print("=" * 112)
-    print("  H_ctx = drop-I_perp (VALID interpretations only); H_ctxAll = old all-label rule.")
-    print("  filt = # surfaced dims dropped by the format/language/tooling backstop.")
+    print("=" * 120)
+    print("  H_ctx = mutual-equivalence entropy (bits); flag = item-level danger flag "
+          "(H_ctx>0 AND H_seed low).")
+    print("  cover = pinned answers parseable/runnable out of total pins (coverage "
+          "fix); match = argmax dim == true deleted axis.")
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -456,12 +468,26 @@ def main(argv: Optional[List[str]] = None) -> None:
     summary = summarize(results)
     print("\n[Pilot] Summary:")
     print(json.dumps(summary, indent=2))
+
+    # ── PRIMARY: item-level flag by ground-truth bucket + coverage ────────────
+    print("\n[Pilot] PRIMARY item-level flag (H_ctx>0 AND H_seed low) by bucket:")
+    for cat in ("H1_k1", "H2", "H1_k0"):
+        c = summary["by_category"].get(cat)
+        if not c:
+            continue
+        should = {"H1_k1": "SHOULD flag", "H2": "should NOT (disambiguator in-prompt)",
+                  "H1_k0": "should NOT (no deleted axis)"}[cat]
+        cov = c["coverage"]
+        print(f"    {cat:<6} flagged {c['n_flagged']}/{c['n']}  "
+              f"(rate {c['flag_rate']:.2f})  coverage {c['pins_parseable']}/{c['pins_total']}"
+              f"{f' ({cov:.0%})' if cov is not None else ''}  — {should}")
+
     sep = summary["danger_quadrant_separates"]
-    print(f"\n[Pilot] KEY CHECK — drop-I_perp H_ctx separates the CONVERGENT "
+    print(f"\n[Pilot] KEY CHECK — mutual-equivalence H_ctx separates the CONVERGENT "
           f"(low-H_seed) H1_k1 subset from H2 and k0? {'YES' if sep else 'NO'}")
     print(f"[Pilot] False flags still present: H2={summary['false_flags_H2']} "
           f"H1_k0={summary['false_flags_H1_k0']}")
-    print(f"[Pilot] Localization hit-rate (drop-I_perp argmax) on H1_k1: "
+    print(f"[Pilot] Localization hit-rate (argmax==true axis) on H1_k1: "
           f"{summary['localization_hit_rate_H1_k1']}  | convergent subset: "
           f"{summary['H1_k1_convergent_subset']['localization_hit_rate']}")
     print(f"[Pilot] Result: completed={result['completed']} skipped={result['skipped']} "

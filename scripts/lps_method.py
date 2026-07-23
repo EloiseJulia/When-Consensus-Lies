@@ -77,6 +77,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from common.schema import AgentRun, Task  # noqa: E402
 from harness.label import label_run  # noqa: E402  (FROZEN executable-gold labeler)
+from harness.run import answer_format_instruction  # noqa: E402  (FROZEN prompt contract)
 
 
 # ── Defaults (pilot-tunable; FROZEN before the confirmatory run) ─────────────
@@ -152,6 +153,34 @@ PINNING_TEMPLATE = (
     "Give your final answer now."
 )
 
+#: EXECUTABLE ANSWER CONTRACT (2026-07-23 coverage fix). We APPEND the FROZEN
+#: confirmatory answer-format contract (``answer_format_instruction(domain)``) to
+#: the seed-resample AND pinning prompts so answers come back in the SAME
+#: extractable/executable shape the confirmatory study uses — otherwise most
+#: pinned answers were unparseable/unrunnable and H_ctx collapsed to 0. For
+#: code / data_analysis we additionally require STANDARD-LIBRARY-ONLY code so it
+#: runs under the scrubbed ``-S -E`` execution harness (no pandas/numpy). The
+#: contract is DOMAIN-GENERIC (no gold/target/foil/key_questions) → anti-leakage
+#: preserved. This changes the DETECTOR's prompts only, not any frozen metric.
+_STDLIB_ONLY_CLAUSE = (
+    "\nUse ONLY the Python standard library — do NOT import pandas, numpy, or any "
+    "third-party package. The solution must run under a standard-library-only "
+    "interpreter."
+)
+
+
+def _answer_contract(domain: str) -> str:
+    """Frozen domain answer-format contract (+ stdlib-only clause for code)."""
+    contract = answer_format_instruction(domain)
+    if domain in ("code_spec", "data_analysis"):
+        contract += _STDLIB_ONLY_CLAUSE
+    return contract
+
+
+def _with_contract(prompt: str, domain: str) -> str:
+    """Append the executable answer contract to a prompt."""
+    return f"{prompt}\n\n{_answer_contract(domain)}"
+
 
 # ── Entropy (BITS) over exact label clusters ─────────────────────────────────
 
@@ -226,17 +255,20 @@ def H_seed(
 ) -> Dict[str, Any]:
     """Semantic entropy (bits) over k resamples of the SAME underspecified prompt.
 
-    The prompt is ``task.prompt`` verbatim — NO added text (anti-leakage trivially
-    holds). k distinct samples are obtained by advancing the seed
-    (``base_seed + j``); temperature>0 drives the sampling variation.
+    The prompt is ``task.prompt`` + the executable answer contract (so H_seed and
+    H_ctx are measured on comparably-extractable outputs); the contract is
+    domain-generic (no gold) so anti-leakage holds. k distinct samples are
+    obtained by advancing the seed (``base_seed + j``); temperature>0 drives the
+    sampling variation.
 
     Returns ``{"H_seed", "labels", "k"}``.
     """
     labels: List[str] = []
+    prompt = _with_contract(task.prompt, task.domain)
     for j in range(k):
         seed = base_seed + j
         text = _complete_text(
-            client, prompt=task.prompt, model=model, seed=seed, temperature=temperature
+            client, prompt=prompt, model=model, seed=seed, temperature=temperature
         )
         labels.append(_label_answer(text, task, model_id=model, seed=seed))
     return {"H_seed": semantic_entropy(labels), "labels": labels, "k": k}
@@ -604,6 +636,7 @@ def H_ctx(
             prompt = PINNING_TEMPLATE.format(
                 prompt=task.prompt, dimension=name, value=value
             )
+            prompt = _with_contract(prompt, task.domain)
             # Distinct seed per (dim, value) so the cache never collapses cells.
             seed = base_seed + di * 100 + vj
             text = _complete_text(
@@ -659,9 +692,11 @@ def lpp_detect(
 ) -> Dict[str, Any]:
     """Full black-box detector: surface → pin → decompose → flag danger quadrant.
 
-    Item is flagged AMBIGUOUS iff ``H_ctx_max >= tau`` AND ``H_seed <= tau_s``
-    (the danger quadrant: answer depends on an unstated dimension yet resampling
-    looks confident).
+    PRIMARY (item-level) metric: item is flagged AMBIGUOUS iff
+    ``H_ctx_max > 0`` (some surfaced-dimension pinning changes the answer among
+    mutual-equivalence clusters) AND ``H_seed <= tau_s`` (the danger quadrant:
+    the answer depends on an unstated dimension yet resampling looks confident).
+    Localization (which dimension) is a SECONDARY metric, reported separately.
 
     Returns a dict with H_seed, H_ctx_max, flagged_dimension, is_flagged, plus the
     per-dimension breakdown, surfaced dims, and seed labels (for reporting/audit).
@@ -676,7 +711,12 @@ def lpp_detect(
 
     h_seed = seed_res["H_seed"]
     h_ctx_max = ctx_res["H_ctx_max"]
-    is_flagged = bool(h_ctx_max >= tau and h_seed <= tau_s)
+    # PRIMARY item-level flag: any answer-changing dimension + confident reseed.
+    is_flagged = bool(h_ctx_max > 0.0 and h_seed <= tau_s)
+
+    # Coverage: how many pinned answers came back parseable/runnable (contract fix).
+    n_pins_total = sum(len(d["values"]) for d in ctx_res["per_dim"])
+    n_parseable_total = sum(d["n_parseable"] for d in ctx_res["per_dim"])
 
     return {
         "task_id": task.id,
@@ -688,6 +728,8 @@ def lpp_detect(
         "H_ctx_max_all": ctx_res["H_ctx_max_all"],
         "flagged_dimension": ctx_res["flagged_dimension"],
         "is_flagged": is_flagged,
+        "n_pins_total": n_pins_total,
+        "n_parseable_total": n_parseable_total,
         "tau": tau,
         "tau_s": tau_s,
         "surfaced_dims": dims,
