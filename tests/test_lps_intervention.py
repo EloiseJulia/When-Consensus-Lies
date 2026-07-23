@@ -352,7 +352,8 @@ def test_path_guard_accepts_own_paths(tmp_path):
     intv._validate_output_paths(intv.shard_checkpoint("gpt-5.6-sol"),
                                 intv.shard_cache("gpt-5.6-sol"))
     intv._validate_output_paths(str(tmp_path / "cp_lps_intervention.jsonl"),
-                                str(tmp_path / ".llm_cache_lps_intv"))
+                                str(tmp_path / ".llm_cache_lps_intv"),
+                                allowed_roots=[str(tmp_path)])
 
 
 def test_run_refuses_confirmatory_checkpoint(tmp_path):
@@ -420,7 +421,8 @@ def test_scripted_run_writes_records_and_resumes(tmp_path):
     tasks = [_task("A", key_questions=["axis?"]), _task("B")]
 
     r1 = intv.run(tasks, {}, models=["gpt-5.6-sol"], seed_bases=[30260713, 30270713],
-                  checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client)
+                  checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client,
+                  allowed_roots=[str(tmp_path)])
     assert r1["status"] == "ok"
     assert r1["completed"] == 2 * 1 * 2
     recs = [x for x in r1["results"] if not x.get("_header")]
@@ -433,7 +435,8 @@ def test_scripted_run_writes_records_and_resumes(tmp_path):
 
     # Resume: a second identical run recomputes nothing.
     r2 = intv.run(tasks, {}, models=["gpt-5.6-sol"], seed_bases=[30260713, 30270713],
-                  checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client)
+                  checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client,
+                  allowed_roots=[str(tmp_path)])
     assert r2["completed"] == 0 and r2["skipped"] == 4
 
 
@@ -444,10 +447,12 @@ def test_resume_fingerprint_mismatch_raises(tmp_path):
     cp = str(tmp_path / "cp_lps_intervention.jsonl")
     cache = str(tmp_path / ".llm_cache_lps_intv")
     intv.run([_task("A")], {}, models=["gpt-5.6-sol"], seed_bases=[30260713],
-             checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client)
+             checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client,
+             allowed_roots=[str(tmp_path)])
     with pytest.raises(RuntimeError):
         intv.run([_task("A")], {}, models=["gpt-5.6-sol"], seed_bases=[99999999],
-                 checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client)
+                 checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client,
+                 allowed_roots=[str(tmp_path)])
 
 
 # ── [MAJOR 1] Path isolation is NOT bypassable by nested foreign directories ──
@@ -481,8 +486,10 @@ def test_path_guard_accepts_legit_after_hardening(tmp_path):
     intv._validate_output_paths(intv.CHECKPOINT, intv.CACHE_DIR)
     intv._validate_output_paths(intv.shard_checkpoint("gpt-5.6-sol"),
                                 intv.shard_cache("gpt-5.6-sol"))
+    # An out-of-repo scratch dir is accepted ONLY when injected EXPLICITLY.
     intv._validate_output_paths(str(tmp_path / "cp_lps_intervention.jsonl"),
-                                str(tmp_path / ".llm_cache_lps_intv"))
+                                str(tmp_path / ".llm_cache_lps_intv"),
+                                allowed_roots=[str(tmp_path)])
 
 
 # ── [MAJOR 2] Report/merge integrity — fail loud, never silently concatenate ──
@@ -503,8 +510,15 @@ def _cell(tid, model, seed, fp, **over):
     return rec
 
 
-def _write_ckpt(path, fp, records):
-    lines = [json.dumps({"_header": True, "_fingerprint": fp})]
+def _write_ckpt(path, fp, records, roster=None):
+    if roster is None:
+        roster = {
+            "models": sorted({r["model"] for r in records}),
+            "seed_bases": sorted({r["seed_base"] for r in records}),
+            "items": sorted({r["task_id"] for r in records}),
+        }
+    header = {"_header": True, "_fingerprint": fp, "_roster": roster}
+    lines = [json.dumps(header)]
     lines.extend(json.dumps(r) for r in records)
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(path)
@@ -608,12 +622,17 @@ def test_merge_unstamped_record_raises(tmp_path):
 
 def test_report_main_aborts_on_incomplete_grid(tmp_path, capsys):
     # End-to-end: the report CLI refuses to emit metrics from an interrupted grid.
+    # (Inject tmp_path as an allowed root so the grid check — not the path guard —
+    # is what aborts.)
     fp = _fp_intv(seed_bases=[100, 200])
     recs = [_cell("A", "m", 100, fp), _cell("A", "m", 200, fp),
             _cell("B", "m", 100, fp)]
-    cp = _write_ckpt(tmp_path / "cp_lps_intervention.jsonl", fp, recs)
+    cp = _write_ckpt(tmp_path / "cp_lps_intervention.jsonl", fp, recs,
+                     roster={"models": ["m"], "seed_bases": [100, 200],
+                             "items": ["A", "B"]})
     with pytest.raises(SystemExit):
-        report.main(["--checkpoint", cp, "--out", str(tmp_path / "out.md")])
+        report.main(["--checkpoint", cp, "--out", str(tmp_path / "out.md")],
+                    allowed_roots=[str(tmp_path)])
 
 
 # ── [MINOR 3] H-B2' INTEGRATION test through the REAL frozen labeler ─────────
@@ -682,3 +701,177 @@ def test_hb2_compute_cell_end_to_end_real_labeler(monkeypatch):
     assert rec["b2"]["baseline_label"] != "I0"
     assert cd_primary([rec["b2"]["oracle_label"]], "I0") == pytest.approx(0.0)
     assert cd_primary([rec["b2"]["baseline_label"]], "I0") > 0.0
+
+
+# ── Re-audit round 3: temp-escape / version-equality / declared-roster /
+#    malformed-keys / merge-report I/O isolation ─────────────────────────────
+
+def test_path_guard_rejects_system_temp_in_production():
+    # MAJOR-1 (re-audit): a path under the system temp dir must be REJECTED in
+    # production (no allowed_roots injected) — the guard never hard-allows %TEMP%.
+    import tempfile
+    tmp = Path(tempfile.gettempdir())
+    cp = str(tmp / "audit-outside" / "cp_lps_intervention.jsonl")
+    cache = str(tmp / "audit-outside" / ".llm_cache_lps_intv")
+    with pytest.raises(ValueError):
+        intv._validate_output_paths(cp, cache)                      # production mode
+    # …but accepted when the caller injects that exact root EXPLICITLY.
+    intv._validate_output_paths(cp, cache, allowed_roots=[str(tmp / "audit-outside")])
+
+
+def test_run_rejects_system_temp_without_injected_root(tmp_path):
+    # The driver run() must also refuse an out-of-repo scratch dir unless the
+    # caller injects it — proving the plumbing is not bypassable via run().
+    def fn(role, prompt, seed):
+        return "I1"
+    client = ScriptedClient(fn)
+    import tempfile
+    tmp = Path(tempfile.gettempdir()) / "audit-outside-run"
+    with pytest.raises(ValueError):
+        intv.run([_task("A")], {}, models=["m"], seed_bases=[1],
+                 checkpoint_path=str(tmp / "cp_lps_intervention.jsonl"),
+                 cache_dir=str(tmp / ".llm_cache_lps_intv"), k=3,
+                 _client_override=client)
+
+
+def test_merge_rejects_wrong_but_uniform_version(tmp_path):
+    # MAJOR-2 (re-audit): a self-consistent checkpoint stamped a WRONG version
+    # (uniform across records, so cross-record agreement passes) must still RAISE
+    # because it does not EQUAL the current module constants.
+    fp = _fp_intv(seed_bases=[100], intervention_version="WRONG",
+                  method_version="WRONG")
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp,
+                    [_cell("A", "m", 100, fp)])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_rejects_wrong_intervention_version_only(tmp_path):
+    fp = _fp_intv(seed_bases=[100], intervention_version="WRONG")
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp,
+                    [_cell("A", "m", 100, fp)])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_declared_roster_missing_model_raises(tmp_path):
+    # MAJOR-3 (re-audit): the fingerprint/header DECLARES models ["a","b"] but only
+    # "a" is present → completeness measured against the DECLARED roster RAISES
+    # (must not overstate completeness from the observed universe).
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a", "b"], "seed_bases": [100], "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_declared_roster_missing_item_raises(tmp_path):
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": [100], "items": ["A", "B"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_no_roster_raises(tmp_path):
+    # A checkpoint with NO declared roster header cannot be completeness-verified
+    # against the intended grid → abort (never fall back to observed universe).
+    fp = _fp_intv(seed_bases=[100])
+    p = tmp_path / "cp_lps_intervention__m.jsonl"
+    p.write_text(json.dumps({"_header": True, "_fingerprint": fp})
+                 + "\n" + json.dumps(_cell("A", "m", 100, fp)) + "\n",
+                 encoding="utf-8")
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([str(p)])
+
+
+def test_merge_declared_roster_complete_ok(tmp_path):
+    # Sanity: when every declared cell IS present, merge succeeds and echoes the
+    # declared roster.
+    fp = _fp_intv(models=["a", "b"], seed_bases=[100])
+    roster = {"models": ["a", "b"], "seed_bases": [100], "items": ["A"]}
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                     [_cell("A", "a", 100, fp)], roster=roster)
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__b.jsonl", fp,
+                     [_cell("A", "b", 100, fp)], roster=roster)
+    merged = merge.merge_records([p1, p2])
+    assert len(merged["records"]) == 2
+    assert merged["roster"] == {"models": ["a", "b"], "seed_bases": [100],
+                                "items": ["A"]}
+
+
+@pytest.mark.parametrize("bad", [
+    {"task_id": None, "model": "m", "seed_base": 100},
+    {"task_id": "A", "model": None, "seed_base": 100},
+    {"task_id": "A", "model": "m", "seed_base": None},
+    {"model": "m", "seed_base": 100},                       # task_id absent
+    {"task_id": "A", "seed_base": 100},                     # model absent
+    {"task_id": "A", "model": "m"},                         # seed_base absent
+    {"task_id": "A", "model": "m", "seed_base": "100"},     # seed_base wrong type
+    {"task_id": "A", "model": "m", "seed_base": True},      # bool is not an int
+    {"task_id": "", "model": "m", "seed_base": 100},        # empty task_id
+])
+def test_merge_malformed_identity_keys_raise(tmp_path, bad):
+    # MAJOR-4 (re-audit): a record with a missing / None / wrong-typed identity key
+    # must RAISE (never enter the cell universe and silently satisfy completeness).
+    fp = _fp_intv(seed_bases=[100])
+    rec = dict(bad)
+    rec["_fingerprint"] = fp
+    p = tmp_path / "cp_lps_intervention__m.jsonl"
+    p.write_text(json.dumps({"_header": True, "_fingerprint": fp,
+                             "_roster": {"models": ["m"], "seed_bases": [100],
+                                         "items": ["A"]}})
+                 + "\n" + json.dumps(rec) + "\n", encoding="utf-8")
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([str(p)])
+
+
+def _confirmatory_ckpt(tmp_path):
+    """Write a plausible CONFIRMATORY checkpoint (protected namespace) on disk."""
+    d = tmp_path / ".run_partitions"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "cp_lps_confirm.jsonl"
+    p.write_text(json.dumps({"_header": True}) + "\n", encoding="utf-8")
+    return str(p)
+
+
+def test_merge_main_rejects_out_into_confirmatory(tmp_path):
+    # MAJOR-5 (re-audit): merge --out into a confirmatory path is REJECTED.
+    fp = _fp_intv(seed_bases=[100])
+    shard = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp,
+                        [_cell("A", "m", 100, fp)])
+    bad_out = str(tmp_path / "cp_lps_confirm.jsonl")
+    with pytest.raises(SystemExit):
+        merge.main(["--shards", shard, "--out", bad_out],
+                   allowed_roots=[str(tmp_path)])
+
+
+def test_merge_main_rejects_confirmatory_input_shard(tmp_path):
+    # merge --shards pointing at a confirmatory checkpoint is REJECTED.
+    bad_shard = _confirmatory_ckpt(tmp_path)
+    good_out = str(tmp_path / "cp_lps_intervention_merged.jsonl")
+    with pytest.raises(SystemExit):
+        merge.main(["--shards", bad_shard, "--out", good_out],
+                   allowed_roots=[str(tmp_path)])
+
+
+def test_report_main_rejects_confirmatory_checkpoint_input(tmp_path):
+    # MAJOR-5 (re-audit): report --checkpoint reading a confirmatory checkpoint is
+    # REJECTED before any pooling.
+    bad_cp = _confirmatory_ckpt(tmp_path)
+    with pytest.raises(SystemExit):
+        report.main(["--checkpoint", bad_cp, "--out", str(tmp_path / "out.md")],
+                    allowed_roots=[str(tmp_path)])
+
+
+def test_report_main_rejects_out_into_confirmatory(tmp_path):
+    fp = _fp_intv(seed_bases=[100])
+    cp = _write_ckpt(tmp_path / "cp_lps_intervention.jsonl", fp,
+                     [_cell("A", "m", 100, fp)])
+    bad_out = str(tmp_path / ".run_partitions" / "cp_lps_confirm.jsonl")
+    (tmp_path / ".run_partitions").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(SystemExit):
+        report.main(["--checkpoint", cp, "--out", bad_out],
+                    allowed_roots=[str(tmp_path)])

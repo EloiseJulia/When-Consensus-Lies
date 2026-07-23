@@ -451,7 +451,8 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv: Optional[List[str]] = None, *,
+         allowed_roots: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         description="Study 2 LPS INTERVENTION analysis + markdown report "
                     "(H-B1' + H-B2')."
@@ -467,6 +468,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     import registered_run as _rr
+    import lps_intervention as _intv
     import lps_intervention_merge as _merge
 
     if args.shards:
@@ -479,8 +481,22 @@ def main(argv: Optional[List[str]] = None) -> None:
         paths = [args.checkpoint]
         source = args.checkpoint
 
-    # Fail-loud integrity gate (MAJOR-2): validate fingerprints + grid completeness
-    # and dedup with conflict detection before ANY metric is computed. An
+    # Artifact-isolation gate (MAJOR-5): neither the INPUT checkpoint(s) nor the
+    # report OUTPUT may resolve into a confirmatory/frozen/other-pass namespace.
+    try:
+        for p in paths:
+            _intv.validate_merge_io_path(p, label="--checkpoint/--shards",
+                                         is_checkpoint=True,
+                                         allowed_roots=allowed_roots)
+        _intv.validate_merge_io_path(args.out, label="--out", is_checkpoint=False,
+                                     allowed_roots=allowed_roots)
+    except ValueError as exc:
+        print(f"[Report] ABORT — {exc}", file=sys.stderr)
+        raise SystemExit(2)
+
+    # Fail-loud integrity gate (MAJOR-2/3/4): validate versions == constants,
+    # fingerprints, required record keys, and grid completeness against the
+    # DECLARED roster, with conflict-aware dedup, before ANY metric is computed. An
     # interrupted / overlapping / incompatible grid ABORTS rather than silently
     # yielding metrics with missing or overweighted cells.
     try:

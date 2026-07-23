@@ -63,7 +63,6 @@ import argparse
 import json
 import re
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -162,26 +161,51 @@ def _is_under(child: Path, root: Path) -> bool:
         return str(child).startswith(str(root))
 
 
-def _validate_output_paths(checkpoint_path: str, cache_dir: str) -> None:
+def _resolved_roots(allowed_roots: Optional[List[str]]) -> List[Path]:
+    """Resolve caller-injected extra roots (test scratch dirs). EMPTY in production.
+
+    MAJOR-1 hardening: production code hard-allows ONLY the repository roots. A
+    scratch directory (e.g. the system temp dir) is accepted ONLY when the caller
+    passes it EXPLICITLY via ``allowed_roots`` — the guard never silently trusts
+    ``%TEMP%``/``/tmp``. Tests inject their ``tmp_path`` here; production callers
+    pass nothing.
+    """
+    return [Path(r).resolve() for r in (allowed_roots or [])]
+
+
+def _scan_protected_substr(path: Path, label: str) -> None:
+    """Raise if any protected token appears ANYWHERE in the full resolved path."""
+    rel = _rel_lower(path)
+    hit = next((tok for tok in _PROTECTED_PATH_SUBSTR if tok in rel), None)
+    if hit is not None:
+        raise ValueError(
+            f"Refusing {label} {path!s}: protected token {hit!r} appears in the "
+            "resolved path — it lives inside a confirmatory/pilot/other-pass "
+            "namespace. Intervention artifacts must be fully isolated."
+        )
+
+
+def _validate_output_paths(checkpoint_path: str, cache_dir: str, *,
+                           allowed_roots: Optional[List[str]] = None) -> None:
     """Reject any path that could read/write a confirmatory/other-pass artifact.
 
-    Defence in depth (MAJOR-1 hardening — a basename-only check is bypassable):
+    Defence in depth (a basename-only check is bypassable):
       1. The checkpoint BASENAME must start with ``cp_lps_intervention`` and the
          cache basename with ``.llm_cache_lps_intv``.
       2. NO protected substring (``cp_lps_confirm``, ``registered_run``, ``sck10``,
          ``phaseb``, ``pilot``, …) may appear ANYWHERE in the FULL resolved path —
          so a nested confirmatory/other-pass DIRECTORY cannot smuggle a write in.
-      3. The checkpoint's PARENT must be EXACTLY the repo's ``.run_partitions`` root
-         (or under a temp dir for tests) — never a nested subdirectory; the cache's
-         parent must be EXACTLY the repo root (or under a temp dir). This blocks
-         ``.run_partitions/cp_lps_confirm_archive/cp_lps_intervention.jsonl`` and
-         ``.llm_cache_registered_run/.llm_cache_lps_intv``.
+      3. The checkpoint's PARENT must be EXACTLY the repo's ``.run_partitions`` root;
+         the cache's parent must be EXACTLY the repo root. A path OUTSIDE these
+         repository roots is REJECTED — the ONLY exception is a root a test injects
+         EXPLICITLY via ``allowed_roots`` (production passes none, so the system
+         temp dir can NOT smuggle a write past the guard — MAJOR-1 escape fix).
     """
     cp = Path(checkpoint_path).resolve()
     cache = Path(cache_dir).resolve()
     repo_root = _REPO_ROOT.resolve()
     runparts_root = (repo_root / ".run_partitions").resolve()
-    tmp_root = Path(tempfile.gettempdir()).resolve()
+    extra_roots = _resolved_roots(allowed_roots)
 
     # (1) basename namespace.
     if not cp.name.startswith("cp_lps_intervention"):
@@ -197,27 +221,74 @@ def _validate_output_paths(checkpoint_path: str, cache_dir: str) -> None:
         )
 
     # (2) protected substring ANYWHERE in the full (relative) resolved path.
-    for label, p in (("checkpoint", cp), ("cache dir", cache)):
-        rel = _rel_lower(p)
-        hit = next((tok for tok in _PROTECTED_PATH_SUBSTR if tok in rel), None)
-        if hit is not None:
-            raise ValueError(
-                f"Refusing {label} {p!s}: protected token {hit!r} appears in the "
-                "resolved path — it lives inside a confirmatory/pilot/other-pass "
-                "namespace. Intervention artifacts must be fully isolated."
-            )
+    _scan_protected_substr(cp, "checkpoint")
+    _scan_protected_substr(cache, "cache dir")
 
-    # (3) exact approved parent root (no nesting inside a foreign directory).
-    if not (cp.parent == runparts_root or _is_under(cp, tmp_root)):
+    # (3) exact approved repository parent root — NO system-temp hard-allow; only an
+    #     EXPLICITLY injected test root may live outside the repo.
+    if not (cp.parent == runparts_root
+            or any(_is_under(cp, r) for r in extra_roots)):
         raise ValueError(
             f"Refusing checkpoint {checkpoint_path!r}: parent must be exactly "
-            f"'{runparts_root}' (or a temp dir for tests), got '{cp.parent}'."
+            f"'{runparts_root}' (or an explicitly injected test root), got "
+            f"'{cp.parent}'. Production output must resolve UNDER the repository "
+            "roots — a system-temp path is NOT accepted."
         )
-    if not (cache.parent == repo_root or _is_under(cache, tmp_root)):
+    if not (cache.parent == repo_root
+            or any(_is_under(cache, r) for r in extra_roots)):
         raise ValueError(
             f"Refusing cache dir {cache_dir!r}: parent must be exactly the repo "
-            f"root '{repo_root}' (or a temp dir for tests), got '{cache.parent}'."
+            f"root '{repo_root}' (or an explicitly injected test root), got "
+            f"'{cache.parent}'. A system-temp path is NOT accepted."
         )
+
+
+def validate_merge_io_path(path: str, *, label: str, is_checkpoint: bool = True,
+                           allowed_roots: Optional[List[str]] = None) -> Path:
+    """Reject a merge/report INPUT or OUTPUT path that escapes intervention roots.
+
+    MAJOR-5 hardening: the merge/report CLIs must not read a protected checkpoint
+    (e.g. ``--checkpoint .run_partitions/cp_lps_confirm.jsonl``) nor write over a
+    confirmatory/frozen artifact (e.g. ``--out`` into a ``cp_lps_confirm`` path).
+    Applies the SAME resolved-path discipline as ``_validate_output_paths``:
+
+      * NO protected substring anywhere in the full resolved path.
+      * A ``is_checkpoint`` path (``.jsonl`` shard/merge in/out) must be an
+        intervention checkpoint (``cp_lps_intervention*``) whose parent is exactly
+        the repo ``.run_partitions`` root (or an injected test root).
+      * A report OUTPUT (``is_checkpoint=False``, e.g. the ``.md``) must simply
+        resolve UNDER the repository root (or an injected test root) and hit no
+        protected token — never overwriting a foreign namespace.
+    """
+    p = Path(path).resolve()
+    repo_root = _REPO_ROOT.resolve()
+    runparts_root = (repo_root / ".run_partitions").resolve()
+    extra_roots = _resolved_roots(allowed_roots)
+
+    _scan_protected_substr(p, label)
+
+    if is_checkpoint:
+        if not p.name.startswith("cp_lps_intervention"):
+            raise ValueError(
+                f"Refusing {label} {path!r}: a merge/report checkpoint must be an "
+                "intervention checkpoint (cp_lps_intervention*.jsonl), never a "
+                "confirmatory/other-pass file."
+            )
+        if not (p.parent == runparts_root
+                or any(_is_under(p, r) for r in extra_roots)):
+            raise ValueError(
+                f"Refusing {label} {path!r}: parent must be exactly "
+                f"'{runparts_root}' (or an injected test root), got '{p.parent}'."
+            )
+    else:
+        if not (_is_under(p, repo_root)
+                or any(_is_under(p, r) for r in extra_roots)):
+            raise ValueError(
+                f"Refusing {label} {path!r}: output must resolve UNDER the "
+                f"repository root '{repo_root}' (or an injected test root), got "
+                f"'{p}'."
+            )
+    return p
 
 
 # ── Per-model sharding (PARALLEL-safe namespaced paths) ──────────────────────
@@ -359,6 +430,24 @@ def run_fingerprint(
     }
 
 
+def run_roster(
+    models: List[str], seed_bases: List[int], items: List[str]
+) -> Dict[str, Any]:
+    """Canonical DECLARED grid roster (manifest) for the checkpoint header.
+
+    Records the FULL intended grid — every model, seed base, and item id the run
+    was launched to cover — so a downstream merge validates observed cells against
+    what was INTENDED, never against the (possibly interrupted) observed universe.
+    In per-model shard mode the driver passes the FULL model roster to EVERY shard,
+    so merging a single shard cannot masquerade as a complete grid.
+    """
+    return {
+        "models": sorted(set(models)),
+        "seed_bases": sorted(int(s) for s in seed_bases),
+        "items": sorted(set(items)),
+    }
+
+
 # ── Core per-cell computation ────────────────────────────────────────────────
 
 def compute_cell(
@@ -443,6 +532,10 @@ def run(
     dry_run: bool = False,
     offline: bool = False,
     budget_usd: Optional[float] = None,
+    roster_models: Optional[List[str]] = None,
+    roster_seed_bases: Optional[List[int]] = None,
+    roster_items: Optional[List[str]] = None,
+    allowed_roots: Optional[List[str]] = None,
     _client_override: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Run (or dry-run) the intervention grid. Offline-test-friendly.
@@ -450,7 +543,9 @@ def run(
     On dry_run: returns ``{status, total, jobs}`` with no network. Otherwise
     computes, per (item, model, seed), the H-B1' clarify decisions + the H-B2'
     baseline/oracle answers, appending each as a JSON line to ``checkpoint_path``
-    (resumable, fingerprint-guarded).
+    (resumable, fingerprint-guarded). The checkpoint HEADER records the DECLARED
+    grid roster (full models × seed_bases × item ids) so a downstream merge can
+    verify completeness against what was INTENDED, not merely what is observed.
     """
     if models is None:
         models = list(DEFAULT_MODELS)
@@ -462,13 +557,19 @@ def run(
     if dry_run:
         return {"status": "dry_run", "total": len(jobs), "jobs": jobs}
 
-    _validate_output_paths(checkpoint_path, cache_dir)
+    _validate_output_paths(checkpoint_path, cache_dir, allowed_roots=allowed_roots)
 
     cp = Path(checkpoint_path)
     cp.parent.mkdir(parents=True, exist_ok=True)
 
     fingerprint = run_fingerprint(
         models=models, seed_bases=seed_bases, k=k, tau=tau, tau_s=tau_s
+    )
+    roster = run_roster(
+        roster_models if roster_models is not None else models,
+        roster_seed_bases if roster_seed_bases is not None else seed_bases,
+        (roster_items if roster_items is not None
+         else [t.id for t in tasks]),
     )
 
     done: set = set()
@@ -504,7 +605,8 @@ def run(
     else:
         with cp.open("w", encoding="utf-8") as fh:
             fh.write(json.dumps({"_header": True,
-                                 "_fingerprint": fingerprint}) + "\n")
+                                 "_fingerprint": fingerprint,
+                                 "_roster": roster}) + "\n")
 
     if _client_override is not None:
         client = _client_override
@@ -646,12 +748,15 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     if args.shard_by_model:
         totals = {"completed": 0, "skipped": 0, "total": 0}
+        roster_items = [t.id for t in tasks]
         for m in models:
             r = run(
                 tasks, cfg,
                 models=[m], seed_bases=seed_bases,
                 checkpoint_path=shard_checkpoint(m), cache_dir=shard_cache(m),
                 rpm=args.rpm, k=args.k, budget_usd=args.budget_usd,
+                roster_models=models, roster_seed_bases=seed_bases,
+                roster_items=roster_items,
             )
             print(f"[Intervention] shard {m}: completed={r['completed']} "
                   f"skipped={r['skipped']} → {r['checkpoint']}")
