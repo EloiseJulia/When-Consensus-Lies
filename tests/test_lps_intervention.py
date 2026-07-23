@@ -534,12 +534,17 @@ def test_merge_complete_grid_ok(tmp_path):
 
 
 def test_merge_model_diff_same_shared_fp_ok(tmp_path):
+    # Multi-model grid: each shard stamps the SAME full roster (models a AND b);
+    # union of observed cells exactly fills the declared grid.
     fp_a = _fp_intv(models=["a"], seed_bases=[100])
     fp_b = _fp_intv(models=["b"], seed_bases=[100])
+    roster = {"models": ["a", "b"], "seed_bases": [100], "items": ["A", "B"]}
     p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp_a,
-                     [_cell("A", "a", 100, fp_a), _cell("B", "a", 100, fp_a)])
+                     [_cell("A", "a", 100, fp_a), _cell("B", "a", 100, fp_a)],
+                     roster=roster)
     p2 = _write_ckpt(tmp_path / "cp_lps_intervention__b.jsonl", fp_b,
-                     [_cell("A", "b", 100, fp_b), _cell("B", "b", 100, fp_b)])
+                     [_cell("A", "b", 100, fp_b), _cell("B", "b", 100, fp_b)],
+                     roster=roster)
     merged = merge.merge_records([p1, p2])
     assert len(merged["records"]) == 4          # 2 items × 2 models × 1 seed
     assert merged["n_conflict"] == 0
@@ -875,3 +880,201 @@ def test_report_main_rejects_out_into_confirmatory(tmp_path):
     with pytest.raises(SystemExit):
         report.main(["--checkpoint", cp, "--out", bad_out],
                     allowed_roots=[str(tmp_path)])
+
+
+# ── Re-audit round 4: frozen-report allowlist / strict identical roster /
+#    merged round-trip / full pipeline self-consistency ────────────────────────
+
+def _repo(*parts):
+    return str(_REPO_ROOT.joinpath(*parts))
+
+
+def test_report_out_rejects_frozen_prereg_path():
+    # BLOCKER (re-audit): a report must NOT be writable over the FROZEN prereg.
+    with pytest.raises(ValueError):
+        intv.validate_merge_io_path(
+            _repo("paper", "preregistration",
+                  "2026-07-23-study2-prereg-FROZEN.md"),
+            label="--out", is_checkpoint=False)
+
+
+def test_report_out_rejects_any_paper_path():
+    with pytest.raises(ValueError):
+        intv.validate_merge_io_path(
+            _repo("paper", "plans", "some-plan.md"),
+            label="--out", is_checkpoint=False)
+
+
+def test_report_out_rejects_confirmatory_phase_report():
+    with pytest.raises(ValueError):
+        intv.validate_merge_io_path(
+            _repo("files", "phase6_confirmatory_report.md"),
+            label="--out", is_checkpoint=False)
+
+
+def test_report_out_rejects_stage_report():
+    with pytest.raises(ValueError):
+        intv.validate_merge_io_path(
+            _repo("files", "study2_stage3_results.md"),
+            label="--out", is_checkpoint=False)
+
+
+def test_report_out_rejects_non_md_extension():
+    with pytest.raises(ValueError):
+        intv.validate_merge_io_path(
+            _repo("files", "study2_intervention_results.txt"),
+            label="--out", is_checkpoint=False)
+
+
+def test_report_out_rejects_files_wrong_prefix():
+    with pytest.raises(ValueError):
+        intv.validate_merge_io_path(
+            _repo("files", "some_other_report.md"),
+            label="--out", is_checkpoint=False)
+
+
+def test_report_out_accepts_intervention_namespace():
+    # The one legit destination IS accepted.
+    intv.validate_merge_io_path(
+        _repo("files", "study2_intervention_results.md"),
+        label="--out", is_checkpoint=False)
+
+
+def test_report_main_rejects_write_to_frozen(tmp_path):
+    # End-to-end: the report CLI refuses to overwrite the FROZEN prereg even with
+    # an injected test root (the paper/ + FROZEN guard is unconditional).
+    fp = _fp_intv(seed_bases=[100])
+    cp = _write_ckpt(tmp_path / "cp_lps_intervention.jsonl", fp,
+                     [_cell("A", "m", 100, fp)])
+    frozen = _repo("paper", "preregistration",
+                   "2026-07-23-study2-prereg-FROZEN.md")
+    with pytest.raises(SystemExit):
+        report.main(["--checkpoint", cp, "--out", frozen],
+                    allowed_roots=[str(tmp_path)])
+
+
+def test_report_main_rejects_write_to_confirmatory_report(tmp_path):
+    fp = _fp_intv(seed_bases=[100])
+    cp = _write_ckpt(tmp_path / "cp_lps_intervention.jsonl", fp,
+                     [_cell("A", "m", 100, fp)])
+    with pytest.raises(SystemExit):
+        report.main(["--checkpoint", cp,
+                     "--out", _repo("files", "phase6_confirmatory_report.md")],
+                    allowed_roots=[str(tmp_path)])
+
+
+# ── [MAJOR 2] Strict identical-roster enforcement across shards ──────────────
+
+def test_merge_shard_missing_roster_among_others_raises(tmp_path):
+    # A shard with NO _roster is rejected even though ANOTHER shard supplies one.
+    fp_a = _fp_intv(models=["a"], seed_bases=[100])
+    fp_b = _fp_intv(models=["b"], seed_bases=[100])
+    roster = {"models": ["a", "b"], "seed_bases": [100], "items": ["A"]}
+    good = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp_a,
+                       [_cell("A", "a", 100, fp_a)], roster=roster)
+    bad = tmp_path / "cp_lps_intervention__b.jsonl"   # header WITHOUT _roster
+    bad.write_text(json.dumps({"_header": True, "_fingerprint": fp_b})
+                   + "\n" + json.dumps(_cell("A", "b", 100, fp_b)) + "\n",
+                   encoding="utf-8")
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([good, str(bad)])
+
+
+def test_merge_two_shards_different_rosters_raise(tmp_path):
+    # Differing declared rosters ABORT (never union-away the difference).
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    r1 = {"models": ["a"], "seed_bases": [100], "items": ["A"]}
+    r2 = {"models": ["a"], "seed_bases": [100], "items": ["A", "B"]}
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                     [_cell("A", "a", 100, fp)], roster=r1)
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__a2.jsonl", fp,
+                     [_cell("A", "a", 100, fp)], roster=r2)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p1, p2])
+
+
+def test_merge_undeclared_cell_raises(tmp_path):
+    # An observed cell for a model NOT in the declared roster ABORTS.
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": [100], "items": ["A"]}
+    recs = [_cell("A", "a", 100, fp), _cell("A", "b", 100, fp)]  # b undeclared
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp, recs,
+                    roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_undeclared_item_raises(tmp_path):
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": [100], "items": ["A"]}
+    recs = [_cell("A", "a", 100, fp), _cell("Z", "a", 100, fp)]  # Z undeclared
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp, recs,
+                    roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+# ── [MAJOR 3] Merged output round-trips through its own strict loader ────────
+
+def test_write_merged_requires_roster_and_fingerprint(tmp_path):
+    out = str(tmp_path / "cp_lps_intervention_merged.jsonl")
+    with pytest.raises(merge.MergeError):
+        merge.write_merged([], out, fingerprint={"intervention_version": "x"},
+                           roster=None)
+    with pytest.raises(merge.MergeError):
+        merge.write_merged([], out, fingerprint=None,
+                           roster={"models": ["m"], "seed_bases": [100],
+                                   "items": ["A"]})
+
+
+def test_write_merged_roundtrips_through_strict_loader(tmp_path):
+    fp = _fp_intv(models=["m"], seed_bases=[100])
+    roster = {"models": ["m"], "seed_bases": [100], "items": ["A", "B"]}
+    recs = [_cell("A", "m", 100, fp), _cell("B", "m", 100, fp)]
+    shard = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, recs,
+                        roster=roster)
+    merged = merge.merge_records([shard])
+
+    out = tmp_path / "cp_lps_intervention_merged.jsonl"
+    merge.write_merged(merged["records"], str(out),
+                       fingerprint=merged["shared_fingerprint"],
+                       roster=merged["roster"])
+
+    # The merged checkpoint re-validates through the SAME strict loader: header
+    # carries _roster + _fingerprint, versions equal the constants, and the
+    # observed cells EXACTLY fill the declared roster.
+    reloaded = merge.merge_records([str(out)])
+    assert len(reloaded["records"]) == 2
+    assert reloaded["roster"] == {"models": ["m"], "seed_bases": [100],
+                                  "items": ["A", "B"]}
+    header = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+    assert header["_roster"] == roster
+    assert header["_fingerprint"]["intervention_version"] == \
+        intv.INTERVENTION_VERSION
+    assert header["_fingerprint"]["method_version"] == lps.METHOD_VERSION
+
+
+def test_pipeline_merge_then_report_end_to_end(tmp_path):
+    # CONVERGENCE: write a valid multi-cell checkpoint (stamped roster) → merge it
+    # → report from the MERGED output, all through strict validation. Proves the
+    # whole driver→merge→report pipeline is self-consistent.
+    rows = _hb1_rows()
+    fp = _fp_intv(models=["m"], seed_bases=[30260713])
+    for r in rows:
+        r["_fingerprint"] = fp
+    roster = {"models": ["m"], "seed_bases": [30260713],
+              "items": sorted(r["task_id"] for r in rows)}
+    shard = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, rows,
+                        roster=roster)
+
+    merged_out = str(tmp_path / "cp_lps_intervention_merged.jsonl")
+    merge.main(["--shards", shard, "--out", merged_out],
+               allowed_roots=[str(tmp_path)])
+    assert Path(merged_out).exists()
+
+    report_out = tmp_path / "study2_intervention_results.md"
+    report.main(["--checkpoint", merged_out, "--out", str(report_out)],
+                allowed_roots=[str(tmp_path)])
+    assert report_out.exists()
+    text = report_out.read_text(encoding="utf-8")
+    assert "H-B1'" in text and "cd_primary" in text

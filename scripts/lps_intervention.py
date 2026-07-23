@@ -90,6 +90,19 @@ CHECKPOINT_BASE = ".run_partitions/cp_lps_intervention"
 CACHE_BASE = ".llm_cache_lps_intv"
 SHARD_CHECKPOINT_GLOB = ".run_partitions/cp_lps_intervention__*.jsonl"
 
+#: Dedicated intervention-report OUTPUT namespace (BLOCKER hardening). A report may
+#: be written ONLY under the repo ``files/`` dir with a basename that STARTS with
+#: this prefix and ends in ``.md`` — so the report writer can NEVER clobber a FROZEN
+#: spec, a confirmatory/phase report, or anything under ``paper/``.
+REPORT_DIR = "files"
+REPORT_OUT_PREFIX = "study2_intervention"
+#: Basename tokens that unconditionally DISQUALIFY a report-output path even inside
+#: an approved dir (confirmatory / frozen / prereg / other-pass report names).
+_REPORT_DENY_BASENAME = (
+    "frozen", "phase", "stage", "confirmatory", "prereg",
+    "registered_run", "cp_lps_confirm", "sck10", "pilot", "default_check",
+)
+
 #: Pilot roster (owner-scoped, DECISION-LOG row 89): gpt-5.6-sol FIRST. The driver
 #: ACCEPTS ``--models`` but the pilot targets a single model.
 DEFAULT_MODELS = ["gpt-5.6-sol"]
@@ -249,16 +262,18 @@ def validate_merge_io_path(path: str, *, label: str, is_checkpoint: bool = True,
 
     MAJOR-5 hardening: the merge/report CLIs must not read a protected checkpoint
     (e.g. ``--checkpoint .run_partitions/cp_lps_confirm.jsonl``) nor write over a
-    confirmatory/frozen artifact (e.g. ``--out`` into a ``cp_lps_confirm`` path).
-    Applies the SAME resolved-path discipline as ``_validate_output_paths``:
+    confirmatory/frozen artifact. Applies the SAME resolved-path discipline as
+    ``_validate_output_paths``:
 
       * NO protected substring anywhere in the full resolved path.
       * A ``is_checkpoint`` path (``.jsonl`` shard/merge in/out) must be an
         intervention checkpoint (``cp_lps_intervention*``) whose parent is exactly
         the repo ``.run_partitions`` root (or an injected test root).
-      * A report OUTPUT (``is_checkpoint=False``, e.g. the ``.md``) must simply
-        resolve UNDER the repository root (or an injected test root) and hit no
-        protected token — never overwriting a foreign namespace.
+      * A report OUTPUT (``is_checkpoint=False``, the ``.md``) must live in the
+        DEDICATED intervention-report namespace (repo ``files/`` + the
+        ``study2_intervention`` prefix, or an injected test root) — an ALLOWLIST.
+        FROZEN specs, ``paper/`` paths, confirmatory/phase reports, and non-``.md``
+        outputs are REJECTED (BLOCKER fix — the token denylist alone was too weak).
     """
     p = Path(path).resolve()
     repo_root = _REPO_ROOT.resolve()
@@ -281,14 +296,58 @@ def validate_merge_io_path(path: str, *, label: str, is_checkpoint: bool = True,
                 f"'{runparts_root}' (or an injected test root), got '{p.parent}'."
             )
     else:
-        if not (_is_under(p, repo_root)
-                or any(_is_under(p, r) for r in extra_roots)):
-            raise ValueError(
-                f"Refusing {label} {path!r}: output must resolve UNDER the "
-                f"repository root '{repo_root}' (or an injected test root), got "
-                f"'{p}'."
-            )
+        _validate_report_out_path(p, label, extra_roots)
     return p
+
+
+def _validate_report_out_path(p: Path, label: str,
+                              extra_roots: List[Path]) -> None:
+    """Allowlist a report-OUTPUT path to the intervention-report namespace ONLY.
+
+    Rejects (regardless of any injected root): a non-``.md`` extension, anything
+    under ``paper/`` (FROZEN specs / prereg), and any basename bearing a
+    confirmatory/frozen/phase/prereg/other-pass token. Then requires the path to be
+    either (a) under repo ``files/`` with the ``study2_intervention`` prefix, or
+    (b) under a test-injected root. A FROZEN prereg or ``files/phase*`` report can
+    NOT satisfy this allowlist.
+    """
+    repo_root = _REPO_ROOT.resolve()
+    files_root = (repo_root / REPORT_DIR).resolve()
+    paper_root = (repo_root / "paper").resolve()
+
+    if p.suffix.lower() != ".md":
+        raise ValueError(
+            f"Refusing report output {p!s}: must be a Markdown (.md) report, got "
+            f"suffix {p.suffix!r}."
+        )
+    if _is_under(p, paper_root):
+        raise ValueError(
+            f"Refusing report output {p!s}: writing under 'paper/' is forbidden "
+            "(FROZEN specs / preregistration must never be overwritten)."
+        )
+    low_name = p.name.lower()
+    bad = next((tok for tok in _REPORT_DENY_BASENAME if tok in low_name), None)
+    if bad is not None:
+        raise ValueError(
+            f"Refusing report output {p!s}: basename bears disqualifying token "
+            f"{bad!r} (confirmatory/frozen/other-pass report namespace)."
+        )
+    under_files = _is_under(p, files_root)
+    under_extra = any(_is_under(p, r) for r in extra_roots)
+    if under_files:
+        if not p.name.startswith(REPORT_OUT_PREFIX):
+            raise ValueError(
+                f"Refusing report output {p!s}: an intervention report under "
+                f"'{files_root}' must start with {REPORT_OUT_PREFIX!r}."
+            )
+        return
+    if under_extra:
+        return
+    raise ValueError(
+        f"Refusing report output {p!s}: must live in the dedicated intervention-"
+        f"report namespace (under '{files_root}' with the {REPORT_OUT_PREFIX!r} "
+        "prefix) or an explicitly injected test root."
+    )
 
 
 # ── Per-model sharding (PARALLEL-safe namespaced paths) ──────────────────────

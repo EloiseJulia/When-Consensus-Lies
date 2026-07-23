@@ -194,31 +194,55 @@ def _validate_versions(records: List[Dict[str, Any]]) -> None:
             )
 
 
-def _merge_rosters(rosters: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Union the declared rosters across shards (fail loud if none present).
+def _norm_roster(roster: Dict[str, Any]) -> Dict[str, Any]:
+    """Canonicalise a roster for exact comparison (sorted, de-duped, int seeds)."""
+    return {
+        "models": sorted(set(roster.get("models") or [])),
+        "seed_bases": sorted(int(s) for s in (roster.get("seed_bases") or [])),
+        "items": sorted(set(roster.get("items") or [])),
+    }
 
-    The declared grid (models × seed_bases × items) MUST come from the checkpoint
-    header manifest, never the observed records (MAJOR-3). In shard mode every
-    shard header carries the SAME full roster, so unioning is a no-op; if a shard
-    declares a superset the union keeps it (stricter completeness). With no roster
-    at all we cannot know the intended grid → abort rather than trust observations.
+
+def _resolve_declared_roster(
+    shard_rosters: List[Tuple[str, Optional[Dict[str, Any]]]]
+) -> Dict[str, Any]:
+    """Require a VALID, IDENTICAL declared roster on EVERY shard (fail loud).
+
+    MAJOR-2 hardening — no permissive union. Every shard header MUST carry a
+    ``_roster`` (a shard missing one aborts, even if another shard supplies one),
+    and ALL shards must declare the SAME full roster (differing rosters abort
+    rather than being union-away). The driver stamps the FULL intended roster into
+    every per-model shard, so identical rosters is the invariant a legitimate grid
+    always satisfies.
     """
-    if not rosters:
-        raise MergeError(
-            "No declared roster found in any checkpoint header — cannot verify "
-            "grid completeness against the INTENDED grid. A checkpoint written by "
-            "the current driver always stamps a _roster; refusing to fall back to "
-            "the (possibly interrupted) observed universe."
-        )
-    models: set = set()
-    seeds: set = set()
-    items: set = set()
-    for r in rosters:
-        models.update(r.get("models") or [])
-        seeds.update(int(s) for s in (r.get("seed_bases") or []))
-        items.update(r.get("items") or [])
-    return {"models": sorted(models), "seed_bases": sorted(seeds),
-            "items": sorted(items)}
+    if not shard_rosters:
+        raise MergeError("No shards to resolve a declared roster from.")
+    normed: List[Tuple[str, Dict[str, Any]]] = []
+    for path, roster in shard_rosters:
+        if not roster:
+            raise MergeError(
+                f"Shard {path} has NO declared _roster header — every shard must "
+                "declare the full intended grid (models × seed_bases × items). "
+                "Refusing to infer completeness from a partially-declared set."
+            )
+        for axis in ("models", "seed_bases", "items"):
+            if not roster.get(axis):
+                raise MergeError(
+                    f"Shard {path} declares an empty _roster.{axis} — cannot verify "
+                    f"completeness (roster={roster!r})."
+                )
+        normed.append((path, _norm_roster(roster)))
+
+    ref_path, ref = normed[0]
+    for path, nr in normed[1:]:
+        if nr != ref:
+            raise MergeError(
+                "Shards declare DIFFERENT rosters — refusing to merge (a legitimate "
+                "grid stamps the SAME full roster into every shard).\n"
+                f"  {ref_path}: {ref}\n"
+                f"  {path}: {nr}"
+            )
+    return ref
 
 
 def _validate_fingerprints(records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -248,36 +272,46 @@ def _validate_fingerprints(records: List[Dict[str, Any]]) -> Optional[Dict[str, 
 
 def _check_completeness(records: List[Dict[str, Any]],
                         roster: Dict[str, Any]) -> None:
-    """ABORT if the observed cells do not fill the DECLARED roster grid.
+    """ABORT unless the observed cell set EXACTLY equals the declared roster grid.
 
-    The item, model, AND seed axes all come from the declared roster manifest
-    (``run_roster`` in the header), NOT the observed records (MAJOR-3): a shard
-    that is entirely absent, or a partially-interrupted grid, is caught because a
-    declared cell has no observed record. An interrupted grid must never be
-    averaged as if complete.
+    The declared grid is the Cartesian product of the roster's models × seed_bases
+    × items (MAJOR-2/3). Enforcement is bidirectional:
+      * any DECLARED cell with no observed record → incomplete grid → RAISE;
+      * any OBSERVED cell NOT in the declared roster (undeclared model/item/seed) →
+        RAISE (an overlapping/foreign shard must not smuggle extra cells in).
+    An interrupted OR contaminated grid must never be averaged as if complete.
     """
     if not records:
         raise MergeError("No records to validate for completeness.")
-    items = list(roster.get("items") or [])
-    models = list(roster.get("models") or [])
-    seeds = sorted(int(s) for s in (roster.get("seed_bases") or []))
+    items = set(roster.get("items") or [])
+    models = set(roster.get("models") or [])
+    seeds = {int(s) for s in (roster.get("seed_bases") or [])}
     if not (items and models and seeds):
         raise MergeError(
             "Declared roster is missing one of models/seed_bases/items — cannot "
             f"verify completeness (roster={roster!r})."
         )
-    present = {(r.get("task_id"), r.get("model"), r.get("seed_base"))
-               for r in records}
-    missing = [(t, m, s) for t in items for m in models for s in seeds
-               if (t, m, s) not in present]
+    declared = {(t, m, s) for t in items for m in models for s in seeds}
+    observed = {(r.get("task_id"), r.get("model"), int(r.get("seed_base")))
+                for r in records}
+
+    undeclared = observed - declared
+    if undeclared:
+        preview = ", ".join(f"(item={t}, model={m}, seed={s})"
+                            for t, m, s in sorted(undeclared, key=repr)[:5])
+        raise MergeError(
+            f"Observed {len(undeclared)} cell(s) NOT in the declared roster — "
+            f"refusing to merge a contaminated/overlapping grid. First: {preview}."
+        )
+    missing = declared - observed
     if missing:
         preview = ", ".join(f"(item={t}, model={m}, seed={s})"
-                            for t, m, s in missing[:5])
+                            for t, m, s in sorted(missing, key=repr)[:5])
         raise MergeError(
             f"Incomplete grid — {len(missing)} declared cell(s) missing from "
             f"{len(items)} items × {len(models)} models × {len(seeds)} seeds "
-            f"(= {len(items) * len(models) * len(seeds)} declared). "
-            f"First missing: {preview}. Refusing to average an interrupted grid."
+            f"(= {len(declared)} declared). First missing: {preview}. "
+            "Refusing to average an interrupted grid."
         )
 
 
@@ -292,14 +326,13 @@ def merge_records(paths: List[str], *, strict: bool = True,
     declared-roster cell missing all raise ``MergeError``.
     """
     all_records: List[Dict[str, Any]] = []
-    rosters: List[Dict[str, Any]] = []
+    shard_rosters: List[Tuple[str, Optional[Dict[str, Any]]]] = []
     per_shard: Dict[str, int] = {}
     for path in paths:
         shard = load_shard(path)
         per_shard[path] = len(shard["records"])
         all_records.extend(shard["records"])
-        if shard["roster"] is not None:
-            rosters.append(shard["roster"])
+        shard_rosters.append((path, shard["roster"]))
 
     shared_fp = None
     if strict:
@@ -335,7 +368,7 @@ def merge_records(paths: List[str], *, strict: bool = True,
     records = list(seen.values())
     roster = None
     if strict and check_completeness:
-        roster = _merge_rosters(rosters)
+        roster = _resolve_declared_roster(shard_rosters)
         _check_completeness(records, roster)
 
     per_model: Dict[str, int] = {}
@@ -353,13 +386,34 @@ def merge_records(paths: List[str], *, strict: bool = True,
     }
 
 
-def write_merged(records: List[Dict[str, Any]], out_path: str) -> None:
-    """Write merged records to a single checkpoint (header + one line each)."""
+def write_merged(records: List[Dict[str, Any]], out_path: str, *,
+                 fingerprint: Optional[Dict[str, Any]] = None,
+                 roster: Optional[Dict[str, Any]] = None) -> None:
+    """Write merged records to a single checkpoint that ROUND-TRIPS strict load.
+
+    MAJOR-3: the merged header stamps BOTH the validated ``_roster`` and a
+    ``_fingerprint`` (intervention_version/method_version …) so re-loading the
+    merged checkpoint passes the same strict loader (roster present) + version
+    equality + exact roster-completeness that a raw shard does. Refuses to emit an
+    un-round-trippable file (no roster/fingerprint) so the report can always
+    re-validate its own input.
+    """
+    if not roster:
+        raise MergeError(
+            "write_merged requires the validated declared _roster so the merged "
+            "checkpoint can round-trip through the strict loader."
+        )
+    if not fingerprint:
+        raise MergeError(
+            "write_merged requires the run _fingerprint (intervention_version/"
+            "method_version …) for the merged header."
+        )
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    header = {"_header": True, "_merged": True, "n_records": len(records),
+              "_fingerprint": fingerprint, "_roster": roster}
     with out.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"_header": True, "_merged": True,
-                             "n_records": len(records)}) + "\n")
+        fh.write(json.dumps(header) + "\n")
         for rec in records:
             fh.write(json.dumps(rec) + "\n")
 
@@ -399,7 +453,9 @@ def main(argv: Optional[List[str]] = None, *,
     except MergeError as exc:
         print(f"[Merge] ABORT — {exc}", file=sys.stderr)
         raise SystemExit(2)
-    write_merged(merged["records"], args.out)
+    write_merged(merged["records"], args.out,
+                 fingerprint=merged["shared_fingerprint"],
+                 roster=merged["roster"])
     print(f"[Merge] Checkpoints: {len(paths)}")
     for path, n in merged["per_shard"].items():
         print(f"    {path}  ({n} records)")
