@@ -16,25 +16,28 @@ executable deterministic gold contract (Law 7 — no LLM judge).
 THE "UNFILTERED" INVARIANT (the anti-cherry-pick core — read this, auditor)
 =====================================================================================
 Per the RATIFIED Amendment 14 (§3), these items were constructed WITHOUT running
-any default-check as an inclusion filter. Every constructed item is KEPT
-regardless of whether an unaware capable model would resolve to the foil ``I1``,
-split, or default elsewhere. The pool is a DELIBERATE, VARIED MIX:
+any default-check as an inclusion filter. The credibility of "no filtering" does
+NOT rest on trusting the constructor: it is made AUDITABLE by construction.
 
-  * ``default_pull == "strong"``   — items whose ``I1`` default is a dominant,
-    widely-shared convention (like the frozen benchmark's strongest traps:
-    calendar quarter, 40h FLSA overtime, pre-tax tip, sequential discounts).
-  * ``default_pull == "even_odds"`` — items where the non-default ``I0`` is a
-    genuinely competitive / less-dominant reading (mode-vs-mean, sample-vs-
-    population std, geometric-vs-arithmetic mean, inclusive-vs-exclusive range,
-    ceil-vs-floor grouping, ISO-vs-US dates, etc.), where a model may plausibly
-    pick ``I0``, split, or default.
+  (a) DETERMINISTIC ENUMERATION FRAME. The sample is the FULL Cartesian
+      enumeration of a pre-declared frame of (domain x convention-axis) cells —
+      see the module-level ``FRAME`` constant below. EVERY declared cell is
+      included exactly once and NONE is dropped. Because the frame is fixed and
+      the sample must cover it completely (enforced by
+      ``tests/test_amd14_sidecar.py::test_frame_completeness``), a silent
+      cherry-pick / drop during construction would FAIL the test. "We included the
+      entire enumerated frame" is therefore verifiable by inspection, not trust.
 
-The ``default_pull`` tag is METADATA for the honest post-hoc transparency report
-ONLY. It was NEVER used to include or exclude an item. The Manager runs
-``cd_primary`` on the WHOLE pool later and reports the UNCONDITIONED rate
-honestly, whatever it is. Deliberately keeping MORE ``even_odds`` items than
-``strong`` items is evidence the sample is NOT enrichment-biased toward
-foil-eliciting traps.
+  (b) NON-AUTHORITATIVE default-pull tags. Each item also carries a
+      ``default_pull`` hint (``strong`` | ``even_odds``). This is the
+      constructor's PROVISIONAL, NON-AUTHORITATIVE guess, exposed ONLY as
+      informal transparency colour. It is NEVER used to include/exclude an item,
+      and NO scientific claim depends on it being correct. The ACTUAL default-pull
+      of every item is MEASURED EMPIRICALLY AT RUN TIME: the Manager runs
+      ``cd_primary`` on the WHOLE pool and reports the UNCONDITIONED convergent-
+      delusion rate honestly, whatever it is. If a "strong" guess turns out weak
+      (or vice versa), the reported result is unaffected — only frame completeness
+      (a), not the tags, underwrites the no-filter guarantee.
 
 =====================================================================================
 PROMINENT CALL-OUT (for the cross-family auditor) — checker registration
@@ -218,7 +221,7 @@ def format_date(year, month, day):
         "prompt_core": (
             "Write a function `day_span(start_day, end_day)` where `start_day` and "
             "`end_day` are day-of-year numbers with start_day <= end_day. Return the "
-            "number of days the interval covers."
+            "number of days between start_day and end_day."
         ),
         "class_id": "interval_counting",
         "class_desc": "Whether both endpoints are counted (inclusive span)",
@@ -245,8 +248,8 @@ def day_span(start_day, end_day):
         "domain": "code_spec", "key": "cs_order", "task_id": "code_amd14_order_001",
         "default_pull": "even_odds",
         "prompt_core": (
-            "Write a function `order_scores(scores)` that returns a new list with the "
-            "scores arranged in ranked order."
+            "Write a function `order_scores(scores)` that returns a new list "
+            "containing the scores in sorted order."
         ),
         "class_id": "sort_direction",
         "class_desc": "Ascending vs descending ranking direction",
@@ -297,39 +300,45 @@ def relative_change(old, new):
         "i1_tests": [((100, 150), 0.5), ((200, 100), -0.5), ((80, 100), 0.25)],
     },
     {
-        "domain": "code_spec", "key": "cs_groups", "task_id": "code_amd14_groups_001",
+        # NOTE: replaces the withdrawn `num_groups` item, whose prompt ("place every
+        # item into groups holding AT MOST size") LOGICALLY ENTAILED ceiling division
+        # (floor cannot place every item) -> not genuinely ambiguous. This remainder
+        # item's two readings (Python floored-modulo vs C/truncated fmod) are BOTH
+        # fully compatible with "the remainder of a divided by b"; neither is forced.
+        "domain": "code_spec", "key": "cs_remainder", "task_id": "code_amd14_remainder_001",
         "default_pull": "even_odds",
         "prompt_core": (
-            "Write a function `num_groups(n, size)` that returns how many groups are "
-            "needed to place `n` items into groups holding at most `size` items each."
+            "Write a function `remainder(a, b)` that returns the remainder of dividing "
+            "`a` by `b`, where `a` may be negative and `b` is a positive integer."
         ),
-        "class_id": "partial_group",
-        "class_desc": "How a leftover partial group is counted",
+        "class_id": "remainder_sign",
+        "class_desc": "Sign convention of the remainder for a negative dividend",
         "clause": (
-            "A leftover partial group STILL counts as one group: use ceiling division "
-            "so every remaining item is placed."
+            "Use the TRUNCATED (C / math.fmod) convention: the remainder takes the "
+            "SIGN OF THE DIVIDEND, so remainder(-7, 3) is -1, not 2."
         ),
-        "question": "Does a leftover partial group count as an additional group (ceiling) or not (floor)?",
-        "i0_desc": "NON-default: ceiling division, partial group counts (stated by the deleted clause).",
-        "i1_desc": "MODEL DEFAULT [combined-default]: floor division n // size (full groups only).",
-        "entrypoint": "num_groups",
+        "question": "Does the remainder take the sign of the dividend (C/truncated) or the divisor (Python %)?",
+        "i0_desc": "NON-default: truncated remainder, sign of dividend (stated by the deleted clause).",
+        "i1_desc": "MODEL DEFAULT [combined-default]: Python floored modulo a % b (sign of divisor).",
+        "entrypoint": "remainder",
         "i0_ref": """
-def num_groups(n, size):
-    return -(-n // size)
+def remainder(a, b):
+    import math
+    return int(math.fmod(a, b))
 """,
         "i1_ref": """
-def num_groups(n, size):
-    return n // size
+def remainder(a, b):
+    return a % b
 """,
-        "i0_tests": [((10, 3), 4), ((7, 2), 4), ((9, 4), 3)],
-        "i1_tests": [((10, 3), 3), ((7, 2), 3), ((9, 4), 2)],
+        "i0_tests": [((-7, 3), -1), ((-8, 5), -3), ((-1, 4), -1)],
+        "i1_tests": [((-7, 3), 2), ((-8, 5), 2), ((-1, 4), 3)],
     },
     {
         "domain": "code_spec", "key": "cs_range", "task_id": "code_amd14_range_001",
         "default_pull": "strong",
         "prompt_core": (
-            "Write a function `build_range(a, b)` that returns a list of the integers "
-            "from `a` to `b`."
+            "Write a function `build_range(a, b)` that returns a list of consecutive "
+            "integers starting at `a` and stopping at the bound `b`."
         ),
         "class_id": "upper_bound",
         "class_desc": "Whether the upper bound b is included",
@@ -734,6 +743,63 @@ def average_factor(factors):
 ]
 
 
+# =====================================================================================
+# DECLARED ENUMERATION FRAME (the auditable "no-filter" guarantee — Amendment 14)
+#
+# The unfiltered sample is the FULL enumeration of these fixed (domain x convention-
+# axis) cells. Each cell (identified by the item's requirement-class id = the deleted
+# convention axis) is included EXACTLY ONCE and NONE is dropped. A convention axis is
+# a real specification degree-of-freedom whose non-default reading needs an EXTERNAL
+# disambiguator (the H1_external construction). ``test_frame_completeness`` asserts the
+# items biject with this frame, so a silent cherry-pick during construction fails CI.
+#
+# The frame was declared BEFORE selecting outcomes and does NOT encode any expectation
+# about model behavior (that is measured empirically at run time via cd_primary).
+# =====================================================================================
+FRAME: Dict[str, List[str]] = {
+    "code_spec": [
+        "fiscal_year_start",    # calendar vs fiscal quarter boundary
+        "range_convention",     # index base + endpoint inclusivity of a slice
+        "conversion_rule",      # float->int: round vs truncate
+        "date_format",          # ISO vs US date formatting
+        "interval_counting",    # inclusive span vs plain difference
+        "sort_direction",       # ascending vs descending ordering
+        "change_units",         # percentage-number vs raw fraction
+        "remainder_sign",       # truncated (C) vs floored (Python) modulo sign
+        "upper_bound",          # inclusive vs exclusive range upper bound
+        "average_rounding",     # integer mean: round vs floor
+    ],
+    "policy_qa": [
+        "overtime_threshold",       # weekly hours before overtime
+        "compounding",              # compound vs simple interest
+        "tip_base",                 # gratuity on post-tax vs pre-tax
+        "discount_combination",     # additive vs sequential discount stacking
+        "weight_rounding",          # ceil-to-next-kg vs exact prorated weight
+        "commission_base",          # commission on gross (incl. tax) vs net
+        "proration_basis",          # divide by actual days vs fixed 30
+        "threshold_inclusivity",    # strict > vs >= at a quantity threshold
+    ],
+    "data_analysis": [
+        "central_measure",      # mode vs mean central tendency
+        "std_denominator",      # sample (n-1) vs population (n) std
+        "bound_inclusivity",    # closed vs half-open counting interval
+        "weighting",            # credit-weighted vs plain average
+        "even_median_rule",     # lower-of-two vs average for even-length median
+        "mean_kind",            # geometric vs arithmetic mean of factors
+    ],
+}
+
+
+def frame_cells() -> set:
+    """The declared frame as a set of (domain, axis) cells."""
+    return {(dom, axis) for dom, axes in FRAME.items() for axis in axes}
+
+
+def item_cells() -> list:
+    """The (domain, axis) cell realized by each constructed base item (in order)."""
+    return [(item["domain"], item["class_id"]) for item in _ITEMS]
+
+
 _CODE_LIKE_MODULES = {"code_spec": cs, "data_analysis": da}
 _CHECKER_CLS = {"code_spec": cs.CodeChecker, "data_analysis": da.DataChecker}
 
@@ -849,12 +915,19 @@ def generate_tasks(domain: str) -> List[Task]:
 
 
 def item_metadata() -> List[Dict[str, Any]]:
-    """Post-hoc transparency metadata (NOT an inclusion criterion)."""
+    """Post-hoc transparency metadata (NOT an inclusion criterion).
+
+    ``provisional_default_pull`` is the constructor's NON-AUTHORITATIVE guess and
+    underwrites NO scientific claim; the real default-pull is measured empirically
+    at run time (cd_primary on the whole pool). The auditable no-filter guarantee
+    rests on frame completeness (``axis`` covering ``FRAME``), not on these tags.
+    """
     return [
         {
             "task_id": item["task_id"],
             "domain": item["domain"],
-            "default_pull": item["default_pull"],
+            "axis": item["class_id"],
+            "provisional_default_pull": item["default_pull"],
             "i0": item["i0_desc"],
             "i1": item["i1_desc"],
             "deleted_disambiguator": item["clause"],

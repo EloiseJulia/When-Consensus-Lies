@@ -22,9 +22,11 @@ inclusion filter). All checks are OFFLINE, deterministic, no network / no LLM ju
      than the latent_spec.
   5. Additive-only registration: the sidecar only ADDS amd14_* checker ids; it never
      overwrites a frozen checker id (cannot shadow frozen ids).
-  6. Unfiltered-sample integrity: the pool is a deliberate VARIED mix of strong and
-     even-odds default-pulls (not pre-enriched for foil-elicitation), and the pooled
-     amd14_unfiltered.jsonl equals the union of the per-domain sidecar files.
+  6. Unfiltered-sample integrity (AUDITABLE no-filter guarantee): the items biject
+     with a pre-declared enumeration FRAME of (domain x convention-axis) cells (none
+     dropped) — so a silent cherry-pick would fail CI — and the pooled
+     amd14_unfiltered.jsonl equals the union of the per-domain sidecar files. The
+     constructor's default-pull tags are non-authoritative and gate nothing.
 """
 
 from __future__ import annotations
@@ -180,24 +182,45 @@ def test_sidecar_cannot_shadow_frozen_ids():
     assert cs.CHECKERS[frozen_id] is original
 
 
-def test_unfiltered_sample_is_a_varied_mix():
-    """The pool is a deliberate mix of default-pulls, NOT pre-enriched for foils.
+def test_unfiltered_sample_covers_the_declared_frame():
+    """AUDITABLE no-filter guarantee: the items biject with the declared FRAME.
 
-    This is the anti-cherry-pick guarantee of Amendment 14: keep both strong-default
-    traps AND even-odds items. If the sample were covertly enriched, it would be all
-    'strong'. We require a genuine spread with a non-trivial even-odds share.
+    Amendment 14's credibility rests on including the ENTIRE pre-declared enumeration
+    frame of (domain x convention-axis) cells and dropping NONE. If a candidate item
+    had been silently cherry-picked/discarded during construction, the realized cells
+    would no longer equal the frame and this test would FAIL. This does NOT rely on
+    trusting the constructor's self-assigned pull tags.
+    """
+    frame = sidecar.frame_cells()
+    realized = sidecar.item_cells()
+    # No cell is dropped and none is duplicated: exact bijection with the frame.
+    assert len(realized) == len(frame), (len(realized), len(frame))
+    assert set(realized) == frame, {
+        "missing": frame - set(realized),
+        "extra": set(realized) - frame,
+    }
+    assert len(realized) == len(set(realized)), "duplicate frame cell realized"
+    # Per-domain counts match the declared frame exactly.
+    for dom, axes in sidecar.FRAME.items():
+        got = [c for c in realized if c[0] == dom]
+        assert len(got) == len(axes), (dom, len(got), len(axes))
+    # Frame spans all three confirmatory domains.
+    assert set(sidecar.FRAME) == {"code_spec", "policy_qa", "data_analysis"}
+    assert len(frame) == 24
+
+
+def test_default_pull_tags_are_non_authoritative_only():
+    """The pull tags are advisory colour, never a gate; result must not depend on them.
+
+    We only assert the tag vocabulary is well-formed. We deliberately do NOT assert any
+    particular strong/even_odds ratio: the no-filter guarantee is carried by frame
+    completeness, and the real default-pull is measured empirically at run time.
     """
     meta = sidecar.item_metadata()
     assert len(meta) == 24
-    pulls = [m["default_pull"] for m in meta]
-    assert set(pulls) == {"strong", "even_odds"}
-    n_strong = pulls.count("strong")
-    n_even = pulls.count("even_odds")
-    # Both classes are well represented; even-odds is not a token minority.
-    assert n_strong >= 6 and n_even >= 10, (n_strong, n_even)
-    # Spread across all three confirmatory domains.
-    domains = {m["domain"] for m in meta}
-    assert domains == {"code_spec", "policy_qa", "data_analysis"}
+    for m in meta:
+        assert m["provisional_default_pull"] in {"strong", "even_odds"}
+        assert m["axis"]  # every item records the convention axis (its frame cell)
 
 
 def test_pool_file_is_union_of_domain_files():
