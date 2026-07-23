@@ -78,6 +78,45 @@ def test_cache_key_is_mode_and_model_aware(tmp_path):
     assert offline_key != online_key
 
 
+def test_cache_key_distinguishes_models_without_family(tmp_path):
+    """Regression: model passed without family must not collide across models.
+
+    scripts/lps_method.py calls complete(role=..., model=model) with family=None.
+    Different models sharing a role/prompt/seed must produce DIFFERENT cache keys,
+    otherwise a shared cache replays the first model's response for all models.
+    """
+    cfg = load_config()
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+    key_a = client._cache_key("tested_agents", "p", 1, None, "openai/gpt-4o-mini")
+    key_b = client._cache_key("tested_agents", "p", 1, None, "meta/llama-3-8b")
+    assert key_a != key_b
+
+
+def test_cache_key_family_model_form_unchanged(tmp_path):
+    """Backward-compat: family+model and role-only keys must be byte-identical
+    to the pre-fix format so existing correct caches are not invalidated."""
+    import hashlib
+
+    cfg = load_config()
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+
+    def expected_key(identity):
+        content = (
+            f"offline|{client.provider}|{client.base_url}|{identity}|"
+            f"tested_agents|p|1|None"
+        )
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    # family + model path: identity stays "family:model"
+    fm_key = client._cache_key("tested_agents", "p", 1, "openai", "gpt-4o-mini")
+    assert fm_key == expected_key("openai:gpt-4o-mini")
+
+    # role-only path: identity stays the resolved role identity
+    role_identity = client._role_identity("tested_agents")
+    role_key = client._cache_key("tested_agents", "p", 1, None, None)
+    assert role_key == expected_key(role_identity)
+
+
 def test_unknown_role_fails_fast(tmp_path):
     """A typoed role must raise, not fabricate mock-model provenance."""
     cfg = load_config()

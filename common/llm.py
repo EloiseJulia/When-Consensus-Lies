@@ -394,9 +394,13 @@ class LLMClient:
         """
         mode = "offline" if self.offline else "online"
         
-        # Use explicit family/model if provided, otherwise resolve from role
-        if family is not None and model is not None:
-            identity = f"{family}:{model}"
+        # Use explicit model if provided, otherwise resolve from role. When a model
+        # is given without a family (e.g. a multi-model sweep that only varies the
+        # slug), the identity must still reflect the model so different models never
+        # collide in a shared cache dir; the family+model form stays byte-identical
+        # to avoid needlessly invalidating existing correct caches.
+        if model is not None:
+            identity = f"{family}:{model}" if family is not None else f"model:{model}"
         else:
             identity = self._role_identity(role)
         
