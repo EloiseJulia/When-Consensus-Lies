@@ -194,12 +194,56 @@ def _validate_versions(records: List[Dict[str, Any]]) -> None:
             )
 
 
-def _norm_roster(roster: Dict[str, Any]) -> Dict[str, Any]:
-    """Canonicalise a roster for exact comparison (sorted, de-duped, int seeds)."""
+def _norm_roster(roster: Dict[str, Any], path: str = "<roster>") -> Dict[str, Any]:
+    """Canonicalise a roster for LOSSLESS exact comparison (fail-loud on malformity).
+
+    MAJOR (re-audit #4): the previous normalizer silently ``set``-deduped and
+    ``int()``-coerced seeds, so non-identical/invalid rosters (e.g. ``[100]`` vs
+    ``[100.9]``, or a duplicated axis entry) passed as identical. Now:
+
+      * each axis must be a list/tuple;
+      * ``seed_bases`` entries must be TRUE ``int`` (``bool`` and ``float`` — even
+        integer-valued like ``100.0`` — and strings are REJECTED, never coerced);
+        ``models`` / ``items`` entries must be ``str``;
+      * DUPLICATE entries within an axis RAISE (they signal a malformed roster —
+        never silently deduped);
+      * entries are sorted for a canonical order but values are preserved exactly
+        (no lossy coercion), so ``[100]`` and ``[100.9]`` stay DIFFERENT.
+    """
+    def _axis(name: str, want: type, typelabel: str) -> List[Any]:
+        raw = roster.get(name)
+        if not isinstance(raw, (list, tuple)):
+            raise MergeError(
+                f"Shard {path} roster.{name} must be a list, got "
+                f"{type(raw).__name__} ({raw!r})."
+            )
+        vals: List[Any] = []
+        for v in raw:
+            # bool is a subclass of int — reject it explicitly for seed_bases.
+            if want is int and isinstance(v, bool):
+                raise MergeError(
+                    f"Shard {path} roster.{name} entry {v!r} is a bool, not an "
+                    f"{typelabel} — refusing to coerce (malformed roster)."
+                )
+            if type(v) is not want:
+                raise MergeError(
+                    f"Shard {path} roster.{name} entry {v!r} has type "
+                    f"{type(v).__name__}, expected {typelabel} — refusing lossy "
+                    "coercion (a float/str seed must never masquerade as an int)."
+                )
+            vals.append(v)
+        if len(set(vals)) != len(vals):
+            raise MergeError(
+                f"Shard {path} roster.{name} has DUPLICATE entries ({raw!r}) — a "
+                "duplicated axis entry signals a malformed roster; refusing to "
+                "silently de-duplicate."
+            )
+        return sorted(vals)
+
     return {
-        "models": sorted(set(roster.get("models") or [])),
-        "seed_bases": sorted(int(s) for s in (roster.get("seed_bases") or [])),
-        "items": sorted(set(roster.get("items") or [])),
+        "models": _axis("models", str, "str"),
+        "seed_bases": _axis("seed_bases", int, "int"),
+        "items": _axis("items", str, "str"),
     }
 
 
@@ -231,7 +275,7 @@ def _resolve_declared_roster(
                     f"Shard {path} declares an empty _roster.{axis} — cannot verify "
                     f"completeness (roster={roster!r})."
                 )
-        normed.append((path, _norm_roster(roster)))
+        normed.append((path, _norm_roster(roster, path)))
 
     ref_path, ref = normed[0]
     for path, nr in normed[1:]:

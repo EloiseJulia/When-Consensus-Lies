@@ -1078,3 +1078,99 @@ def test_pipeline_merge_then_report_end_to_end(tmp_path):
     assert report_out.exists()
     text = report_out.read_text(encoding="utf-8")
     assert "H-B1'" in text and "cd_primary" in text
+
+
+# ── Re-audit round 4 (final): _norm_roster must be STRICT + LOSSLESS ─────────
+
+def test_roster_float_seed_raises(tmp_path):
+    # (a) A float seed (100.9) is REJECTED by type validation — never int()-coerced.
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": [100.9], "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_roster_bool_seed_raises(tmp_path):
+    # bool is an int subclass — it must NOT slip through the seed type check.
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": [True], "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_roster_str_seed_raises(tmp_path):
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": ["100"], "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_roster_int_vs_float_seed_not_lossily_identical(tmp_path):
+    # (b) [100] vs [100.9] must be DIFFERENT — the old int()-coercion made them
+    # falsely identical. Now the float shard raises (lossless, fail-loud).
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    r_int = {"models": ["a"], "seed_bases": [100], "items": ["A"]}
+    r_flt = {"models": ["a"], "seed_bases": [100.9], "items": ["A"]}
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a1.jsonl", fp,
+                     [_cell("A", "a", 100, fp)], roster=r_int)
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__a2.jsonl", fp,
+                     [_cell("A", "a", 100, fp)], roster=r_flt)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p1, p2])
+
+
+def test_roster_duplicate_axis_entry_raises(tmp_path):
+    # (c) A duplicated axis entry signals a malformed roster — never silently
+    # de-duplicated.
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a", "a"], "seed_bases": [100], "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_roster_duplicate_seed_raises(tmp_path):
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": [100, 100], "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_roster_non_list_axis_raises(tmp_path):
+    fp = _fp_intv(models=["a"], seed_bases=[100])
+    roster = {"models": ["a"], "seed_bases": 100, "items": ["A"]}
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp,
+                    [_cell("A", "a", 100, fp)], roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_legit_pilot_roster_validates_and_roundtrips(tmp_path):
+    # (d) The real integer-seed pilot roster still validates + round-trips.
+    seeds = [30260713, 30270713, 30280713]
+    fp = _fp_intv(models=["m"], seed_bases=seeds)
+    roster = {"models": ["m"], "seed_bases": seeds, "items": ["A"]}
+    recs = [_cell("A", "m", s, fp) for s in seeds]
+    shard = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, recs,
+                        roster=roster)
+    merged = merge.merge_records([shard])
+    assert merged["roster"] == {"models": ["m"], "seed_bases": sorted(seeds),
+                                "items": ["A"]}
+
+    out = tmp_path / "cp_lps_intervention_merged.jsonl"
+    merge.write_merged(merged["records"], str(out),
+                       fingerprint=merged["shared_fingerprint"],
+                       roster=merged["roster"])
+    reloaded = merge.merge_records([str(out)])
+    assert reloaded["roster"] == {"models": ["m"], "seed_bases": sorted(seeds),
+                                  "items": ["A"]}
+    assert len(reloaded["records"]) == 3
