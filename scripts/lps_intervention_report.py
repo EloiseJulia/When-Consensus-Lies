@@ -433,6 +433,13 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
     lines.append(f"- H-B2' PARTIAL-hit AMB+ items (oracle I0-hit < 1 across "
                  f"seeds): {hb2['n_partial_hit']} — bounds how much of the failure "
                  "is surfacable + resolvable.")
+    lines.append("- **Temperature disclosure (known limitation):** the H-B2' "
+                 "never-clarify baseline AND oracle committed answers are generated "
+                 "at `temperature=0.0` (a deterministic \"commit\"), so a single "
+                 "item's per-seed labels barely vary and its `cd_primary` is COARSE "
+                 "(effectively ∈ {0, 1}) at 3 seeds. The item-level means / "
+                 "cluster-bootstrap CIs over the AMB+ item set carry the resolution; "
+                 "per-item `cd_primary` granularity is limited by design.")
     lines.append("- Reuses the FROZEN apparatus read-only: `cd_primary` "
                  "(resolution metric), the executable labeler (`_label_answer`), "
                  "`lpp_detect` (clarify signals), and `gold_ambiguity` (strata). "
@@ -460,16 +467,28 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     import registered_run as _rr
+    import lps_intervention_merge as _merge
 
     if args.shards:
-        from glob import glob
-        records: List[Dict[str, Any]] = []
-        for p in sorted(glob(args.shards)):
-            records.extend(load_records(p))
-        source = f"{args.shards} ({len(sorted(glob(args.shards)))} shards)"
+        paths = _merge.iter_shard_paths(args.shards)
+        if not paths:
+            print(f"[Report] No checkpoints match {args.shards!r}.")
+            return
+        source = f"{args.shards} ({len(paths)} shards)"
     else:
-        records = load_records(args.checkpoint)
+        paths = [args.checkpoint]
         source = args.checkpoint
+
+    # Fail-loud integrity gate (MAJOR-2): validate fingerprints + grid completeness
+    # and dedup with conflict detection before ANY metric is computed. An
+    # interrupted / overlapping / incompatible grid ABORTS rather than silently
+    # yielding metrics with missing or overweighted cells.
+    try:
+        merged = _merge.merge_records(paths)
+    except _merge.MergeError as exc:
+        print(f"[Report] ABORT — cannot pool checkpoint(s): {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    records = merged["records"]
 
     if not records:
         print(f"[Report] No records in {source}.")

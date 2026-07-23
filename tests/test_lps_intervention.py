@@ -20,6 +20,7 @@ All tests run OFFLINE (no network / no live model). They assert:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +36,9 @@ for _p in (str(_REPO_ROOT), str(_SCRIPTS_DIR)):
 
 from common.schema import Task, Interpretation  # noqa: E402
 import lps_method as lps  # noqa: E402
+import lps_gold as lgold  # noqa: E402
 import lps_intervention as intv  # noqa: E402
+import lps_intervention_merge as merge  # noqa: E402
 import lps_intervention_report as report  # noqa: E402
 from analysis.cd import cd_primary  # noqa: E402
 
@@ -445,3 +448,237 @@ def test_resume_fingerprint_mismatch_raises(tmp_path):
     with pytest.raises(RuntimeError):
         intv.run([_task("A")], {}, models=["gpt-5.6-sol"], seed_bases=[99999999],
                  checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client)
+
+
+# ── [MAJOR 1] Path isolation is NOT bypassable by nested foreign directories ──
+
+def test_path_guard_rejects_nested_confirmatory_dir_bypass():
+    # The auditor's exact bypass: a valid intervention BASENAME nested inside a
+    # confirmatory-namespace DIRECTORY must be REJECTED (full-path scan + exact
+    # parent-root requirement), not accepted.
+    with pytest.raises(ValueError):
+        intv._validate_output_paths(
+            ".run_partitions/cp_lps_confirm_archive/cp_lps_intervention.jsonl",
+            intv.CACHE_DIR)
+
+
+def test_path_guard_rejects_nested_foreign_cache_bypass():
+    # The auditor's exact cache bypass: a valid intervention cache basename nested
+    # inside a registered_run cache DIRECTORY must be REJECTED.
+    with pytest.raises(ValueError):
+        intv._validate_output_paths(
+            intv.CHECKPOINT, ".llm_cache_registered_run/.llm_cache_lps_intv")
+
+
+def test_path_guard_rejects_deep_nested_pilot_dir():
+    with pytest.raises(ValueError):
+        intv._validate_output_paths(
+            ".run_partitions/lps_pilot/cp_lps_intervention__m.jsonl", intv.CACHE_DIR)
+
+
+def test_path_guard_accepts_legit_after_hardening(tmp_path):
+    # A genuinely isolated intervention path is still ACCEPTED after the hardening.
+    intv._validate_output_paths(intv.CHECKPOINT, intv.CACHE_DIR)
+    intv._validate_output_paths(intv.shard_checkpoint("gpt-5.6-sol"),
+                                intv.shard_cache("gpt-5.6-sol"))
+    intv._validate_output_paths(str(tmp_path / "cp_lps_intervention.jsonl"),
+                                str(tmp_path / ".llm_cache_lps_intv"))
+
+
+# ── [MAJOR 2] Report/merge integrity — fail loud, never silently concatenate ──
+
+def _fp_intv(**over):
+    fp = {"intervention_version": intv.INTERVENTION_VERSION,
+          "method_version": lps.METHOD_VERSION, "k": 5, "tau": 0.0, "tau_s": 0.5,
+          "seed_bases": [100, 200], "models": ["m"]}
+    fp.update(over)
+    return fp
+
+
+def _cell(tid, model, seed, fp, **over):
+    rec = {"task_id": tid, "model": model, "seed_base": seed, "stratum": "AMB+",
+           "clarify": {p: False for p in intv.CLARIFY_POLICIES}, "b2": None,
+           "_fingerprint": fp}
+    rec.update(over)
+    return rec
+
+
+def _write_ckpt(path, fp, records):
+    lines = [json.dumps({"_header": True, "_fingerprint": fp})]
+    lines.extend(json.dumps(r) for r in records)
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_merge_complete_grid_ok(tmp_path):
+    fp = _fp_intv(seed_bases=[100, 200])
+    recs = [_cell(t, "m", s, fp) for t in ("A", "B") for s in (100, 200)]
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, recs)
+    merged = merge.merge_records([p])
+    assert len(merged["records"]) == 4
+    assert merged["n_conflict"] == 0
+
+
+def test_merge_model_diff_same_shared_fp_ok(tmp_path):
+    fp_a = _fp_intv(models=["a"], seed_bases=[100])
+    fp_b = _fp_intv(models=["b"], seed_bases=[100])
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp_a,
+                     [_cell("A", "a", 100, fp_a), _cell("B", "a", 100, fp_a)])
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__b.jsonl", fp_b,
+                     [_cell("A", "b", 100, fp_b), _cell("B", "b", 100, fp_b)])
+    merged = merge.merge_records([p1, p2])
+    assert len(merged["records"]) == 4          # 2 items × 2 models × 1 seed
+    assert merged["n_conflict"] == 0
+
+
+def test_merge_conflicting_duplicate_raises(tmp_path):
+    # (a) same cell key, DIFFERENT payload → abort (never keep-first silently).
+    fp = _fp_intv(seed_bases=[100])
+    r1 = _cell("A", "m", 100, fp, H_seed=0.2)
+    r2 = _cell("A", "m", 100, fp, H_seed=0.9)
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, [r1, r2])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_identical_duplicate_dedups_not_conflict(tmp_path):
+    fp = _fp_intv(seed_bases=[100])
+    r = _cell("A", "m", 100, fp, H_seed=0.2)
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp, [r])
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__a2.jsonl", fp, [r])
+    merged = merge.merge_records([p1, p2])
+    assert len(merged["records"]) == 1
+    assert merged["n_dup"] == 1 and merged["n_conflict"] == 0
+
+
+def test_merge_missing_cell_raises(tmp_path):
+    # (b) interrupted grid: (B, m, 200) missing → abort (not silently averaged).
+    fp = _fp_intv(seed_bases=[100, 200])
+    recs = [_cell("A", "m", 100, fp), _cell("A", "m", 200, fp),
+            _cell("B", "m", 100, fp)]
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, recs)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_merge_version_mismatch_raises(tmp_path):
+    # (c) incompatible intervention_version across shards → abort.
+    fp1 = _fp_intv(models=["a"], seed_bases=[100])
+    fp2 = _fp_intv(models=["b"], seed_bases=[100],
+                   intervention_version="lps-intv-OTHER")
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp1,
+                     [_cell("A", "a", 100, fp1)])
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__b.jsonl", fp2,
+                     [_cell("A", "b", 100, fp2)])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p1, p2])
+
+
+def test_merge_method_version_mismatch_raises(tmp_path):
+    fp1 = _fp_intv(models=["a"], seed_bases=[100])
+    fp2 = _fp_intv(models=["b"], seed_bases=[100], method_version="lps-OTHER")
+    p1 = _write_ckpt(tmp_path / "cp_lps_intervention__a.jsonl", fp1,
+                     [_cell("A", "a", 100, fp1)])
+    p2 = _write_ckpt(tmp_path / "cp_lps_intervention__b.jsonl", fp2,
+                     [_cell("A", "b", 100, fp2)])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p1, p2])
+
+
+def test_merge_malformed_record_raises(tmp_path):
+    # (d) a corrupt line raises rather than being silently dropped.
+    fp = _fp_intv(seed_bases=[100])
+    p = tmp_path / "cp_lps_intervention__m.jsonl"
+    p.write_text(json.dumps({"_header": True, "_fingerprint": fp})
+                 + "\nNOT VALID JSON\n", encoding="utf-8")
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([str(p)])
+
+
+def test_merge_unstamped_record_raises(tmp_path):
+    # A record with no _fingerprint cannot be version-verified → abort.
+    fp = _fp_intv(seed_bases=[100])
+    rec = {"task_id": "A", "model": "m", "seed_base": 100}   # no _fingerprint
+    p = tmp_path / "cp_lps_intervention__m.jsonl"
+    p.write_text(json.dumps({"_header": True, "_fingerprint": fp})
+                 + "\n" + json.dumps(rec) + "\n", encoding="utf-8")
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([str(p)])
+
+
+def test_report_main_aborts_on_incomplete_grid(tmp_path, capsys):
+    # End-to-end: the report CLI refuses to emit metrics from an interrupted grid.
+    fp = _fp_intv(seed_bases=[100, 200])
+    recs = [_cell("A", "m", 100, fp), _cell("A", "m", 200, fp),
+            _cell("B", "m", 100, fp)]
+    cp = _write_ckpt(tmp_path / "cp_lps_intervention.jsonl", fp, recs)
+    with pytest.raises(SystemExit):
+        report.main(["--checkpoint", cp, "--out", str(tmp_path / "out.md")])
+
+
+# ── [MINOR 3] H-B2' INTEGRATION test through the REAL frozen labeler ─────────
+
+def test_hb2_real_labeler_resolves_to_I0(monkeypatch):
+    # Restore the REAL executable labeler (undo the autouse identity stub) and run
+    # a domain-valid oracle answer through it: a gold-I0-convention answer must
+    # land on I0 → cd_primary → 0, while a non-I0 (I1) answer gives non-zero
+    # cd_primary. Deterministic: concrete benchmark Task + gold answer strings,
+    # NO live model calls.
+    from harness.label import label_run as _real_label
+    monkeypatch.setattr(lps, "label_run", _real_label)
+
+    import registered_run as rr
+    from bench.policy_qa import get_checkers_and_candidates
+    tasks = rr.load_tasks()
+    task = next(t for t in tasks
+                if t.domain == "policy_qa"
+                and lgold.gold_ambiguity(t)["stratum"] == lgold.STRATUM_AMB_POS)
+    _ch, cand, _foils = get_checkers_and_candidates(task.domain, task)
+
+    oracle_answer = json.dumps({"amount": cand["I0"]["amount"]})
+    baseline_answer = json.dumps({"amount": cand["I1"]["amount"]})
+
+    oracle_label = lps._label_answer(oracle_answer, task, model_id="m", seed=0)
+    baseline_label = lps._label_answer(baseline_answer, task, model_id="m", seed=0)
+
+    # REAL labeler: the gold-I0-convention answer is labeled I0 (not merely echoed).
+    assert oracle_label == "I0"
+    assert baseline_label != "I0"
+    # Executable resolution metric moves as pre-committed.
+    assert cd_primary([oracle_label] * 3, "I0") == pytest.approx(0.0)
+    assert cd_primary([baseline_label] * 3, "I0") > 0.0
+
+
+def test_hb2_compute_cell_end_to_end_real_labeler(monkeypatch):
+    # compute_cell wired to the REAL labeler on a real AMB+ policy_qa item: a
+    # scripted client emits the gold I0 amount for the oracle re-ask and a wrong
+    # (I1) amount otherwise → b2 baseline is non-I0, oracle is I0.
+    from harness.label import label_run as _real_label
+    monkeypatch.setattr(lps, "label_run", _real_label)
+
+    import registered_run as rr
+    from bench.policy_qa import get_checkers_and_candidates
+    tasks = rr.load_tasks()
+    task = next(t for t in tasks
+                if t.domain == "policy_qa"
+                and lgold.gold_ambiguity(t)["stratum"] == lgold.STRATUM_AMB_POS)
+    _ch, cand, _foils = get_checkers_and_candidates(task.domain, task)
+    i0_amt = cand["I0"]["amount"]
+    i1_amt = cand["I1"]["amount"]
+
+    def fn(role, prompt, seed):
+        if intv.ORACLE_PREFIX in prompt:
+            return json.dumps({"amount": i0_amt})     # oracle → true convention
+        if "JSON array" in prompt:
+            return '[{"dimension": "threshold", "values": ["a", "b"]}]'
+        return json.dumps({"amount": i1_amt})          # else → a wrong interp
+
+    client = ScriptedClient(fn)
+    rec = intv.compute_cell(task, client, "gpt-5.6-sol", 30260713,
+                            k=3, tau=intv.TAU, tau_s=intv.TAU_S,
+                            stratum=lgold.STRATUM_AMB_POS)
+    assert rec["b2"] is not None
+    assert rec["b2"]["oracle_label"] == "I0"
+    assert rec["b2"]["baseline_label"] != "I0"
+    assert cd_primary([rec["b2"]["oracle_label"]], "I0") == pytest.approx(0.0)
+    assert cd_primary([rec["b2"]["baseline_label"]], "I0") > 0.0

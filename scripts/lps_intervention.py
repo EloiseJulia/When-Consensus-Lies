@@ -127,58 +127,96 @@ CLARIFY_POLICIES = [
     "requirements_probing_gated",
 ]
 
-#: Refuse to write over ANY confirmatory / pilot / other-pass artifact.
-_FORBIDDEN_CHECKPOINT_SUBSTR = ("confirm", "pilot", "registered_run",
-                                "phaseB", "sck10", "pilot_gate")
-_FORBIDDEN_CACHE_SUBSTR = ("confirm", "pilot", "registered_run",
-                           "phaseB", "sck10", "pilot_gate", "default_check")
+#: Protected substrings that must NEVER appear ANYWHERE in the FULL resolved path
+#: of an intervention checkpoint/cache — not just the basename. This blocks writing
+#: INSIDE a confirmatory/pilot/other-pass namespace (e.g. a nested directory named
+#: ``cp_lps_confirm_archive`` or ``.llm_cache_registered_run``), which a
+#: basename-only check would wrongly accept. Matched case-insensitively against the
+#: path RELATIVE to the repo root (so the check is insensitive to where the repo is
+#: checked out), falling back to the full path for out-of-repo (e.g. temp) paths.
+_PROTECTED_PATH_SUBSTR = (
+    "cp_lps_confirm", "lps_confirm", "llm_cache_lps_confirm",
+    "registered_run", "cp_sck10", "sck10", "phaseb",
+    "pilot", "pilot_gate", "default_check",
+)
+
+
+def _rel_lower(p: Path) -> str:
+    """Path relative to the repo root (else the full path), lowercased/posix.
+
+    Used for the protected-substring scan so it is insensitive to the repo's
+    checkout location while still catching a protected token anywhere INSIDE the
+    (possibly nested) intervention path.
+    """
+    try:
+        rel = p.relative_to(_REPO_ROOT.resolve())
+        return rel.as_posix().lower()
+    except ValueError:
+        return p.as_posix().lower()
+
+
+def _is_under(child: Path, root: Path) -> bool:
+    try:
+        return child.is_relative_to(root)
+    except AttributeError:  # pragma: no cover (py<3.9)
+        return str(child).startswith(str(root))
 
 
 def _validate_output_paths(checkpoint_path: str, cache_dir: str) -> None:
     """Reject any path that could read/write a confirmatory/other-pass artifact.
 
-    The intervention driver MUST write its OWN namespace: the checkpoint name must
-    start with ``cp_lps_intervention`` and the cache with ``.llm_cache_lps_intv``,
-    and neither may contain a confirmatory/pilot token — so a fat-fingered
-    ``--checkpoint``/``--cache-dir`` can never clobber (or resume from) another
-    pass's file.
+    Defence in depth (MAJOR-1 hardening — a basename-only check is bypassable):
+      1. The checkpoint BASENAME must start with ``cp_lps_intervention`` and the
+         cache basename with ``.llm_cache_lps_intv``.
+      2. NO protected substring (``cp_lps_confirm``, ``registered_run``, ``sck10``,
+         ``phaseb``, ``pilot``, …) may appear ANYWHERE in the FULL resolved path —
+         so a nested confirmatory/other-pass DIRECTORY cannot smuggle a write in.
+      3. The checkpoint's PARENT must be EXACTLY the repo's ``.run_partitions`` root
+         (or under a temp dir for tests) — never a nested subdirectory; the cache's
+         parent must be EXACTLY the repo root (or under a temp dir). This blocks
+         ``.run_partitions/cp_lps_confirm_archive/cp_lps_intervention.jsonl`` and
+         ``.llm_cache_registered_run/.llm_cache_lps_intv``.
     """
     cp = Path(checkpoint_path).resolve()
-    name = cp.name
-    if not name.startswith("cp_lps_intervention"):
+    cache = Path(cache_dir).resolve()
+    repo_root = _REPO_ROOT.resolve()
+    runparts_root = (repo_root / ".run_partitions").resolve()
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+
+    # (1) basename namespace.
+    if not cp.name.startswith("cp_lps_intervention"):
         raise ValueError(
             f"Refusing checkpoint {checkpoint_path!r}: intervention must write its "
             "OWN checkpoint (cp_lps_intervention*.jsonl), never a confirmatory or "
             "other-pass file."
         )
-    low = name.lower()
-    if any(tok in low for tok in _FORBIDDEN_CHECKPOINT_SUBSTR):
-        raise ValueError(
-            f"Refusing checkpoint {checkpoint_path!r}: name collides with another "
-            "run's artifact (confirmatory/pilot token present)."
-        )
-    tmp_root = Path(tempfile.gettempdir()).resolve()
-    under_runparts = ".run_partitions" in cp.parts
-    try:
-        under_tmp = cp.is_relative_to(tmp_root)
-    except AttributeError:  # pragma: no cover (py<3.9)
-        under_tmp = str(cp).startswith(str(tmp_root))
-    if not (under_runparts or under_tmp):
-        raise ValueError(
-            f"Refusing checkpoint {checkpoint_path!r}: not under '.run_partitions' "
-            "(or a temp dir for tests)."
-        )
-    cache = Path(cache_dir).resolve()
-    cname = cache.name
-    if not cname.startswith(".llm_cache_lps_intv"):
+    if not cache.name.startswith(".llm_cache_lps_intv"):
         raise ValueError(
             f"Refusing cache dir {cache_dir!r}: intervention must use its OWN cache "
             "(.llm_cache_lps_intv*), never a confirmatory/other-pass cache."
         )
-    if any(tok in cname.lower() for tok in _FORBIDDEN_CACHE_SUBSTR):
+
+    # (2) protected substring ANYWHERE in the full (relative) resolved path.
+    for label, p in (("checkpoint", cp), ("cache dir", cache)):
+        rel = _rel_lower(p)
+        hit = next((tok for tok in _PROTECTED_PATH_SUBSTR if tok in rel), None)
+        if hit is not None:
+            raise ValueError(
+                f"Refusing {label} {p!s}: protected token {hit!r} appears in the "
+                "resolved path — it lives inside a confirmatory/pilot/other-pass "
+                "namespace. Intervention artifacts must be fully isolated."
+            )
+
+    # (3) exact approved parent root (no nesting inside a foreign directory).
+    if not (cp.parent == runparts_root or _is_under(cp, tmp_root)):
         raise ValueError(
-            f"Refusing cache dir {cache_dir!r}: name collides with another run's "
-            "cache (confirmatory/pilot token present)."
+            f"Refusing checkpoint {checkpoint_path!r}: parent must be exactly "
+            f"'{runparts_root}' (or a temp dir for tests), got '{cp.parent}'."
+        )
+    if not (cache.parent == repo_root or _is_under(cache, tmp_root)):
+        raise ValueError(
+            f"Refusing cache dir {cache_dir!r}: parent must be exactly the repo "
+            f"root '{repo_root}' (or a temp dir for tests), got '{cache.parent}'."
         )
 
 
