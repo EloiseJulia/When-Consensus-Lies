@@ -792,21 +792,22 @@ fake-redundancy condition of Study~1 (many agents share one lossy reading and ag
 precisely where same-prompt semantic entropy, looking only at resampling variance, is blind.
 
 \paragraph{Positioning against input-clarification ensembling.} The closest prior method is
-\emph{Input Clarification Ensembling} (ICE)~\cite{hou2024decomposing}, which decomposes an LLM's uncertainty
-into aleatoric (input-ambiguity) and epistemic (model-ignorance) components by generating clarifications and
-ensembling the resulting answers---capturing the same broad distinction as our \Hseed{}/\Hctx{}
-decomposition. Our detector (LPP) differs in four ways that matter for the same-prompt interface setting.
-First, it specifically targets the low-\Hseed{} $\wedge$ high-\Hctx{} \emph{danger quadrant}, where semantic
-entropy is blind by design and open-ended clarification alone conflates confidently-wrong answers with
-genuinely uncertain ones; ICE decomposes uncertainty broadly rather than isolating this regime. Second, it
-uses \emph{counterfactual pinning} of \emph{self-surfaced} premises rather than open clarification
-generation: pinning the model's own candidate values and clustering by \emph{executable equivalence} filters
-assumptions that change the framing but not the answer, a sharper answer-sensitivity signal. Third, it is
-evaluated against an \emph{executable} gold-ambiguity label rather than an LLM judge. Fourth, it runs
-identically across three vendors \emph{without logit access}, so it is deployable on the multi-vendor
-same-prompt interfaces of Study~1---unlike white-box activation probes that require model internals. We
-report the increment from pinning honestly (\S\ref{sec:study2-results}): the headline is that LPP exposes a
-failure mode semantic entropy cannot reach, not that it beats every baseline.
+\emph{Input Clarification Ensembling} (ICE)~\cite{hou2024decomposing}, which separates an LLM's
+\emph{aleatoric} (input-ambiguity) uncertainty from its \emph{epistemic} (model-ignorance) uncertainty by
+generating clarifications of the input and ensembling the resulting answers, evaluated against standard
+dataset gold---capturing the same broad aleatoric/epistemic distinction as our \Hseed{}/\Hctx{}
+decomposition. Our detector (LPP) differs in target, mechanism, and setting rather than in being ``better''
+at the same task. In \emph{target}, LPP operationalizes and flags the specific low-\Hseed{} $\wedge$
+high-\Hctx{} \emph{danger quadrant}---the confident-latent-premise regime where same-prompt semantic entropy
+is blind by design---as a deployable detector, whereas ICE performs a general aleatoric/epistemic
+decomposition that is not aimed at that low-semantic-entropy zone. In \emph{mechanism}, LPP uses
+\emph{counterfactual pinning} of \emph{self-surfaced} premises---injecting specific candidate values and
+testing whether the \emph{executable} answer moves, clustering by executable equivalence---rather than ICE's
+clarification-generation ensembling. In \emph{setting}, LPP is black-box, multi-vendor, and inference-only
+\emph{without logit access}, evaluated against our executable gold-ambiguity label, so it is deployable on
+the multi-vendor same-prompt interfaces of Study~1---unlike white-box activation probes that require model
+internals. The honest headline is that LPP exposes a failure mode semantic entropy is blind to; it does not
+dominate every baseline.
 
 \subsection{The latent-premise-pinning (LPP) detector}
 \label{sec:study2-method}
@@ -921,11 +922,10 @@ counterfactual pinning is a \emph{refinement} on top, not the whole story. Three
 calibrated. First, the requirements-probing baseline---assumption-surfacing \emph{without} the pinning
 test---is already strong (pooled AUROC $0.810$), so the pinning increment, though real, is
 \textbf{modest ($+0.085$)}: much of the signal comes from surfacing latent premises at all, and pinning
-sharpens the separation. This surfacing-versus-pinning contrast is precisely the ablation that separates LPP
-from open clarification such as ICE~\cite{hou2024decomposing}: requirements-probing \emph{surfaces}
-assumptions but does not pin them, whereas counterfactual pinning tests whether the \emph{executable} answer
-actually moves, filtering assumptions that change the framing but not the answer---worth a real but modest
-$+0.085$ here, on the tested items and models. Second, \textbf{localization is weak} (pooled $0.36$): identifying \emph{which}
+sharpens the separation. This is an \emph{internal} LPP ablation---surfacing versus surfacing-plus-pinning,
+two points on the same pipeline---not a comparison against ICE: it isolates the contribution of counterfactual
+pinning \emph{within} our own method, showing that testing whether the \emph{executable} answer moves adds a
+real but modest $+0.085$ over surfacing assumptions alone, on the tested items and models. Second, \textbf{localization is weak} (pooled $0.36$): identifying \emph{which}
 axis is responsible is a secondary, recall-limited signal, not a headline. Third, the \textbf{token-logprob
 baseline is not applicable} on non-OpenAI models, so we do not report it cross-family. None of these
 undercuts the primary, pre-committed detection result; we state them so the contribution is not overclaimed.
