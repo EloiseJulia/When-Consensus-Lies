@@ -60,7 +60,9 @@ $\approx\!0.03\%$); a nominal $k$-agent ensemble supplies the evidence of $\appr
 non-frontier models---converges on a shared wrong interpretation (rate $=\!0.00$). A second benchmark constructed by a \emph{different} model family
 rules out a shared-prior-with-the-constructor artifact. We name this failure \emph{fake redundancy}: under a
 shared information boundary, nominally diverse agents form an \emph{interpretive monoculture}, and consensus
-stops being evidence of correctness. Building on this diagnosis, we contribute a black-box, cross-vendor
+stops being evidence of correctness. Our aim is not to rediscover that frontier-model errors are correlated,
+but to isolate a controlled, capability-invariant phase boundary---the disambiguator's location---that
+switches this monoculture on and off on executable-gold tasks. Building on this diagnosis, we contribute a black-box, cross-vendor
 detector (Study~2) that flags precisely this condition at inference time---without ground truth---by testing
 whether a model's answer is stable when a \emph{self-surfaced} latent premise is counterfactually pinned; on
 executable gold-ambiguity it separates ambiguous from unambiguous prompts at pooled AUROC $0.895$, exactly
@@ -165,7 +167,11 @@ in the interface's ``models agree'' display distinguishes it from genuine agreem
 We present two linked studies. \emph{Study~1} documents the failure (\S\ref{sec:results}): where and why
 nominally diverse agents silently converge on the same wrong reading. \emph{Study~2} contributes a
 constructive counterpart (\S\ref{sec:study2}): a black-box, cross-vendor detector that flags the failure
-mode at inference time.
+mode at inference time. Our aim in neither study is to rediscover that frontier-model errors are
+correlated~\cite{kim2025correlated} or to decompose model uncertainty in general~\cite{hou2024decomposing};
+it is (Study~1) to isolate a controlled, capability-invariant \emph{causal} phase boundary---whether the
+decisive disambiguator lies inside or outside the retained prompt---and (Study~2) to build a
+danger-quadrant detector that reaches the confident-latent-premise blind spot semantic entropy cannot.
 
 \paragraph{Contributions.} This paper makes five contributions.
 \begin{itemize}
@@ -323,12 +329,14 @@ help~\cite{du2023debate} but also converge to shared misconceptions~\cite{estorn
 to majorities~\cite{choi2025conformity}, and degrade under peer pressure~\cite{wynn2025talk}. Underspecified
 prompts are common and destabilizing~\cite{yang2025underspecification}. Our contribution is distinct from
 the two nearest lines at the construct, manipulation, and metric levels: where Kim et al.~\cite{kim2025correlated}
-document that LLM errors are \emph{correlated} across providers as an observed property, and Yang et
-al.~\cite{yang2025underspecification} show that underspecification \emph{degrades} performance, we
-\emph{isolate a controlled, executable-gold axis}---the location of the disambiguator---that switches the
-failure on and off while holding the base task and executable verifier fixed, and we frame it as an
-\emph{interface-centered} question (when does displayed multi-model agreement warrant trust) with a
-convergent-delusion metric rather than a general error-correlation or accuracy claim. Our contribution is
+document that LLM errors are \emph{correlated} across providers as an observed property, Estornell and
+Liu~\cite{estornell2024} prove \emph{theoretically} that debate can converge on shared misconceptions, and
+Yang et al.~\cite{yang2025underspecification} show that underspecification \emph{degrades} performance, we
+\emph{isolate a controlled, pre-registered, capability-invariant, executable-gold axis}---the location of the
+disambiguator---that switches the failure on and off while holding the base task, the agents, and the
+executable verifier fixed, and we frame it as an \emph{interface-centered} question (when does displayed
+multi-model agreement warrant trust) with a convergent-delusion metric rather than a general
+error-correlation or accuracy claim. Our contribution is
 thus not to re-demonstrate that consensus can be wrong, but to
 connect a controlled manipulation to the human--AI interaction question of when multi-model agreement can be trusted.
 
@@ -783,6 +791,24 @@ once a latent premise is pinned differently). That combination---\emph{low \Hsee
 fake-redundancy condition of Study~1 (many agents share one lossy reading and agree with confidence) and
 precisely where same-prompt semantic entropy, looking only at resampling variance, is blind.
 
+\paragraph{Positioning against input-clarification ensembling.} The closest prior method is
+\emph{Input Clarification Ensembling} (ICE)~\cite{hou2024decomposing}, which separates an LLM's
+\emph{aleatoric} (input-ambiguity) uncertainty from its \emph{epistemic} (model-ignorance) uncertainty by
+generating clarifications of the input and ensembling the resulting answers, evaluated against standard
+dataset gold---capturing the same broad aleatoric/epistemic distinction as our \Hseed{}/\Hctx{}
+decomposition. Our detector (LPP) differs in target, mechanism, and setting rather than in being ``better''
+at the same task. In \emph{target}, LPP operationalizes and flags the specific low-\Hseed{} $\wedge$
+high-\Hctx{} \emph{danger quadrant}---the confident-latent-premise regime where same-prompt semantic entropy
+is blind by design---as a deployable detector, whereas ICE performs a general aleatoric/epistemic
+decomposition that is not aimed at that low-semantic-entropy zone. In \emph{mechanism}, LPP uses
+\emph{counterfactual pinning} of \emph{self-surfaced} premises---injecting specific candidate values and
+testing whether the \emph{executable} answer moves, clustering by executable equivalence---rather than ICE's
+clarification-generation ensembling. In \emph{setting}, LPP is black-box, multi-vendor, and inference-only
+\emph{without logit access}, evaluated against our executable gold-ambiguity label, so it is deployable on
+the multi-vendor same-prompt interfaces of Study~1---unlike white-box activation probes that require model
+internals. The honest headline is that LPP exposes a failure mode semantic entropy is blind to; it does not
+dominate every baseline.
+
 \subsection{The latent-premise-pinning (LPP) detector}
 \label{sec:study2-method}
 The detector is black-box and inference-only: it needs only sampled completions, no logits, gradients, or
@@ -896,7 +922,10 @@ counterfactual pinning is a \emph{refinement} on top, not the whole story. Three
 calibrated. First, the requirements-probing baseline---assumption-surfacing \emph{without} the pinning
 test---is already strong (pooled AUROC $0.810$), so the pinning increment, though real, is
 \textbf{modest ($+0.085$)}: much of the signal comes from surfacing latent premises at all, and pinning
-sharpens the separation. Second, \textbf{localization is weak} (pooled $0.36$): identifying \emph{which}
+sharpens the separation. This is an \emph{internal} LPP ablation---surfacing versus surfacing-plus-pinning,
+two points on the same pipeline---not a comparison against ICE: it isolates the contribution of counterfactual
+pinning \emph{within} our own method, showing that testing whether the \emph{executable} answer moves adds a
+real but modest $+0.085$ over surfacing assumptions alone, on the tested items and models. Second, \textbf{localization is weak} (pooled $0.36$): identifying \emph{which}
 axis is responsible is a secondary, recall-limited signal, not a headline. Third, the \textbf{token-logprob
 baseline is not applicable} on non-OpenAI models, so we do not report it cross-family. None of these
 undercuts the primary, pre-committed detection result; we state them so the contribution is not overclaimed.
