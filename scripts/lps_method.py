@@ -90,9 +90,10 @@ _ROLE = "tested_agents"    # generic answering role
 
 #: Method-version stamp for run provenance / checkpoint fingerprinting. Bump this
 #: whenever the H_seed/H_ctx measurement changes so a resume cannot silently reuse
-#: results computed under an incompatible method. Current: mutual-equivalence
-#: H_ctx clustering with tolerance-aware output signing (frozen-harness FLOAT_TOL).
-METHOD_VERSION = "lps-2026-07-23-v4-tol-equiv"
+#: results computed under an incompatible method. v5: mutual-equivalence H_ctx via
+#: tolerance-aware PAIRWISE clustering (frozen-harness ``_compare`` + union-find
+#: connected components), replacing the earlier rounding-signature bucketing (v4).
+METHOD_VERSION = "lps-2026-07-23-v5-pairwise-tol"
 
 #: The ineligible "degenerate/noise" label. Refinement 1 (2026-07-23): H_ctx is
 #: computed over VALID enumerated interpretations only, EXCLUDING I_perp — mirror

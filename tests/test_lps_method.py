@@ -664,3 +664,35 @@ def test_resume_reuses_matching_fingerprint(monkeypatch, _fp_checkpoint):
     assert res["skipped"] == 1
     assert res["completed"] == 0
 
+
+def test_method_version_is_v5_pairwise():
+    # The clustering ALGORITHM is tolerance-aware pairwise / union-find (v5). The
+    # version string must reflect that so a pre-pairwise (v4) checkpoint is refused.
+    assert lps.METHOD_VERSION == "lps-2026-07-23-v5-pairwise-tol"
+    fp = lps_pilot.run_fingerprint(models=["m"], k=5, base_seed=0, tau=0.0, tau_s=0.5)
+    assert fp["method_version"] == "lps-2026-07-23-v5-pairwise-tol"
+
+
+def test_resume_refuses_old_method_version(monkeypatch, _fp_checkpoint):
+    _sig_by_text(monkeypatch)
+    cp, cache = _fp_checkpoint
+    task = _dummy_task()
+    client = _detect_client({"V1": "RA", "V2": "RB"}, lambda seed: "SAME")
+
+    # A checkpoint written by the OLD (pre-pairwise) method — same k/seed/tau, but a
+    # stale method_version. It must be refused, not silently reused.
+    old_fp = lps_pilot.run_fingerprint(models=["m"], k=5, base_seed=0, tau=0.0, tau_s=0.5)
+    old_fp = dict(old_fp)
+    old_fp["method_version"] = "lps-2026-07-23-v4-tol-equiv"
+    with cp.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"_header": True, "_fingerprint": old_fp}) + "\n")
+        fh.write(json.dumps({"task_id": task.id, "model": "m",
+                             "_fingerprint": old_fp}) + "\n")
+
+    with pytest.raises(RuntimeError, match="fingerprint mismatch"):
+        lps_pilot.run(
+            [task], {}, models=["m"], checkpoint_path=str(cp), cache_dir=str(cache),
+            k=5, base_seed=0, tau=0.0, tau_s=0.5, select_pilot=False,
+            _client_override=client,
+        )
+
