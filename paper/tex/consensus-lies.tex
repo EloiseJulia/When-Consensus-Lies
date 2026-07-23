@@ -27,6 +27,8 @@
 \newcommand{\cd}{\textsf{CD}}
 \newcommand{\iperp}{\ensuremath{I_\perp}}
 \newcommand{\neff}{\ensuremath{n_{\mathrm{eff}}}}
+\newcommand{\Hseed}{\ensuremath{H_{\mathrm{seed}}}}
+\newcommand{\Hctx}{\ensuremath{H_{\text{ctx-self}}}}
 
 \begin{document}
 
@@ -58,7 +60,11 @@ $\approx\!0.03\%$); a nominal $k$-agent ensemble supplies the evidence of $\appr
 non-frontier models---converges on a shared wrong interpretation (rate $=\!0.00$). A second benchmark constructed by a \emph{different} model family
 rules out a shared-prior-with-the-constructor artifact. We name this failure \emph{fake redundancy}: under a
 shared information boundary, nominally diverse agents form an \emph{interpretive monoculture}, and consensus
-stops being evidence of correctness. We derive implications for multi-model interfaces: they should surface
+stops being evidence of correctness. Building on this diagnosis, we contribute a black-box, cross-vendor
+detector (Study~2) that flags precisely this condition at inference time---without ground truth---by testing
+whether a model's answer is stable when a \emph{self-surfaced} latent premise is counterfactually pinned; on
+executable gold-ambiguity it separates ambiguous from confident prompts at pooled AUROC $0.895$, exactly
+where the same-prompt semantic-entropy baseline (AUROC $0.581$) is blind. We derive implications for multi-model interfaces: they should surface
 \emph{evidential dependence}---whether answers rest on the same, possibly incomplete, input---rather than
 displaying agent count.
 \end{abstract}
@@ -156,7 +162,12 @@ they can form an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture}
 artifact of a shared prior rather than corroborating evidence---and, because the failure is silent, nothing
 in the interface's ``models agree'' display distinguishes it from genuine agreement.
 
-\paragraph{Contributions.} This paper makes four contributions.
+We present two linked studies. \emph{Study~1} documents the failure (\S\ref{sec:results}): where and why
+nominally diverse agents silently converge on the same wrong reading. \emph{Study~2} contributes a
+constructive counterpart (\S\ref{sec:study2}): a black-box, cross-vendor detector that flags the failure
+mode at inference time.
+
+\paragraph{Contributions.} This paper makes five contributions.
 \begin{itemize}
 \item \textbf{Conceptual and interaction-paradigm.} We identify the hidden assumption in same-prompt
 multi-model interfaces---that agreement across models is independent corroboration---and name
@@ -181,6 +192,13 @@ $\approx\!1$ independent judgment.
 instead of ``$4/4$ models agree,'' surface shared-input, missing-context, shared-interpretation, and
 alternative-interpretation signals and a request-clarification action. Grounded in the landscape gap, this
 is framed as design implications and a proposed concept; its evaluation is future work.
+\item \textbf{A black-box detector (Study~2).} A constructive counterpart to the diagnosis: a cross-vendor,
+inference-only detector that \emph{explicitly surfaces} a prompt's latent premises and flags
+\emph{confident latent-premise ambiguity}---the exact blind spot of same-prompt resampling. On an executable
+gold-ambiguity label it separates ambiguous from confident prompts at pooled AUROC $0.895$ versus $0.581$
+for a semantic-entropy baseline. We report this honestly as a refinement, not a panacea: a strong
+requirements-probing baseline already reaches AUROC $0.810$, so the counterfactual-pinning increment is real
+but modest ($+0.085$), and localization of the responsible premise remains weak.
 \end{itemize}
 We report our pre-registered hypotheses honestly, including those that were not supported, and treat the
 capability/family nulls as theoretically informative: they are what makes the failure a property of the
@@ -737,6 +755,165 @@ shared answers are aggregated; this motivates---but does not prove---the \emph{h
 remedies must diversify the \emph{inputs}/evidence rather than merely the vendors or the roles. We tested
 only these two interventions, state this modestly, and do not claim to have found a solution or that all
 same-input interventions are insufficient.
+
+%% =====================================================================
+\section{Study 2: A Black-Box Detector for Confident Latent-Premise Ambiguity}
+\label{sec:study2}
+Study~1 diagnoses the failure: under a shared information boundary, nominally diverse agents silently
+converge on the same wrong reading. Study~2 asks the constructive question an interface designer would
+ask next: \emph{can we detect, at inference time and without ground truth, that a prompt harbors a
+decision-relevant latent premise on which the model is confidently guessing?} We contribute a black-box,
+cross-vendor detector for exactly this condition. Its target is a blind spot that the semantic-entropy line
+of work documents about \emph{itself}~\cite{farquhar2024semantic}: resampling the same prompt catches cases
+where a model is \emph{internally} uncertain, but it is systematically blind when the model is confidently
+self-consistent yet its answer secretly depends on an unstated assumption. Everything reported here is the
+\emph{confirmatory} detection read, pre-registered and frozen before the run; the intervention and the
+white-box contrast are still running and appear below only as pre-registered \emph{design}, with no numbers.
+
+\subsection{Concept: a seed/context uncertainty decomposition and the danger quadrant}
+\label{sec:study2-concept}
+We separate two sources of answer variability. \Hseed{}---semantic entropy (in bits) over $k$ resamples of
+the \emph{same} prompt---is the state-of-the-art hallucination signal~\cite{farquhar2024semantic}: it is
+high when the model is internally unsure and low when the model answers the same way every time it is asked.
+\Hctx{} measures something different: the dispersion of the model's answer when a \emph{self-surfaced} but
+unstated premise is \emph{counterfactually pinned} to different plausible values. The two can diverge. A
+prompt can have low \Hseed{} (the model is confidently self-consistent) yet high \Hctx{} (its answer flips
+once a latent premise is pinned differently). That combination---\emph{low \Hseed{} $\wedge$ high
+\Hctx{}}---is the \textbf{danger quadrant}: confident latent-premise ambiguity. It is precisely the
+fake-redundancy condition of Study~1 (many agents share one lossy reading and agree with confidence) and
+precisely where same-prompt semantic entropy, looking only at resampling variance, is blind.
+
+\subsection{The latent-premise-pinning (LPP) detector}
+\label{sec:study2-method}
+The detector is black-box and inference-only: it needs only sampled completions, no logits, gradients, or
+vendor-specific access, so it runs identically across OpenAI, Anthropic, and Google models. It proceeds in
+three steps. \emph{(1) Self-surface.} A \emph{generic} prompt asks the model to name the decision-relevant
+unstated assumptions a competent solver would have to fix before answering. The prompt never mentions the
+target interpretation, the deleted convention, or the enumerated foils: this anti-leakage discipline keeps
+the surfaced premises the model's own, not a paraphrase of the gold key. \emph{(2) Counterfactually pin and
+cluster.} Each self-surfaced dimension is pinned to the model's \emph{own} candidate values, and the
+resulting pinned answers are clustered by \emph{mutual executable equivalence} using the frozen benchmark
+harness's pairwise equality check (\texttt{\_runner\_compare}; \texttt{FLOAT\_TOL}$=$\texttt{1e-9},
+booleans type-distinct, integers exact, union-find components); unparseable or unrunnable answers are
+excluded, and fewer than two parseable answers yields \Hctx{}$=0$. \Hctx{} is the entropy over the resulting
+answer-equivalence clusters. \emph{(3) Flag.} An item is flagged when
+$\Hctx{} > \tau \wedge \Hseed{} \le \tau_s$, at the frozen operating point $\tau=0$, $\tau_s=0.5$ bits
+(the low-\Hseed{} ``convergent'' cutoff that defines the danger quadrant).
+
+\subsection{Executable gold-ambiguity and non-circularity}
+\label{sec:study2-gold}
+The detector is evaluated against an \emph{executable, detector-independent} gold-ambiguity label. An item
+is $\mathrm{AMB}{+}$ iff at least two of its \emph{own} enumerated interpretations produce different
+executable results on its test inputs, and $\mathrm{AMB}{-}$ when no deleted axis exists (a $k{=}0$ control)
+or the interpretations coincide; the gold label is computed by running code, never by an LLM judge, and
+never enters any prompt. The evaluation is therefore \textbf{not circular}: the gold label clusters the
+\emph{benchmark's} enumerated interpretations, while the detector clusters the \emph{model's} self-generated
+pins---two independent pin-sets, so measuring detector-versus-gold agreement is not tautological. Of the 54
+pre-registered items, executable gold-ambiguity yields \textbf{33 $\mathrm{AMB}{+}$, 21 $\mathrm{AMB}{-}$,
+and 0 non-discriminating}.
+
+This study was pre-registered and frozen before the confirmatory run, locking the hypotheses, the metric
+definitions, the 54-item set, the model roster (OpenAI, Anthropic, and Google, each at a reasoning and a
+weak tier), $\ge 3$ seeds, the baseline set, and the operating point. On provenance: the confirmatory run
+was launched under a \emph{conditional pre-authorization} from the owner that delegated the go/no-go
+decision, against a pre-committed decision rule, once a validation pilot cleared the strong-signal bar---not
+a self-signed approval, and not a claim that the owner ratified each metric line by line. The detector was
+implemented by one model family and the numbers below were independently reproduced under a cross-family
+audit.
+
+\subsection{Detection results}
+\label{sec:study2-results}
+Across all six frontier models---three families (OpenAI, Anthropic, Google) at two capability
+tiers---\Hctx{} classifies executable gold-ambiguity far above chance and far above the semantic-entropy
+baseline (Table~\ref{tab:lps-auroc}). Per model, \Hctx{} lands in $0.856$--$0.887$ while same-prompt
+semantic entropy \Hseed{} sits near chance at $0.551$--$0.606$. Pooled, the detector reaches
+\textbf{AUROC $0.895$} $[0.815, 0.966]$ against \textbf{$0.581$} $[0.484, 0.675]$ for semantic entropy, a
+\textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$). This is the crux of the SOTA-blind
+claim: resampling the same prompt cannot separate ambiguous from confident prompts here, because the models
+are confidently self-consistent on exactly the items whose answers hinge on an unstated premise.
+
+The danger quadrant makes the same point at the item level. \textbf{$0.758$ (25 of 33) of $\mathrm{AMB}{+}$
+items} fall in the low-\Hseed{} $\wedge$ high-\Hctx{} zone (pre-committed $\ge 0.40$)---confident, yet the
+answer depends on a latent axis that same-prompt entropy never flags. At the frozen operating point
+($\tau=0$, $\tau_s=0.5$) the pooled detector runs at \textbf{precision $0.926$, recall $0.758$}, with a
+$k{=}0$ false-positive rate of $0.095$ (Table~\ref{tab:lps-op}).
+
+\begin{table}[t]
+\centering
+\caption{Study~2 detection: AUROC of the detector \Hctx{} versus baselines against executable
+gold-ambiguity ($\mathrm{AMB}{+}$ vs.\ $\mathrm{AMB}{-}$; higher $=$ more ambiguous). Brackets are cluster
+(\texttt{task\_id}) bootstrap 95\% CIs over items. Self-consistency and requirements-probing are point
+estimates. The token-logprob baseline is \emph{not applicable} on models that do not expose logprobs
+(Anthropic, Google), so it is omitted.}
+\label{tab:lps-auroc}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Model & \Hctx{} (detector) & \Hseed{} (sem.\ entropy) & Self-consist. & Req.-probing \\
+\midrule
+claude-haiku-4.5 & $0.869$\,$[0.787,0.941]$ & $0.567$\,$[0.483,0.648]$ & $0.566$ & $0.802$ \\
+claude-opus-4.8  & $0.887$\,$[0.808,0.956]$ & $0.591$\,$[0.529,0.662]$ & $0.591$ & $0.832$ \\
+gemini-3.1-pro   & $0.857$\,$[0.771,0.934]$ & $0.606$\,$[0.534,0.682]$ & $0.606$ & $0.794$ \\
+gemini-3.5-flash & $0.880$\,$[0.797,0.955]$ & $0.580$\,$[0.493,0.667]$ & $0.580$ & $0.802$ \\
+gpt-4o-mini      & $0.856$\,$[0.768,0.933]$ & $0.551$\,$[0.472,0.629]$ & $0.553$ & $0.807$ \\
+gpt-5.6-sol      & $0.857$\,$[0.774,0.932]$ & $0.563$\,$[0.467,0.657]$ & $0.563$ & $0.802$ \\
+\midrule
+\textbf{Pooled}  & $\mathbf{0.895}$\,$[0.815,0.966]$ & $0.581$\,$[0.484,0.675]$ & $0.578$ & $0.810$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Study~2 detection at the frozen operating point ($\tau=0$, $\tau_s=0.5$ bits). Every group has
+33 $\mathrm{AMB}{+}$ and 21 $\mathrm{AMB}{-}$ items. Danger mass $=$ share of $\mathrm{AMB}{+}$ items in the
+low-\Hseed{} $\wedge$ high-\Hctx{} quadrant. Localization (secondary, known-weak) $=$ share of
+$\mathrm{AMB}{+}$ items whose argmax-\Hctx{} dimension matches the true deleted axis.}
+\label{tab:lps-op}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Model & Prec. & Recall & $k0$ FP & Danger mass & Localiz. \\
+\midrule
+claude-haiku-4.5 & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.364$ \\
+claude-opus-4.8  & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.273$ \\
+gemini-3.1-pro   & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.364$ \\
+gemini-3.5-flash & $0.960$ & $0.727$ & $0.048$ & $0.727$ (24/33) & $0.273$ \\
+gpt-4o-mini      & $0.957$ & $0.667$ & $0.048$ & $0.667$ (22/33) & $0.333$ \\
+gpt-5.6-sol      & $0.957$ & $0.667$ & $0.048$ & $0.667$ (22/33) & $0.364$ \\
+\midrule
+\textbf{Pooled}  & $\mathbf{0.926}$ & $\mathbf{0.758}$ & $0.095$ & $\mathbf{0.758}$ (25/33) & $0.364$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Honestly reported caveats.} The headline is that \emph{explicitly surfacing latent premises}, in
+a black-box cross-vendor setting, exposes the exact blind spot semantic entropy documents about itself;
+counterfactual pinning is a \emph{refinement} on top, not the whole story. Three caveats keep this claim
+calibrated. First, the requirements-probing baseline---assumption-surfacing \emph{without} the pinning
+test---is already strong (pooled AUROC $0.810$), so the pinning increment, though real, is
+\textbf{modest ($+0.085$)}: much of the signal comes from surfacing latent premises at all, and pinning
+sharpens the separation. Second, \textbf{localization is weak} (pooled $0.36$): identifying \emph{which}
+axis is responsible is a secondary, recall-limited signal, not a headline. Third, the \textbf{token-logprob
+baseline is not applicable} on non-OpenAI models, so we do not report it cross-family. None of these
+undercuts the primary, pre-committed detection result; we state them so the contribution is not overclaimed.
+
+\subsection{Intervention and white-box contrast (pre-registered; results forthcoming)}
+\label{sec:study2-intervention}
+Two pre-registered follow-ups extend the detector from diagnosis to action; both are still running, and we
+describe only their frozen \emph{design} here, with no numbers.
+\todo{Phase 2b intervention results forthcoming.} \emph{Selective clarification (H-B1$'$) and oracle
+resolution (H-B2$'$).} The design tests whether LPP triggers clarification on genuinely ambiguous
+($\mathrm{AMB}{+}$) items but not on unambiguous ($\mathrm{AMB}{-}$/$k{=}0$) ones---i.e.\ appropriate minus
+over-clarification $> 0$, and better targeting than both an always-clarify baseline and a
+semantic-entropy-gated baseline---and, in a controlled oracle where the true convention is supplied on
+clarification, whether the model's answer moves to the target interpretation by executable gold.
+\todo{Phase 2c AU-Probe white-box contrast forthcoming.} \emph{White-box contrast.} A small open white-box
+model probed on CPU positions LPP as the black-box, cross-vendor-deployable method against a
+representation-level alternative; the pre-registered plan permits a reduced item subset if the full run is
+too slow.
 
 %% =====================================================================
 \section{Discussion}
