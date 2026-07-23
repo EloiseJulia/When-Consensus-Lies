@@ -1,7 +1,11 @@
-# Amendment 13 (DRAFT — awaiting owner @EloiseJulia PERSONAL ratification) — regime × domain crossing
+# Amendment 13 (RATIFIED by owner @EloiseJulia 2026-07-23) — regime × domain crossing
 
-> STATUS: **DRAFT. NOT SIGNED. NOT frozen. NO construction or run may start until the owner personally
-> ratifies this specific design.** The Manager NEVER self-signs a frozen-contract change (AGENTS.md).
+> STATUS: **RATIFIED (owner personal sign-off 2026-07-23).** Owner input (verbatim): "按推荐默认批准（每域
+> 4 个 H2 base task、single+heterogeneous-MAD×3 seed、mai-code 构造、pilot 完后再跑）（Recommended）". The
+> recommended §6 scope + §8 defaults are hereby FROZEN. Construction+run per §6; **the RUN starts only AFTER
+> the Phase 2b pilot finishes** (owner-directed, to avoid proxy contention). Additive sidecar ONLY — the
+> frozen 54 confirmatory items / schema / metrics / results are NOT touched. The Manager did NOT self-sign;
+> this records the owner's personal ratification.
 > Motivation: owner asked (2026-07-23) why H1(40)/H2(14) are unbalanced and unpaired. Answer established:
 > H1/H2 is an INTRINSIC semantic property (derivable-in-prompt vs needs-external-convention), so it is
 > necessarily BETWEEN-item; the strict WITHIN-item disambiguator control already exists as k0-vs-k1. BUT the
