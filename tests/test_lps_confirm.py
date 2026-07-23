@@ -33,6 +33,7 @@ from common.schema import Task, Interpretation  # noqa: E402
 import lps_method as lps  # noqa: E402
 import lps_confirm as confirm  # noqa: E402
 import lps_confirm_report as report  # noqa: E402
+import lps_confirm_merge as merge  # noqa: E402
 
 
 class ScriptedClient:
@@ -94,6 +95,29 @@ def test_run_fingerprint_includes_models_and_seeds():
     assert fp["seed_bases"] == [1, 2, 3]        # sorted
     assert fp["method_version"] == lps.METHOD_VERSION
     assert fp["k"] == 5 and fp["tau_s"] == 0.5
+
+
+# ── 2b. Per-model sharding (PARALLEL-safe) ───────────────────────────────────
+
+def test_sanitize_slug():
+    assert confirm.sanitize_slug("gpt-5.6-sol") == "gpt-5_6-sol"
+    assert confirm.sanitize_slug("anthropic/claude-opus-4.8") == \
+        "anthropic_claude-opus-4_8"
+    assert confirm.sanitize_slug("gpt-4o-mini") == "gpt-4o-mini"
+
+
+def test_shard_paths_distinct_per_model():
+    a_cp, a_cache = confirm.shard_checkpoint("gpt-5.6-sol"), \
+        confirm.shard_cache("gpt-5.6-sol")
+    b_cp, b_cache = confirm.shard_checkpoint("gemini-3.1-pro"), \
+        confirm.shard_cache("gemini-3.1-pro")
+    # Two model shards write DISTINCT checkpoint AND cache paths.
+    assert a_cp != b_cp and a_cache != b_cache
+    assert a_cp == ".run_partitions/cp_lps_confirm__gpt-5_6-sol.jsonl"
+    assert a_cache == ".llm_cache_lps_confirm__gpt-5_6-sol"
+    # Shard checkpoints still land under .run_partitions and pass the path guard.
+    confirm._validate_output_paths(a_cp, a_cache)
+    confirm._validate_output_paths(b_cp, b_cache)
 
 
 # ── 3. Path guards ───────────────────────────────────────────────────────────
@@ -162,6 +186,55 @@ def test_resume_fingerprint_mismatch_raises(tmp_path):
         confirm.run(tasks, {}, models=["gpt-4o-mini"], seed_bases=[999],
                     checkpoint_path=cp, cache_dir=cache, k=3,
                     _client_override=client)
+
+
+# ── 4b. Two model-shards → distinct paths + merge dedup ──────────────────────
+
+def _run_shard(tmp_path, model, seed_bases, logit_conf=0.5):
+    dims_json = '[{"dimension": "d", "values": ["a", "b"]}]'
+
+    def fn(role, prompt, seed):
+        return dims_json if "JSON array" in prompt else "I0"
+
+    client = ScriptedClient(fn, logit_conf=logit_conf)
+    cp = str(tmp_path / f"cp_lps_confirm__{confirm.sanitize_slug(model)}.jsonl")
+    cache = str(tmp_path / f".llm_cache_lps_confirm__{confirm.sanitize_slug(model)}")
+    confirm.run([_task("A"), _task("B")], {}, models=[model], seed_bases=seed_bases,
+                checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client)
+    return cp
+
+
+def test_two_shards_distinct_paths_and_merge_dedup(tmp_path):
+    cp1 = _run_shard(tmp_path, "gpt-5.6-sol", [100])
+    cp2 = _run_shard(tmp_path, "gemini-3.1-pro", [100])
+    assert cp1 != cp2                      # concurrent runners → distinct files
+    assert Path(cp1).exists() and Path(cp2).exists()
+
+    merged = merge.merge_records([cp1, cp2])
+    # 2 items × 2 models × 1 seed = 4 distinct cells; nothing to dedup.
+    assert len(merged["records"]) == 4
+    assert merged["n_dup"] == 0
+    assert set(merged["per_model"]) == {"gpt-5.6-sol", "gemini-3.1-pro"}
+
+    # Re-merging with a DUPLICATED shard path collapses the repeats (dedup by
+    # task_id×model×seed×method_version), never double-counts.
+    merged_dup = merge.merge_records([cp1, cp2, cp1])
+    assert len(merged_dup["records"]) == 4
+    assert merged_dup["n_dup"] == 2        # the 2 records of cp1 seen twice
+    assert merged_dup["n_conflict"] == 0
+
+
+def test_merge_glob_and_write(tmp_path):
+    _run_shard(tmp_path, "gpt-5.6-sol", [100])
+    _run_shard(tmp_path, "gemini-3.1-pro", [100])
+    paths = merge.iter_shard_paths(str(tmp_path / "cp_lps_confirm__*.jsonl"))
+    assert len(paths) == 2
+    merged = merge.merge_records(paths)
+    out = str(tmp_path / "cp_lps_confirm_merged.jsonl")
+    merge.write_merged(merged["records"], out)
+    # Round-trip: the report can load the merged checkpoint (header skipped).
+    reloaded = report.load_records(out)
+    assert len(reloaded) == 4
 
 
 # ── 5. Report computations on synthetic strata ───────────────────────────────

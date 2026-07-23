@@ -389,14 +389,28 @@ def main(argv: Optional[List[str]] = None) -> None:
         description="Study 2 LPS CONFIRMATORY analysis + markdown report."
     )
     parser.add_argument("--checkpoint",
-                        default=".run_partitions/cp_lps_confirm.jsonl")
+                        default=".run_partitions/cp_lps_confirm.jsonl",
+                        help="Single checkpoint to analyse (ignored when --shards "
+                             "is given).")
+    parser.add_argument("--shards", default=None,
+                        help="Glob for per-model shard checkpoints "
+                             "(e.g. '.run_partitions/cp_lps_confirm__*.jsonl'). When "
+                             "set, merges + dedups all shards for the analysis.")
     parser.add_argument("--out", default="files/study2_confirm_results.md")
     args = parser.parse_args(argv)
 
     import registered_run as _rr
-    records = load_records(args.checkpoint)
+    if args.shards:
+        import lps_confirm_merge as _merge
+        merged = _merge.merge_records(_merge.iter_shard_paths(args.shards))
+        records = merged["records"]
+        source = f"{args.shards} ({len(merged['per_shard'])} shards, "
+        source += f"deduped {merged['n_dup']})"
+    else:
+        records = load_records(args.checkpoint)
+        source = args.checkpoint
     if not records:
-        print(f"[Report] No records in {args.checkpoint}.")
+        print(f"[Report] No records in {source}.")
         return
 
     tasks = _rr.load_tasks()
@@ -404,7 +418,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     result = analyze(records, gold_by_id)
 
     n_models = len(result["per_model"])
-    md = render_markdown(result, checkpoint=args.checkpoint, n_models=n_models)
+    md = render_markdown(result, checkpoint=source, n_models=n_models)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

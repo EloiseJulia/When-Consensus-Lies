@@ -40,8 +40,20 @@ This driver BUILDS + DRY-RUNS the apparatus; the full live grid is a SEPARATE
 gated step. Usage:
     python scripts/lps_confirm.py --dry-run                 # enumerate 972 jobs
     RUNNER_LIVE=1 python scripts/lps_confirm.py --max-items 2 \\
-        --models gpt-4o-mini --seed-bases 20260713          # tiny smoke ($0)
+        --models gpt-4o-mini --seeds 20260713               # tiny smoke ($0)
     RUNNER_LIVE=1 python scripts/lps_confirm.py             # FULL grid (gated)
+
+PARALLEL (one runner per model — owner's confirmatory workflow): launch 6
+concurrent processes, each with ``--shard-by-model`` and a single ``--models``
+slug; each writes an INDEPENDENT, independently-resumable shard
+(``cp_lps_confirm__<slug>.jsonl`` + ``.llm_cache_lps_confirm__<slug>``), so a
+crash/hang in one model's runner cannot affect the others:
+    RUNNER_LIVE=1 python scripts/lps_confirm.py --shard-by-model --models gpt-5.6-sol
+    ...                                        --shard-by-model --models gemini-3.1-pro
+    # then merge + report across shards:
+    python scripts/lps_confirm_merge.py
+    python scripts/lps_confirm_report.py --shards '.run_partitions/cp_lps_confirm__*.jsonl' \\
+        --out files/study2_confirm_results.md
 """
 
 from __future__ import annotations
@@ -52,6 +64,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import re
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SCRIPTS_DIR.parent
@@ -84,6 +98,15 @@ CONFIRM_MODELS = [
 CONFIRM_SEED_BASES = [20260713, 20270713, 20280713]
 
 RPM = 30
+
+#: Base names for per-model shards (PARALLEL runners). Concurrent runners — one per
+#: model — write DISTINCT namespaced files so they never touch the same checkpoint or
+#: cache: ``.run_partitions/cp_lps_confirm__<slug>.jsonl`` +
+#: ``.llm_cache_lps_confirm__<slug>``. A crash/hang in one shard cannot corrupt another.
+CHECKPOINT_BASE = ".run_partitions/cp_lps_confirm"
+CACHE_BASE = ".llm_cache_lps_confirm"
+#: Glob for the merge tool to discover every per-model shard checkpoint.
+SHARD_CHECKPOINT_GLOB = ".run_partitions/cp_lps_confirm__*.jsonl"
 
 #: FROZEN operating point (prereg §2). Item flag = (H_ctx-self > τ) ∧ (H_seed ≤ τ_s).
 TAU = 0.0
@@ -134,6 +157,29 @@ def _validate_output_paths(checkpoint_path: str, cache_dir: str) -> None:
             f"Refusing cache dir {cache_dir!r}: collides with another run's cache. "
             "Confirm must use its OWN cache (.llm_cache_lps_confirm)."
         )
+
+
+# ── Per-model sharding (PARALLEL-safe namespaced paths) ──────────────────────
+
+def sanitize_slug(model: str) -> str:
+    """Filesystem-safe token for a model slug (any non ``[A-Za-z0-9_-]`` → ``_``).
+
+    e.g. ``"gpt-5.6-sol"`` → ``"gpt-5_6-sol"``; ``"anthropic/claude-opus-4.8"`` →
+    ``"anthropic_claude-opus-4_8"``. Distinct slugs map to distinct tokens so two
+    concurrent model-runners never collide on a checkpoint or cache path.
+    """
+    return re.sub(r"[^A-Za-z0-9_-]", "_", model.strip())
+
+
+def shard_checkpoint(model: str) -> str:
+    """Per-model checkpoint path: ``.run_partitions/cp_lps_confirm__<slug>.jsonl``."""
+    return f"{CHECKPOINT_BASE}__{sanitize_slug(model)}.jsonl"
+
+
+def shard_cache(model: str) -> str:
+    """Per-model cache dir: ``.llm_cache_lps_confirm__<slug>``."""
+    return f"{CACHE_BASE}__{sanitize_slug(model)}"
+
 
 
 # ── Job enumeration ──────────────────────────────────────────────────────────
@@ -358,9 +404,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--cache-dir", default=CACHE_DIR)
     parser.add_argument("--rpm", type=int, default=RPM)
     parser.add_argument("--models", nargs="+", default=None,
-                        help=f"Override model slugs (default: {CONFIRM_MODELS}).")
-    parser.add_argument("--seed-bases", nargs="+", type=int, default=None,
+                        help=f"Override model slugs (default: {CONFIRM_MODELS}). "
+                             "Pass ONE slug per runner for model-parallel execution.")
+    parser.add_argument("--seeds", "--seed-bases", dest="seed_bases", nargs="+",
+                        type=int, default=None,
                         help=f"Override seed bases (default: {CONFIRM_SEED_BASES}).")
+    parser.add_argument("--shard-by-model", action="store_true",
+                        help="Write PER-MODEL namespaced checkpoint+cache "
+                             "(cp_lps_confirm__<slug>.jsonl / "
+                             ".llm_cache_lps_confirm__<slug>) so concurrent runners — "
+                             "one per model — never touch the same file. Ignores "
+                             "--checkpoint/--cache-dir.")
     parser.add_argument("--items", nargs="+", default=None,
                         help="Restrict to specific item IDs (smoke).")
     parser.add_argument("--max-items", type=int, default=None,
@@ -386,7 +440,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"  seed_bases: {seed_bases}")
     print(f"  operating point (FROZEN): tau={TAU}  tau_s={TAU_S}")
     print(f"  jobs = {len(tasks)} × {len(models)} × {len(seed_bases)} = {n_jobs}")
-    print(f"  checkpoint={args.checkpoint}  cache={args.cache_dir}")
+    if args.shard_by_model:
+        print("  shard-by-model: ON — per-model namespaced checkpoint+cache "
+              "(PARALLEL-safe)")
+        for m in models:
+            print(f"    {m:<20} → {shard_checkpoint(m)}  |  {shard_cache(m)}")
+    else:
+        print(f"  checkpoint={args.checkpoint}  cache={args.cache_dir}")
     print("=" * 76)
 
     if args.dry_run:
@@ -394,6 +454,10 @@ def main(argv: Optional[List[str]] = None) -> None:
                   k=args.k, dry_run=True)
         print(f"\n[Confirm] Dry-run: {res['total']} jobs "
               f"({len(tasks)} items × {len(models)} models × {len(seed_bases)} seeds).")
+        if args.shard_by_model:
+            per_shard = len(tasks) * len(seed_bases)
+            print(f"[Confirm] Per-model shard: {per_shard} jobs each "
+                  f"({len(models)} concurrent runners).")
         return
 
     if not pilot1._live_ok():
@@ -405,8 +469,37 @@ def main(argv: Optional[List[str]] = None) -> None:
               "http://127.0.0.1:8313). Start the proxy before running live.")
         sys.exit(0)
 
+    cfg = load_config()
+
+    # ── Per-model shards: each model → its OWN checkpoint+cache (parallel-safe). ─
+    # A single process can drive several shards sequentially; the intended parallel
+    # workflow launches ONE process per model (each with --models <slug>), so each
+    # writes an INDEPENDENT, independently-resumable shard.
+    if args.shard_by_model:
+        totals = {"completed": 0, "skipped": 0, "total": 0}
+        for m in models:
+            cp = shard_checkpoint(m)
+            cache = shard_cache(m)
+            r = run(
+                tasks, cfg,
+                models=[m], seed_bases=seed_bases,
+                checkpoint_path=cp, cache_dir=cache,
+                rpm=args.rpm, k=args.k, budget_usd=args.budget_usd,
+            )
+            print(f"[Confirm] shard {m}: completed={r['completed']} "
+                  f"skipped={r['skipped']} → {r['checkpoint']}")
+            for key in totals:
+                totals[key] += r[key]
+        print(f"\n[Confirm] All shards: completed={totals['completed']} "
+              f"skipped={totals['skipped']} total={totals['total']}")
+        print("[Confirm] Merge + analyse with: python scripts/lps_confirm_merge.py "
+              "&& python scripts/lps_confirm_report.py "
+              "--shards '.run_partitions/cp_lps_confirm__*.jsonl' "
+              "--out files/study2_confirm_results.md")
+        return
+
     result = run(
-        tasks, load_config(),
+        tasks, cfg,
         models=models, seed_bases=seed_bases,
         checkpoint_path=args.checkpoint, cache_dir=args.cache_dir,
         rpm=args.rpm, k=args.k, budget_usd=args.budget_usd,

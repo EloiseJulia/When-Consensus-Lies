@@ -13,6 +13,7 @@ default_check_table.txt
 .llm_cache_lps_pilot2/
 # Study 2 LPS CONFIRMATORY live-run artifacts (gated; never committed)
 .llm_cache_lps_confirm/
+.llm_cache_lps_confirm__*/
 .run_partitions/
 lps_pilot_run.log
 lps_pilot2_run.log
