@@ -41,6 +41,16 @@ import lps_confirm as confirm  # noqa: E402
 DEFAULT_SHARDS_GLOB = confirm.SHARD_CHECKPOINT_GLOB
 DEFAULT_MERGED_OUT = ".run_partitions/cp_lps_confirm_merged.jsonl"
 
+#: Fingerprint keys that MUST agree across shards for the merge to be valid. The
+#: ``models`` key is intentionally EXCLUDED — each per-model shard legitimately
+#: carries its own single-model list; every OTHER knob (method version, k, τ, τ_s,
+#: seed roster) must be identical or the shards measured incompatible quantities.
+_SHARED_FP_KEYS = ("method_version", "k", "tau", "tau_s", "seed_bases")
+
+
+class MergeError(RuntimeError):
+    """Raised when shards are incompatible or genuinely conflict (fail loudly)."""
+
 
 def _record_method_version(rec: Dict[str, Any]) -> Optional[str]:
     fp = rec.get("_fingerprint") or {}
@@ -58,15 +68,85 @@ def iter_shard_paths(shards_glob: str) -> List[str]:
     return sorted(_glob.glob(shards_glob))
 
 
-def merge_records(paths: List[str]) -> Dict[str, Any]:
-    """Load + dedup records across shard files.
+def _read_header_fingerprint(path: Path) -> Optional[Dict[str, Any]]:
+    """Return the ``_fingerprint`` from a shard's header line, if present."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                return None
+            if rec.get("_header"):
+                return rec.get("_fingerprint")
+            # First non-header line: fall back to its per-record fingerprint.
+            return rec.get("_fingerprint")
+    except OSError:
+        return None
+    return None
 
-    Returns ``{records, n_read, n_dup, n_conflict, per_shard, per_model}``:
-      * ``records``  — deduped record list (header lines dropped).
-      * ``n_read``   — total non-header records read.
-      * ``n_dup``    — duplicate cells collapsed (same key, first kept).
-      * ``n_conflict`` — duplicates whose payload differed from the kept one.
+
+def _shared_fp(fp: Optional[Dict[str, Any]]) -> Optional[Tuple[Any, ...]]:
+    """The cross-shard-compatible projection of a fingerprint (drops ``models``)."""
+    if not fp:
+        return None
+    return tuple(_hashable(fp.get(k)) for k in _SHARED_FP_KEYS)
+
+
+def _hashable(v: Any) -> Any:
+    return tuple(v) if isinstance(v, list) else v
+
+
+def _validate_shard_fingerprints(paths: List[str]) -> Optional[Dict[str, Any]]:
+    """ABORT (MergeError) if shards carry incompatible run-fingerprints.
+
+    Compares every shard's fingerprint MINUS the per-shard ``models`` field. A
+    differing method version / k / τ / τ_s / seed roster means the shards measured
+    incompatible quantities and MUST NOT be pooled.
     """
+    ref_shared: Optional[Tuple[Any, ...]] = None
+    ref_fp: Optional[Dict[str, Any]] = None
+    ref_path: Optional[str] = None
+    for path in paths:
+        fp = _read_header_fingerprint(Path(path))
+        shared = _shared_fp(fp)
+        if shared is None:
+            continue
+        if ref_shared is None:
+            ref_shared, ref_fp, ref_path = shared, fp, path
+        elif shared != ref_shared:
+            raise MergeError(
+                "Incompatible shard fingerprints — refusing to merge.\n"
+                f"  {ref_path}: "
+                f"{ {k: ref_fp.get(k) for k in _SHARED_FP_KEYS} }\n"
+                f"  {path}: "
+                f"{ {k: (fp or {}).get(k) for k in _SHARED_FP_KEYS} }\n"
+                "Shards must share method_version/k/tau/tau_s/seed_bases."
+            )
+    return ref_fp
+
+
+def merge_records(paths: List[str], *, strict: bool = True) -> Dict[str, Any]:
+    """Load + dedup records across shard files (validated, fail-loud).
+
+    (a) ABORTS if shards carry incompatible run-fingerprints (different
+        method_version/k/τ/τ_s/seed roster).
+    (b) DEDUPS by ``(task_id, model, seed_base, method_version)``.
+    (c) ABORTS on a genuine value CONFLICT (same key, different payload) rather
+        than silently keeping the first — a fixed method must be reproducible.
+
+    Returns ``{records, n_read, n_dup, n_conflict, per_shard, per_model,
+    shared_fingerprint}``. ``strict=False`` downgrades (a)/(c) to counts (for
+    diagnostics/tests only).
+    """
+    shared_fp = None
+    if strict:
+        shared_fp = _validate_shard_fingerprints(paths)
+    else:
+        shared_fp = _read_header_fingerprint(Path(paths[0])) if paths else None
+
     seen: Dict[Tuple[Any, Any, Any, Any], Dict[str, Any]] = {}
     n_read = 0
     n_dup = 0
@@ -94,6 +174,17 @@ def merge_records(paths: List[str]) -> Dict[str, Any]:
                 n_dup += 1
                 if seen[key] != rec:
                     n_conflict += 1
+                    if strict:
+                        raise MergeError(
+                            "Conflicting duplicate records for the same cell — "
+                            "refusing to merge.\n"
+                            f"  key (task_id, model, seed_base, method_version) = "
+                            f"{key}\n"
+                            f"  in shard: {path}\n"
+                            "Two shards recorded DIFFERENT results for the same "
+                            "cell; a fixed method must be reproducible. Investigate "
+                            "before pooling."
+                        )
                 continue
             seen[key] = rec
         per_shard[path] = count
@@ -109,6 +200,7 @@ def merge_records(paths: List[str]) -> Dict[str, Any]:
         "n_conflict": n_conflict,
         "per_shard": per_shard,
         "per_model": per_model,
+        "shared_fingerprint": shared_fp,
     }
 
 
@@ -144,7 +236,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not paths:
         print(f"[Merge] No shards match {args.shards!r}.")
         return
-    merged = merge_records(paths)
+    try:
+        merged = merge_records(paths)
+    except MergeError as exc:
+        print(f"[Merge] ABORT — {exc}", file=sys.stderr)
+        raise SystemExit(2)
     write_merged(merged["records"], args.out)
     print(f"[Merge] Shards: {len(paths)}")
     for path, n in merged["per_shard"].items():

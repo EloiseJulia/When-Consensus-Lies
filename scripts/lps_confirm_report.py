@@ -115,16 +115,75 @@ def _is_flagged_frozen(record: Dict[str, Any], *, tau: float = TAU,
     return bool(hctx > tau and hseed <= tau_s)
 
 
-# ── Metrics ──────────────────────────────────────────────────────────────────
+# ── Per-item aggregation + cluster (task_id) bootstrap ───────────────────────
 
-def _auroc_ci(pairs: List[Tuple[float, int]], *, n_boot: int = 2000,
-              seed: int = 42) -> Tuple[Optional[float], Optional[float]]:
-    """Item-level bootstrap 95% CI for AUROC (resample the (score,label) pairs).
+def _mean(xs: List[float]) -> Optional[float]:
+    return (sum(xs) / len(xs)) if xs else None
 
-    A mean-of-samples CI (``registered_run._bootstrap_ci``) is NOT valid for AUROC,
-    so we resample the paired items with replacement and recompute the tie-aware
-    AUROC each time (deterministic ``random.Random``). Returns (None, None) if
-    either class is empty in the base sample.
+
+def aggregate_by_item(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse a group's rows (item×model×seed) to ONE decision PER task_id.
+
+    PER-ITEM AGGREGATION RULE (stated in the report): within the group (a single
+    model's rows, or — pooled — every model's rows for the item), an item's
+      * per-signal score = MEAN of that signal across all its rows (rows whose
+        signal is None, e.g. token-logprob on a no-logprob model, are dropped from
+        the mean; if none remain the item's signal is None/N/A);
+      * ``mean_H_ctx`` / ``mean_H_seed`` = mean of H_ctx-self / H_seed across rows;
+      * flag decision = the FROZEN operating point on the item's MEAN signals
+        (``mean_H_ctx > τ ∧ mean_H_seed ≤ τ_s``);
+      * danger = ``mean_H_seed ≤ τ_s ∧ mean_H_ctx > 0``;
+      * localization hit = majority of the item's rows match the deleted axis
+        (mean axis_match ≥ 0.5).
+    This yields exactly one point per PRE-REGISTERED item, so AUROC / confusion /
+    danger are computed out of the 54 items (per model) or their pooled per-item
+    aggregation — NEVER out of the up-to-972 run cells.
+    """
+    by_task: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        if r.get("stratum") is None:
+            continue
+        by_task[r.get("task_id")].append(r)
+
+    items: List[Dict[str, Any]] = []
+    for tid, rs in by_task.items():
+        scores: Dict[str, Optional[float]] = {}
+        for sig, _lbl in SIGNAL_ORDER:
+            vals = [s for s in (_signal_scores(r).get(sig) for r in rs)
+                    if s is not None]
+            scores[sig] = _mean(vals)
+        mean_hctx = _mean([r["H_ctx_max"] for r in rs
+                           if isinstance(r.get("H_ctx_max"), (int, float))])
+        mean_hseed = _mean([r["H_seed"] for r in rs
+                            if isinstance(r.get("H_seed"), (int, float))])
+        axis_hit = _mean([1.0 if r.get("axis_match") else 0.0 for r in rs])
+        flagged = (mean_hctx is not None and mean_hseed is not None
+                   and mean_hctx > TAU and mean_hseed <= TAU_S)
+        danger = (mean_hctx is not None and mean_hseed is not None
+                  and mean_hseed <= TAU_S and mean_hctx > 0.0)
+        items.append({
+            "task_id": tid,
+            "stratum": rs[0]["stratum"],
+            "scores": scores,
+            "mean_H_ctx": mean_hctx,
+            "mean_H_seed": mean_hseed,
+            "is_flagged": bool(flagged),
+            "is_danger": bool(danger),
+            "axis_match": bool(axis_hit is not None and axis_hit >= 0.5),
+            "n_rows": len(rs),
+        })
+    return items
+
+
+def _cluster_auroc_ci(pairs: List[Tuple[float, int]], *, n_boot: int = 2000,
+                      seed: int = 42) -> Tuple[Optional[float], Optional[float]]:
+    """Cluster (by task_id) bootstrap 95% CI for AUROC.
+
+    ``pairs`` carries exactly one (score, label) per ITEM (post per-item
+    aggregation), so resampling the pairs with replacement IS a cluster bootstrap
+    over the 54 pre-registered items (keeping each sampled item's aggregated
+    decision). A mean-of-samples CI is not valid for AUROC, so we recompute the
+    tie-aware AUROC on each resample. Returns (None, None) if AUROC is undefined.
     """
     if _auroc(pairs) is None:
         return (None, None)
@@ -153,26 +212,27 @@ def _mean_ci(binary: List[float]) -> Tuple[Optional[float], Optional[float]]:
     return lo, hi
 
 
-def _auroc_for_signal(rows: List[Dict[str, Any]], signal: str
+def _auroc_for_signal(items: List[Dict[str, Any]], signal: str
                       ) -> Dict[str, Any]:
-    """AUROC of one signal for AMB+ (1) vs AMB− (0), with item-level bootstrap CI.
+    """AUROC of one signal for AMB+ (1) vs AMB− (0) over PER-ITEM aggregates.
 
-    Items whose signal is None (e.g. token-logprob on a model without logprobs) are
-    EXCLUDED from that signal's AUROC and counted in ``n_na``.
+    ``items`` are the per-item aggregates (one per task_id). Items whose aggregated
+    signal is None (e.g. token-logprob on a model without logprobs) are EXCLUDED and
+    counted in ``n_na``. The CI is a cluster (task_id) bootstrap.
     """
     pairs: List[Tuple[float, int]] = []
     n_na = 0
-    for r in rows:
-        stratum = r.get("stratum")
+    for it in items:
+        stratum = it.get("stratum")
         if stratum not in (AMB_POS, AMB_NEG):
             continue
-        score = _signal_scores(r).get(signal)
+        score = it["scores"].get(signal)
         if score is None:
             n_na += 1
             continue
         pairs.append((score, 1 if stratum == AMB_POS else 0))
     auroc = _auroc(pairs)
-    ci_lo, ci_hi = _auroc_ci(pairs) if auroc is not None else (None, None)
+    ci_lo, ci_hi = _cluster_auroc_ci(pairs) if auroc is not None else (None, None)
     return {
         "auroc": auroc,
         "ci_lo": ci_lo,
@@ -184,41 +244,41 @@ def _auroc_for_signal(rows: List[Dict[str, Any]], signal: str
 
 
 def analyze_group(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Full detection read for one group of records (a single model, or pooled)."""
-    joined = [r for r in rows if r.get("stratum") is not None]
-    amb_pos = [r for r in joined if r["stratum"] == AMB_POS]
-    amb_neg = [r for r in joined if r["stratum"] == AMB_NEG]
-    non_disc = [r for r in joined if r["stratum"] == NON_DISC]
+    """Full detection read for one group of records (a single model, or pooled).
 
-    # ── AUROC per signal (detector + baselines) ──────────────────────────────
-    aurocs = {sig: _auroc_for_signal(joined, sig) for sig, _label in SIGNAL_ORDER}
+    All statistics are computed over PER-ITEM aggregates (``aggregate_by_item``) so
+    counts are out of the 54 pre-registered items, and CIs cluster-bootstrap by
+    task_id — NEVER treating the up-to-972 run cells as independent items.
+    """
+    items = aggregate_by_item(rows)
+    amb_pos = [it for it in items if it["stratum"] == AMB_POS]
+    amb_neg = [it for it in items if it["stratum"] == AMB_NEG]
+    non_disc = [it for it in items if it["stratum"] == NON_DISC]
 
-    # ── Item-flag confusion at the FROZEN operating point ────────────────────
-    tp = sum(1 for r in amb_pos if _is_flagged_frozen(r))
+    # ── AUROC per signal (detector + baselines), cluster-bootstrap CIs ────────
+    aurocs = {sig: _auroc_for_signal(items, sig) for sig, _label in SIGNAL_ORDER}
+
+    # ── Item-flag confusion at the FROZEN operating point (per-item decision) ─
+    tp = sum(1 for it in amb_pos if it["is_flagged"])
     fn = len(amb_pos) - tp
-    fp = sum(1 for r in amb_neg if _is_flagged_frozen(r))
+    fp = sum(1 for it in amb_neg if it["is_flagged"])
     tn = len(amb_neg) - fp
     precision = (tp / (tp + fp)) if (tp + fp) else None
     recall = (tp / (tp + fn)) if (tp + fn) else None
     k0_fp_rate = (fp / len(amb_neg)) if amb_neg else None
 
-    # ── Danger-quadrant mass: AMB+ ∧ H_seed ≤ τ_s ∧ H_ctx-self > 0 ───────────
-    def _danger(r: Dict[str, Any]) -> bool:
-        hs = r.get("H_seed")
-        hc = r.get("H_ctx_max")
-        return (isinstance(hs, (int, float)) and isinstance(hc, (int, float))
-                and hs <= TAU_S and hc > 0.0)
-
-    danger_flags = [1.0 if _danger(r) else 0.0 for r in amb_pos]
+    # ── Danger-quadrant mass: AMB+ items whose aggregate is in the quadrant ──
+    danger_flags = [1.0 if it["is_danger"] else 0.0 for it in amb_pos]
     n_danger = int(sum(danger_flags))
     danger_lo, danger_hi = _mean_ci(danger_flags)
 
-    # ── Localization (SECONDARY): argmax dim == true deleted axis, on AMB+ ────
-    loc_flags = [1.0 if r.get("axis_match") else 0.0 for r in amb_pos]
+    # ── Localization (SECONDARY): per-item majority axis match, on AMB+ ───────
+    loc_flags = [1.0 if it["axis_match"] else 0.0 for it in amb_pos]
     loc_rate = (sum(loc_flags) / len(loc_flags)) if loc_flags else None
 
     return {
-        "n_records": len(joined),
+        "n_items": len(items),
+        "n_records": sum(it["n_rows"] for it in items),
         "strata_counts": {
             AMB_POS: len(amb_pos), NON_DISC: len(non_disc), AMB_NEG: len(amb_neg),
         },
@@ -324,11 +384,21 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
                  "(Law 6).")
     lines.append("")
     lines.append(f"- Checkpoint: `{checkpoint}`")
-    lines.append(f"- Records analysed: {result['n_records']} "
+    lines.append(f"- Records analysed: {result['n_records']} run cells "
+                 f"aggregated to {pooled['n_items']} pre-registered items "
                  f"across {n_models} model(s)")
     lines.append(f"- FROZEN operating point: τ = {TAU}, τ_s = {TAU_S} bits (prereg §2)")
     lines.append("- Gold-ambiguity is executable + detector-independent "
                  "(`lps_gold`); used for EVALUATION only (never in a prompt).")
+    lines.append("- **Per-item aggregation (unit of analysis = the item):** each "
+                 "item's signals are the MEAN across its model×seed run cells "
+                 "(N/A cells dropped); its flag/danger decision applies the frozen "
+                 "operating point to those per-item means; localization = per-item "
+                 "majority axis match. All counts are out of the pre-registered "
+                 "items (NOT the run cells).")
+    lines.append("- **CIs cluster-bootstrap by `task_id`** (resample items with "
+                 "replacement): AUROC via item-cluster resampling; danger-mass / "
+                 "precision-recall via `registered_run._bootstrap_ci` over items.")
     lines.append("")
 
     lines.append("## 1. Pre-registered PRIMARY read (pooled)")
@@ -351,7 +421,8 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
 
     lines.append("## 2. AUROC vs gold-ambiguity — detector + baseline panel")
     lines.append("")
-    lines.append("Higher ⇒ more ambiguous. `[lo, hi]` = item-level bootstrap 95% CI. "
+    lines.append("Higher ⇒ more ambiguous. `[lo, hi]` = cluster (task_id) "
+                 "bootstrap 95% CI over items. "
                  "`N/A×n` = items excluded because the signal is unavailable "
                  "(e.g. token-logprob on a non-OpenAI slug).")
     lines.append("")
@@ -374,8 +445,11 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
                  "logprobs (Anthropic / Google slugs); shown as `N/A` where so.")
     lines.append("- Localization is a SECONDARY metric (known-weak; a recall lever, "
                  "not a headline) — reported honestly.")
-    lines.append("- AUROC CIs resample items with replacement; danger-mass / "
-                 "precision-recall CIs reuse `registered_run._bootstrap_ci`.")
+    lines.append("- AUROC CIs cluster-bootstrap by `task_id` (resample the items, "
+                 "keeping each item's aggregated decision); danger-mass / "
+                 "precision-recall CIs reuse `registered_run._bootstrap_ci` over "
+                 "items. Run cells (item×model×seed) are NEVER treated as "
+                 "independent items.")
     lines.append("- Metric definitions are FROZEN (prereg); never changed "
                  "post-freeze (Law 7).")
     lines.append("")
@@ -402,7 +476,21 @@ def main(argv: Optional[List[str]] = None) -> None:
     import registered_run as _rr
     if args.shards:
         import lps_confirm_merge as _merge
-        merged = _merge.merge_records(_merge.iter_shard_paths(args.shards))
+        shard_paths = _merge.iter_shard_paths(args.shards)
+        if not shard_paths:
+            print(f"[Report] No shards match {args.shards!r}.")
+            return
+        try:
+            # strict=True: refuse to report if shards are fingerprint-incompatible
+            # or carry genuine value conflicts for the same cell (Law 4 / Law 7).
+            merged = _merge.merge_records(shard_paths)
+        except _merge.MergeError as exc:
+            print(f"[Report] ABORT — cannot pool shards: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+        if merged["n_conflict"] > 0:
+            print(f"[Report] ABORT — {merged['n_conflict']} shard conflict(s); "
+                  "refusing to report.", file=sys.stderr)
+            raise SystemExit(2)
         records = merged["records"]
         source = f"{args.shards} ({len(merged['per_shard'])} shards, "
         source += f"deduped {merged['n_dup']})"

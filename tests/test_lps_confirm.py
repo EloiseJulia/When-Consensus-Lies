@@ -237,6 +237,74 @@ def test_merge_glob_and_write(tmp_path):
     assert len(reloaded) == 4
 
 
+# ── 4b. Merge fail-loud validation (BLOCKER-2 fixes) ─────────────────────────
+
+def _write_shard(path, fingerprint, records):
+    """Write a shard file: header fingerprint line + one JSON record per line."""
+    import json as _json
+    lines = [_json.dumps({"_header": True, "_fingerprint": fingerprint})]
+    for r in records:
+        rr = dict(r)
+        rr["_fingerprint"] = fingerprint
+        lines.append(_json.dumps(rr))
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def _fp(model, *, k=5, tau=0.0, tau_s=0.5, seed_bases=(100,),
+        method_version="lps-test-v1"):
+    return {"method_version": method_version, "k": k, "tau": tau, "tau_s": tau_s,
+            "models": [model], "seed_bases": list(seed_bases)}
+
+
+def _cell(tid, model, seed_base, h_ctx=1.0, h_seed=0.2):
+    return {"task_id": tid, "model": model, "seed_base": seed_base,
+            "H_ctx_max": h_ctx, "H_seed": h_seed}
+
+
+def test_merge_aborts_on_incompatible_fingerprints(tmp_path):
+    # Two shards differing ONLY on the shared knob k → incompatible → abort.
+    s1 = _write_shard(tmp_path / "cp_lps_confirm__a.jsonl", _fp("A", k=5),
+                      [_cell("T1", "A", 100)])
+    s2 = _write_shard(tmp_path / "cp_lps_confirm__b.jsonl", _fp("B", k=3),
+                      [_cell("T1", "B", 100)])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([s1, s2])
+
+
+def test_merge_compatible_fingerprints_ok_despite_model_diff(tmp_path):
+    # SAME shared fingerprint; only the per-shard `models` field differs → OK.
+    s1 = _write_shard(tmp_path / "cp_lps_confirm__a.jsonl", _fp("A"),
+                      [_cell("T1", "A", 100)])
+    s2 = _write_shard(tmp_path / "cp_lps_confirm__b.jsonl", _fp("B"),
+                      [_cell("T1", "B", 100)])
+    merged = merge.merge_records([s1, s2])
+    assert len(merged["records"]) == 2
+    assert merged["n_conflict"] == 0
+
+
+def test_merge_aborts_on_genuine_conflict(tmp_path):
+    # Same dedup key (task_id, model, seed_base, method_version) but DIFFERENT
+    # payload across shards → genuine conflict → abort (never silently keep first).
+    s1 = _write_shard(tmp_path / "cp_lps_confirm__a.jsonl", _fp("A"),
+                      [_cell("T1", "A", 100, h_ctx=1.0)])
+    s2 = _write_shard(tmp_path / "cp_lps_confirm__a2.jsonl", _fp("A"),
+                      [_cell("T1", "A", 100, h_ctx=0.0)])
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([s1, s2])
+
+
+def test_merge_identical_duplicate_is_not_a_conflict(tmp_path):
+    # Identical payload for the same key across shards → dedup, NOT a conflict.
+    rec = _cell("T1", "A", 100, h_ctx=1.0)
+    s1 = _write_shard(tmp_path / "cp_lps_confirm__a.jsonl", _fp("A"), [rec])
+    s2 = _write_shard(tmp_path / "cp_lps_confirm__a2.jsonl", _fp("A"), [rec])
+    merged = merge.merge_records([s1, s2])
+    assert len(merged["records"]) == 1
+    assert merged["n_dup"] == 1
+    assert merged["n_conflict"] == 0
+
+
 # ── 5. Report computations on synthetic strata ───────────────────────────────
 
 def _rec(tid, model, stratum, h_ctx, h_seed, *, token_unc=None,
@@ -280,6 +348,84 @@ def test_report_perfect_separation():
     assert a["danger_quadrant"]["n_danger"] == 4
     # Localization (secondary): 2/4 axis matches.
     assert a["localization_AMB_pos_hit_rate"] == pytest.approx(0.5)
+
+
+def _multimodel_rows():
+    """6 items (3 AMB+, 3 AMB−), EACH appearing across 3 models × 2 seeds = 6 rows.
+
+    Per-item H_ctx is NOISY across rows but its MEAN separates the strata, so a
+    correct per-item aggregation must collapse the 36 run cells to 6 item points.
+    """
+    rows = []
+    models = ["m1", "m2", "m3"]
+    seeds = [100, 200]
+    for i in range(3):  # AMB+ items: mean H_ctx high, low H_seed (danger)
+        for m in models:
+            for s in seeds:
+                hc = 1.0 if (s == 100) else 0.6   # noisy but mean > 0
+                rows.append({
+                    "task_id": f"P{i}", "model": m, "seed_base": s,
+                    "stratum": report.AMB_POS, "H_ctx_max": hc, "H_seed": 0.2,
+                    "axis_match": True, "seed_labels": ["A", "B", "C"],
+                    "surfaced_dims": [{"dimension": "d", "values": ["a", "b"]}],
+                    "baselines": {"token_uncertainty": 0.8},
+                })
+    for i in range(3):  # AMB- items: H_ctx zero
+        for m in models:
+            for s in seeds:
+                rows.append({
+                    "task_id": f"N{i}", "model": m, "seed_base": s,
+                    "stratum": report.AMB_NEG, "H_ctx_max": 0.0, "H_seed": 0.2,
+                    "axis_match": False, "seed_labels": ["A", "A", "A"],
+                    "surfaced_dims": [],
+                    "baselines": {"token_uncertainty": 0.1},
+                })
+    return rows
+
+
+def test_report_cluster_bootstrap_counts_items_not_run_cells():
+    rows = _multimodel_rows()
+    assert len(rows) == 36                       # 6 items × 3 models × 2 seeds
+    a = report.analyze_group(rows)
+    # The unit of analysis is the ITEM: 6 aggregates, NOT 36 run cells.
+    assert a["n_items"] == 6
+    assert a["n_records"] == 36
+    hctx = a["aurocs"]["H_ctx_self"]
+    # AUROC computed on per-item points → 3 pos + 3 neg = 6 (never 18+18).
+    assert hctx["n_pos"] == 3 and hctx["n_neg"] == 3
+    assert hctx["auroc"] == pytest.approx(1.0)
+    # Confusion counts are out of the 6 pre-registered items, not 36 rows.
+    c = a["flag_confusion"]
+    assert c["TP"] + c["FP"] + c["FN"] + c["TN"] == 6
+    assert c["TP"] == 3 and c["FP"] == 0
+    # Danger mass over the 3 AMB+ items (each mean-H_ctx > 0, mean-H_seed ≤ τ_s).
+    assert a["danger_quadrant"]["n_AMB_pos"] == 3
+    assert a["danger_quadrant"]["mass"] == pytest.approx(1.0)
+    # Cluster CI is item-clustered: perfect separation → CI hugs 1.0.
+    assert hctx["ci_lo"] is not None and hctx["ci_lo"] >= 0.9
+    assert hctx["ci_hi"] == pytest.approx(1.0)
+
+
+def test_report_per_item_mean_collapses_noisy_rows():
+    # An AMB+ item with MIXED rows (some H_ctx=0) whose MEAN is still > 0 must be
+    # a SINGLE flagged item, not counted once per row.
+    rows = [
+        {"task_id": "P0", "model": "m1", "seed_base": 100, "stratum": report.AMB_POS,
+         "H_ctx_max": 1.0, "H_seed": 0.2, "axis_match": True,
+         "seed_labels": ["A", "B"], "surfaced_dims": [], "baselines": {}},
+        {"task_id": "P0", "model": "m2", "seed_base": 100, "stratum": report.AMB_POS,
+         "H_ctx_max": 0.0, "H_seed": 0.2, "axis_match": False,
+         "seed_labels": ["A", "A"], "surfaced_dims": [], "baselines": {}},
+        {"task_id": "N0", "model": "m1", "seed_base": 100, "stratum": report.AMB_NEG,
+         "H_ctx_max": 0.0, "H_seed": 0.2, "axis_match": False,
+         "seed_labels": ["A", "A"], "surfaced_dims": [], "baselines": {}},
+    ]
+    a = report.analyze_group(rows)
+    assert a["n_items"] == 2                      # P0 (2 rows) collapses to 1 item
+    c = a["flag_confusion"]
+    # P0 mean H_ctx = 0.5 > 0 → flagged once; totals out of 2 items.
+    assert c["TP"] == 1 and c["FN"] == 0
+    assert c["TP"] + c["FP"] + c["FN"] + c["TN"] == 2
 
 
 def test_report_token_logprob_na_excluded():
