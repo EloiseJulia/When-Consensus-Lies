@@ -63,7 +63,7 @@ shared information boundary, nominally diverse agents form an \emph{interpretive
 stops being evidence of correctness. Building on this diagnosis, we contribute a black-box, cross-vendor
 detector (Study~2) that flags precisely this condition at inference time---without ground truth---by testing
 whether a model's answer is stable when a \emph{self-surfaced} latent premise is counterfactually pinned; on
-executable gold-ambiguity it separates ambiguous from confident prompts at pooled AUROC $0.895$, exactly
+executable gold-ambiguity it separates ambiguous from unambiguous prompts at pooled AUROC $0.895$, exactly
 where the same-prompt semantic-entropy baseline (AUROC $0.581$) is blind. We derive implications for multi-model interfaces: they should surface
 \emph{evidential dependence}---whether answers rest on the same, possibly incomplete, input---rather than
 displaying agent count.
@@ -195,7 +195,7 @@ is framed as design implications and a proposed concept; its evaluation is futur
 \item \textbf{A black-box detector (Study~2).} A constructive counterpart to the diagnosis: a cross-vendor,
 inference-only detector that \emph{explicitly surfaces} a prompt's latent premises and flags
 \emph{confident latent-premise ambiguity}---the exact blind spot of same-prompt resampling. On an executable
-gold-ambiguity label it separates ambiguous from confident prompts at pooled AUROC $0.895$ versus $0.581$
+gold-ambiguity label it separates ambiguous from unambiguous prompts at pooled AUROC $0.895$ versus $0.581$
 for a semantic-entropy baseline. We report this honestly as a refinement, not a panacea: a strong
 requirements-probing baseline already reaches AUROC $0.810$, so the counterfactual-pinning increment is real
 but modest ($+0.085$), and localization of the responsible premise remains weak.
@@ -818,18 +818,19 @@ weak tier), $\ge 3$ seeds, the baseline set, and the operating point. On provena
 was launched under a \emph{conditional pre-authorization} from the owner that delegated the go/no-go
 decision, against a pre-committed decision rule, once a validation pilot cleared the strong-signal bar---not
 a self-signed approval, and not a claim that the owner ratified each metric line by line. The detector was
-implemented by one model family and the numbers below were independently reproduced under a cross-family
-audit.
+implemented by one model family; the detector method and the validation pilot were audited by an independent
+cross-family model (anti-leakage and non-circularity verified, and the pilot results reproduced), after which
+the confirmatory run followed the frozen pre-registration.
 
 \subsection{Detection results}
 \label{sec:study2-results}
-Across all six frontier models---three families (OpenAI, Anthropic, Google) at two capability
+Across all six tested models---three families (OpenAI, Anthropic, Google) at two capability
 tiers---\Hctx{} classifies executable gold-ambiguity far above chance and far above the semantic-entropy
 baseline (Table~\ref{tab:lps-auroc}). Per model, \Hctx{} lands in $0.856$--$0.887$ while same-prompt
 semantic entropy \Hseed{} sits near chance at $0.551$--$0.606$. Pooled, the detector reaches
 \textbf{AUROC $0.895$} $[0.815, 0.966]$ against \textbf{$0.581$} $[0.484, 0.675]$ for semantic entropy, a
 \textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$). This is the crux of the SOTA-blind
-claim: resampling the same prompt cannot separate ambiguous from confident prompts here, because the models
+claim: resampling the same prompt cannot separate ambiguous from unambiguous prompts here, because the models
 are confidently self-consistent on exactly the items whose answers hinge on an unstated premise.
 
 The danger quadrant makes the same point at the item level. \textbf{$0.758$ (25 of 33) of $\mathrm{AMB}{+}$
