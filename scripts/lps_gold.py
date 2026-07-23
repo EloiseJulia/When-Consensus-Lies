@@ -13,8 +13,8 @@ we ask, WITHOUT the model:
 
   * code_spec / data_analysis: run each interpretation's GOLD implementation
     (``candidates[iid]``) on the UNION of the item's test inputs (read-only reuse
-    of the frozen executable bootstrap via ``lps_method._run_code_outputs``) and
-    cluster by output equality.
+    of the frozen executable bootstrap via ``lps_method._run_code_results``) and
+    cluster by tolerance-aware output equality (the frozen harness ``_compare``).
   * policy_qa (numeric): use each interpretation's gold EXPECTED amount
     (``checker.expected['amount']``) at cent tolerance.
 
@@ -51,13 +51,15 @@ for _p in (str(_REPO_ROOT), str(_SCRIPTS_DIR)):
         sys.path.insert(0, _p)
 
 from common.schema import Task  # noqa: E402
-# Read-only reuse of the gold-FREE executors + entropy (they only RUN code / count
-# clusters; they never compare to gold — here we feed them the BENCHMARK's gold
-# code, which is a legitimate independent use).
+# Read-only reuse of the gold-FREE executors + tolerance-aware clustering (they
+# only RUN code / count clusters via the frozen harness ``_compare``; they never
+# compare to gold — here we feed them the BENCHMARK's gold code, a legitimate
+# independent use).
 from lps_method import (  # noqa: E402
-    _run_code_outputs,
+    _run_code_results,
+    _sig_equal,
     _task_code_inputs,
-    semantic_entropy,
+    cluster_entropy,
 )
 
 STRATUM_AMB_POS = "AMB+"
@@ -75,7 +77,7 @@ def _policy_expected_signature(expected: Any) -> Optional[str]:
     return f"num:{int(round(float(amount) * 100))}"
 
 
-def _interpretation_signatures(task: Task) -> Dict[str, Optional[str]]:
+def _interpretation_signatures(task: Task) -> Dict[str, Optional[Any]]:
     """Per-interpretation gold RESULT signature (gold impl output / expected amount).
 
     Returns ``{interp_id: signature or None}``. None marks an interpretation whose
@@ -105,9 +107,9 @@ def _interpretation_signatures(task: Task) -> Dict[str, Optional[str]]:
         inputs, entrypoint = _task_code_inputs(task)
         if not inputs or not entrypoint:
             return {}
-        sigs: Dict[str, Optional[str]] = {}
+        sigs: Dict[str, Optional[Any]] = {}
         for iid, code in candidates.items():
-            sigs[iid] = _run_code_outputs(domain, code, entrypoint, inputs)
+            sigs[iid] = _run_code_results(domain, code, entrypoint, inputs)
         return sigs
 
     return {}
@@ -120,8 +122,11 @@ def gold_ambiguity(task: Task) -> Dict[str, Any]:
     """
     sigs = _interpretation_signatures(task)
     valid = [s for s in sigs.values() if s is not None]
-    n_distinct = len(set(valid))
-    h_ctx_gold = semantic_entropy(valid)
+    # Cluster the enumerated-interpretation gold RESULTS by tolerance-aware mutual
+    # equivalence (the SAME pairwise rule the detector uses), not by hashing.
+    h_ctx_gold, n_distinct = cluster_entropy(
+        valid, lambda a, b: _sig_equal(task.domain, a, b)
+    )
 
     if n_distinct >= 2:
         stratum = STRATUM_AMB_POS

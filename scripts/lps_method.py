@@ -445,44 +445,106 @@ def _is_format_dim(dim: Dict[str, Any]) -> bool:
 
 _EXEC_TIMEOUT_SECONDS = 5.0
 
-#: Float-equivalence tolerance for clustering executed outputs. Mirrors the FROZEN
-#: harness's ``_runner._compare`` semantics (bench.<domain>._runner.FLOAT_TOL = 1e-9,
-#: with bool kept type-distinct from numbers): two answers whose outputs agree to
-#: this tolerance form ONE mutual-equivalence cluster. Without this, exact-string
-#: signing split 0.3 vs 0.30000000000000004 into spurious clusters, inflating H_ctx.
-_FLOAT_TOL = 1e-9
-_CANON_NDIGITS = 9  # round to 9 decimals ≈ FLOAT_TOL, canonicalises float noise
+# ── Tolerance-aware pairwise output equivalence (mirrors frozen harness) ──────
+# Executed-output clustering must agree EXACTLY with the frozen executable harness,
+# whose output-equality is ``bench.<domain>._runner._compare``:
+#   bool kept TYPE-DISTINCT from numbers; top-level float within FLOAT_TOL=1e-9
+#   (``abs(a-b) < 1e-9``); int/float unified by value; everything else exact ``==``.
+# Tolerance equality is NON-TRANSITIVE, so it CANNOT be bucketed by a hashable
+# signature (rounding-to-signature has boundary artifacts and collapses distinct
+# large ints). We therefore compare answers PAIRWISE via the harness ``_compare``
+# and form clusters by connected components (union-find).
 
 
-def _canonical(value: Any) -> Any:
-    """Tolerance-aware canonical form of an executed result for clustering.
+def _runner_compare(domain: str):
+    """The FROZEN harness pairwise output-equality ``_runner._compare`` for a domain.
 
-    Mirrors the frozen harness output-equivalence (``_runner._compare``):
-      * ``bool`` is kept DISTINCT from numbers (True must not equal 1);
-      * ``int``/``float`` are unified by VALUE and rounded to ``_CANON_NDIGITS``
-        (so ``3`` == ``3.0`` and ``0.3`` == ``0.30000000000000004``);
-      * non-finite floats keep a stable textual tag;
-      * lists/tuples/dicts are canonicalised RECURSIVELY.
-    Two results equivalent under the harness's tolerance map to the SAME canonical
-    form (hence the same signature).
+    Reusing it directly makes our mutual-equivalence clustering agree byte-for-byte
+    with the executable gold harness (no rounding-bucket boundary artifacts, no
+    int→float collapse). Returns ``None`` for non-executable domains.
     """
-    if isinstance(value, bool):
-        return ("bool", value)
-    if isinstance(value, int):
-        return ("num", float(value))
-    if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            return ("num_special", repr(value))
-        return ("num", round(value, _CANON_NDIGITS))
-    if isinstance(value, str):
-        return ("str", value)
-    if isinstance(value, (list, tuple)):
-        return ("seq", tuple(_canonical(v) for v in value))
-    if isinstance(value, dict):
-        return ("map", tuple(sorted((str(k), _canonical(v)) for k, v in value.items())))
-    if value is None:
-        return ("none",)
-    return ("other", repr(value))
+    if domain == "code_spec":
+        from bench.code_spec._runner import _compare
+    elif domain == "data_analysis":
+        from bench.data_analysis._runner import _compare
+    else:
+        return None
+    return _compare
+
+
+def _code_results_equal(domain: str, a: Any, b: Any) -> bool:
+    """Pairwise equality of two ordered per-input result lists via the harness compare.
+
+    Elementwise ``_compare`` (tolerance on scalar floats, exact otherwise) — the
+    SAME semantics the gold harness uses to judge a candidate's outputs.
+    """
+    cmp = _runner_compare(domain)
+    if cmp is None:
+        return a == b
+    if not (isinstance(a, list) and isinstance(b, list)) or len(a) != len(b):
+        return a == b
+    try:
+        return all(bool(cmp(x, y)) for x, y in zip(a, b))
+    except Exception:  # noqa: BLE001  — any comparison error → treat as not-equal
+        return False
+
+
+def _sig_equal(domain: str, a: Any, b: Any) -> bool:
+    """Domain-aware pairwise equality of two answer signatures.
+
+    code/data result LISTS → tolerance-aware harness ``_compare`` (elementwise);
+    everything else (policy cent-strings, exact tokens, test stubs) → exact ``==``.
+    """
+    if domain in ("code_spec", "data_analysis") and isinstance(a, list) and isinstance(b, list):
+        return _code_results_equal(domain, a, b)
+    return a == b
+
+
+def _equivalence_labels(items: List[Any], eq) -> List[int]:
+    """Connected-components labels under a (possibly NON-TRANSITIVE) pairwise ``eq``.
+
+    Two items share a cluster iff connected by a CHAIN of pairwise-equal items
+    (union-find). This is the principled clustering for tolerance equality, which
+    is not transitive and cannot be bucketed by a hashable signature.
+    """
+    n = len(items)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if eq(items[i], items[j]):
+                union(i, j)
+    return [find(i) for i in range(n)]
+
+
+def cluster_entropy(items: List[Any], eq) -> Tuple[float, int]:
+    """Shannon entropy (BITS) over connected-component clusters of ``items``.
+
+    Returns ``(H_bits, n_clusters)``; ``(0.0, len(items))`` for < 2 items.
+    """
+    n = len(items)
+    if n == 0:
+        return 0.0, 0
+    if n == 1:
+        return 0.0, 1
+    labels = _equivalence_labels(items, eq)
+    counts = Counter(labels)
+    h = 0.0
+    for c in counts.values():
+        p = c / n
+        h -= p * math.log2(p)
+    return h, len(counts)
 
 
 def _numeric_signature(output_text: str) -> Optional[str]:
@@ -530,15 +592,16 @@ def _task_code_inputs(task: Task) -> Tuple[List[Any], Optional[str]]:
     return inputs, entrypoint
 
 
-def _run_code_outputs(
+def _run_code_results(
     domain: str, code: str, entrypoint: str, inputs: List[Any]
-) -> Optional[str]:
-    """Execute *code* on each input via the frozen bootstrap; return output tuple.
+) -> Optional[List[Any]]:
+    """Execute *code* on each input via the frozen bootstrap; return the RAW outputs.
 
     Reuses ``bench.<domain>._runner.CANDIDATE_BOOTSTRAP`` (the SAME isolated worker
-    the gold harness uses) so execution semantics are identical. Returns a stable
-    string signature of the ordered outputs, or None if the candidate fails to
-    produce a clean result on ANY input (→ unrunnable → excluded).
+    the gold harness uses) so execution semantics are identical. Returns the ORDERED
+    list of raw per-input results (JSON values, compared later via the harness's
+    tolerance-aware ``_compare``), or None if the candidate fails to produce a clean
+    result on ANY input (→ unrunnable → excluded from clustering).
     """
     if domain == "code_spec":
         from bench.code_spec._runner import CANDIDATE_BOOTSTRAP
@@ -547,7 +610,7 @@ def _run_code_outputs(
     else:
         return None
 
-    results: List[str] = []
+    results: List[Any] = []
     sandbox = tempfile.mkdtemp(prefix="lps_exec_")
     try:
         bootstrap_path = os.path.join(sandbox, "_candidate_bootstrap.py")
@@ -596,15 +659,10 @@ def _run_code_outputs(
                 return None
             if out.get("status") != "ok":
                 return None
-            try:
-                results.append(
-                    json.dumps(_canonical(out.get("result")), sort_keys=True, default=repr)
-                )
-            except (TypeError, ValueError):
-                results.append(repr(_canonical(out.get("result"))))
+            results.append(out.get("result"))
     finally:
         _rmtree_quiet(sandbox)
-    return "code:" + "||".join(results)
+    return results
 
 
 def _rmtree_quiet(path: str) -> None:
@@ -615,11 +673,13 @@ def _rmtree_quiet(path: str) -> None:
         pass
 
 
-def answer_signature(task: Task, output_text: str) -> Optional[str]:
+def answer_signature(task: Task, output_text: str) -> Optional[Any]:
     """Gold-FREE equivalence signature of a single answer, or None if unparseable.
 
-    Two answers are mutually equivalent iff their signatures are equal. Compares
-    answers to EACH OTHER only — the gold answer is never consulted.
+    Two answers are mutually equivalent iff ``_sig_equal(domain, a, b)`` (pairwise,
+    tolerance-aware for executed code/data outputs). Compares answers to EACH OTHER
+    only — the gold answer is never consulted. Returns a string (policy cent-sig) or
+    the raw ordered per-input result list (code/data), never compared by hashing.
     """
     domain = task.domain
     if domain == "policy_qa":
@@ -633,15 +693,19 @@ def answer_signature(task: Task, output_text: str) -> Optional[str]:
         inputs, entrypoint = _task_code_inputs(task)
         if not inputs or not entrypoint:
             return None
-        sigs: set = set()
+        variants: List[List[Any]] = []
         for code in cands:
-            sig = _run_code_outputs(domain, code, entrypoint, inputs)
-            if sig is None:
+            res = _run_code_results(domain, code, entrypoint, inputs)
+            if res is None:
                 return None  # any unrunnable block → whole answer excluded
-            sigs.add(sig)
-        if len(sigs) != 1:
-            return None  # disagreeing blocks → ambiguous → excluded
-        return sigs.pop()
+            variants.append(res)
+        # Multiple code blocks in one answer must AGREE (tolerance-aware) to be a
+        # single unambiguous signature; disagreement → excluded.
+        first = variants[0]
+        for other in variants[1:]:
+            if not _code_results_equal(domain, first, other):
+                return None
+        return first
     return None
 
 
@@ -692,7 +756,12 @@ def H_ctx(
             labels.append(_label_answer(text, task, model_id=model, seed=seed))
             signatures.append(answer_signature(task, text))
         parseable = [s for s in signatures if s is not None]
-        h_ctx = semantic_entropy(parseable) if len(parseable) >= 2 else 0.0
+        if len(parseable) >= 2:
+            h_ctx, n_clusters = cluster_entropy(
+                parseable, lambda a, b: _sig_equal(task.domain, a, b)
+            )
+        else:
+            h_ctx, n_clusters = 0.0, len(parseable)
         per_dim.append(
             {
                 "dimension": name,
@@ -700,7 +769,7 @@ def H_ctx(
                 "labels": labels,
                 "signatures": signatures,
                 "n_parseable": len(parseable),
-                "n_clusters": len(set(parseable)),
+                "n_clusters": n_clusters,
                 "H_ctx": h_ctx,
                 "H_ctx_all": semantic_entropy(labels),
             }

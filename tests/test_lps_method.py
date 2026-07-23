@@ -534,34 +534,54 @@ def test_axis_match_positive_and_negative():
     assert lps.axis_match("anything", []) is False
 
 
-# ── Auditor Issue 1: tolerance-aware executable-equality clustering ───────────
+# ── Auditor Issue 1 (final): tolerance-aware PAIRWISE executable clustering ───
 
-def test_canonical_float_tolerance_merges_noise():
-    # 0.3 vs 0.30000000000000004 (float noise) must canonicalise IDENTICALLY so
-    # they cluster together, matching the frozen harness's tolerant float equality.
-    assert lps._canonical(0.3) == lps._canonical(0.1 + 0.2)
-    # int/float numeric-type equivalence: 3 and 3.0 are one value.
-    assert lps._canonical(3) == lps._canonical(3.0)
-    # bool stays TYPE-DISTINCT from numbers (True must not equal 1).
-    assert lps._canonical(True) != lps._canonical(1)
-    # Recurses into nested structures (lists/dicts).
-    assert lps._canonical([0.3, {"a": 0.1 + 0.2}]) == \
-        lps._canonical([0.1 + 0.2, {"a": 0.3}])
-    # Genuinely different values stay distinct.
-    assert lps._canonical(0.3) != lps._canonical(0.4)
+def test_code_results_equal_mirrors_harness_tolerance():
+    # Elementwise pairwise equality uses the frozen harness _compare: within
+    # FLOAT_TOL == equal; bool stays type-distinct; int/float unified by value.
+    assert lps._code_results_equal("code_spec", [0.3], [0.1 + 0.2]) is True
+    assert lps._code_results_equal("code_spec", [3], [3.0]) is True
+    assert lps._code_results_equal("code_spec", [True], [1]) is False
+    assert lps._code_results_equal("code_spec", [0.3], [0.31]) is False
+    # Different lengths / non-lists fall back to exact equality.
+    assert lps._code_results_equal("code_spec", [1, 2], [1]) is False
 
 
-def test_run_code_outputs_tolerant_signatures_merge():
-    # Two candidates whose executed results differ only by float noise must
-    # produce the SAME code signature (one mutual-equivalence cluster), matching
-    # the signing performed inside ``_run_code_outputs``.
-    def _sign(result):
-        return "code:" + json.dumps(lps._canonical(result), sort_keys=True, default=repr)
+def test_pairwise_clustering_tolerance_boundary_vs_rounding():
+    # THE boundary case the auditor called out: 4.9e-10 and 1.4e-9 differ by
+    # 9.1e-10 < FLOAT_TOL (1e-9) → the frozen harness says EQUAL, so they MUST land
+    # in ONE cluster under the pairwise rule. Rounding to 9 digits would have split
+    # them (round(4.9e-10, 9) == 0.0 but round(1.4e-9, 9) == 1e-9) → 2 clusters.
+    a, b = 4.9e-10, 1.4e-9
+    assert abs(a - b) < 1e-9                       # harness-equal
+    assert round(a, 9) != round(b, 9)              # rounding WOULD have split them
+    # Pairwise / union-find clustering keeps them together → 1 cluster, H_ctx = 0.
+    h, n = lps.cluster_entropy(
+        [[a], [b]], lambda x, y: lps._code_results_equal("code_spec", x, y)
+    )
+    assert n == 1
+    assert h == pytest.approx(0.0)
+    # A genuinely different value forms its own cluster (2 clusters, 1 bit).
+    h2, n2 = lps.cluster_entropy(
+        [[a], [b], [5.0]], lambda x, y: lps._code_results_equal("code_spec", x, y)
+    )
+    assert n2 == 2
+    assert h2 == pytest.approx(-(2 / 3) * math.log2(2 / 3) - (1 / 3) * math.log2(1 / 3))
 
-    assert _sign(0.3) == _sign(0.1 + 0.2)
-    assert _sign([1, 0.3]) == _sign([1, 0.1 + 0.2])
-    # Genuinely different outputs remain distinct clusters.
-    assert _sign(0.3) != _sign(0.31)
+
+def test_cluster_entropy_non_transitive_chain_merges():
+    # Tolerance equality is NON-TRANSITIVE: a~b and b~c pairwise, but a and c are
+    # NOT within tolerance. Connected-components (union-find) still merges all three
+    # into ONE cluster — the principled behaviour a hashable signature cannot give.
+    a, b, c = [0.0], [0.9e-9], [1.8e-9]
+    assert lps._code_results_equal("code_spec", a, b) is True
+    assert lps._code_results_equal("code_spec", b, c) is True
+    assert lps._code_results_equal("code_spec", a, c) is False  # 1.8e-9 > FLOAT_TOL
+    h, n = lps.cluster_entropy(
+        [a, b, c], lambda x, y: lps._code_results_equal("code_spec", x, y)
+    )
+    assert n == 1
+    assert h == pytest.approx(0.0)
 
 
 # ── Auditor Issue 2: configured tau actually suppresses borderline flags ──────
