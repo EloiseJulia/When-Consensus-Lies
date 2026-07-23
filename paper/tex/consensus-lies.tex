@@ -420,19 +420,24 @@ before the confirmatory run.
 
 \emph{Default-check disclosure and construct-validity caveat.} Because inclusion required that unaware
 capable models produce the intended foil, item selection is \emph{partly conditioned on the default
-behavior} we then measure---a construct-validity limitation that could inflate observed convergence. The
-decisive rebuttal is a \emph{within-item} one: the \emph{same} base tasks, run at $k{=}0$ with the
-disambiguator retained (fully specified), yield convergent delusion $\cd\!\approx\!0$, and $H2\_derivable$
-items (the ambiguity is present but derivable from the retained prompt) likewise yield $\cd\!\approx\!0$,
-whereas deleting the disambiguating clause on those very families drives $\cd$ high (\S\ref{sec:results},
-F1/F4). A ``we merely selected hard items'' account cannot produce $\cd\!\approx\!0$ on the $k{=}0$ and
-$H2$ variants of the same item families under the same pipeline, labeler, and metric; the effect therefore
-tracks the ambiguity \emph{structure} (the disambiguator's location), not item difficulty or selection. Two
-further features mitigate the screening concern: provenance separation (the constructor family is outside the
-tested pool, so the screen is not run by an evaluated agent) and the R2 cross-family construction control
-(\S\ref{sec:results}), where a second constructor family builds the traps. A fully unfiltered-sample
-replication (no default screen) is being pursued as a pre-registered robustness extension; we report no
-results for it here.
+behavior} we then measure---a construct-validity limitation that could inflate observed convergence. Two
+controls bound the \emph{generic} artifact explanation. First, a \emph{within-item} pairing: on the
+\emph{same} base H1 task, retaining the disambiguating clause ($k{=}0$, fully specified) yields convergent
+delusion $\cd\!\approx\!0$, while deleting that clause ($k{\ge}1$) drives $\cd$ high---same base task,
+pipeline, labeler, and metric, only the disambiguator's presence differs (R1a, \S\ref{sec:results},
+F1/F4). Second, a separate boundary condition on \emph{different} families: $H2\_derivable$ items, where the
+ambiguity is present but the deciding fact is retained in the prompt so a competent solver can \emph{derive}
+$I_0$, yield $\cd\!\approx\!0$ even at $k{\ge}1$. Together these rule out a \emph{generic} hard-item
+difficulty or pipeline/labeler artifact: mere item difficulty cannot explain $\cd\!\approx\!0$ when the same
+task is fully specified, so the effect tracks the ambiguity \emph{structure} (the disambiguator's location).
+They do \emph{not}, however, remove the inflation that screening \emph{specifically} for ambiguous items that
+elicit the foil may add to the observed \emph{rate}; that screen-induced selection effect is what the
+forthcoming replication is pre-registered to bound. Two further features mitigate the screening concern:
+provenance separation (the constructor family is outside the tested pool, so the screen is not run by an
+evaluated agent) and the R2 cross-family construction control (\S\ref{sec:results}), where a second
+constructor family builds the traps. A fully unfiltered-sample replication (no default screen)
+is being pursued as a pre-registered robustness extension to bound the screen-induced rate inflation; we
+report no results for it here.
 
 %% =====================================================================
 \section{Pre-registered Study}
@@ -1062,8 +1067,10 @@ high-stakes domains are \emph{implications}, not tested deployments. Construct v
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
 pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, we
 do not estimate the real-world \emph{prevalence} of such situations---we characterize and detect a failure
-\emph{mode}; the within-item $k{=}0$/$H2$ controls (\S\ref{sec:results}), on which the same families yield
-$\cd\!\approx\!0$, guard the causal claim against a ``hard-item selection'' reading. The abstention detector is rule-based and pending human
+\emph{mode}. The within-item $k{=}0$-vs-$k{\ge}1$ control (same base task; \S\ref{sec:results}, R1a) and the
+$H2\_derivable$ boundary condition rule out a \emph{generic} hard-item or pipeline artifact, but do not
+remove the screen-induced inflation of the observed rate; that selection effect is left to the forthcoming
+pre-registered unfiltered-sample replication. The abstention detector is rule-based and pending human
 validation. Generalization beyond the three domains and the tested roster is future work.
 \paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
 work. First, a \emph{human-subjects study} (a within-subjects design of roughly 50 participants) would test
