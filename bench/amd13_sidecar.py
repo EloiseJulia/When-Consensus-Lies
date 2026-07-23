@@ -62,18 +62,18 @@ from common.schema import Task  # noqa: E402
 # =====================================================================================
 
 _CODE_ENTRYPOINTS: Dict[str, str] = {
-    # CS1 round_half — tie convention (banker's half-even vs half-up)
+    # CS1 round_half — tie convention (banker's half-even vs half-up-away-from-zero)
     "amd13_roundhalf_even": "round_half",
     "amd13_roundhalf_up": "round_half",
-    # CS2 nth_element — 1-based vs 0-based indexing
-    "amd13_nth_1based": "nth_element",
-    "amd13_nth_0based": "nth_element",
-    # CS3 divide — integer floor division vs float true division
-    "amd13_divide_int": "divide",
-    "amd13_divide_float": "divide",
-    # CS4 normalize — divide-by-sum vs divide-by-max
-    "amd13_normalize_sum": "normalize",
-    "amd13_normalize_max": "normalize",
+    # CS2 week_opponent — 1-based vs 0-based position (derived by internal consistency)
+    "amd13_week_1based": "week_opponent",
+    "amd13_week_0based": "week_opponent",
+    # CS3 divide — floor (toward -inf) vs truncate-toward-zero (both INTEGER-returning)
+    "amd13_divide_floor": "divide",
+    "amd13_divide_trunc": "divide",
+    # CS4 share — divide-by-sum (proportional + sums to 1) vs divide-by-max
+    "amd13_share_sum": "share",
+    "amd13_share_max": "share",
 }
 
 _CODE_REFS: Dict[str, str] = {
@@ -88,59 +88,56 @@ def round_half(x):
         return int(math.floor(x + 0.5))
     return int(math.ceil(x - 0.5))
 """,
-    "amd13_nth_1based": """
-def nth_element(items, n):
-    return items[n - 1]
+    "amd13_week_1based": """
+def week_opponent(schedule, week):
+    return schedule[week - 1]
 """,
-    "amd13_nth_0based": """
-def nth_element(items, n):
-    return items[n]
+    "amd13_week_0based": """
+def week_opponent(schedule, week):
+    return schedule[week]
 """,
-    "amd13_divide_int": """
+    "amd13_divide_floor": """
 def divide(a, b):
     return a // b
 """,
-    "amd13_divide_float": """
+    "amd13_divide_trunc": """
 def divide(a, b):
-    return a / b
+    q = abs(a) // abs(b)
+    return q if (a < 0) == (b < 0) else -q
 """,
-    "amd13_normalize_sum": """
-def normalize(xs):
-    s = sum(xs)
-    return [x / s for x in xs]
+    "amd13_share_sum": """
+def share(xs, i):
+    return xs[i] / sum(xs)
 """,
-    "amd13_normalize_max": """
-def normalize(xs):
-    m = max(xs)
-    return [x / m for x in xs]
+    "amd13_share_max": """
+def share(xs, i):
+    return xs[i] / max(xs)
 """,
 }
 
 _CODE_TESTS: Dict[str, List[Tuple[Any, Any]]] = {
-    # 0.5->0, 2.5->2, 4.5->4 are half-even-ONLY (half-up would give 1, 3, 5).
-    "amd13_roundhalf_even": [(0.5, 0), (2.5, 2), (4.5, 4), (3.5, 4)],
-    "amd13_roundhalf_up": [(0.5, 1), (2.5, 3), (4.5, 5), (3.5, 4)],
-    # 1-based: n=1 -> first element.
-    "amd13_nth_1based": [
-        ((["a", "b", "c", "d"], 1), "a"),
-        ((["a", "b", "c", "d"], 2), "b"),
+    # Only half-even (banker's) reproduces ALL of these: 0.5->0 & 2.5->2 rule out
+    # half-up; 1.5->2 & 3.5->4 rule out toward-zero/floor; -2.5->-2 rules out
+    # half-up/ceiling on negatives. (half-up gives 1,2,3,4,-3 respectively.)
+    "amd13_roundhalf_even": [(0.5, 0), (1.5, 2), (2.5, 2), (3.5, 4), (-2.5, -2)],
+    "amd13_roundhalf_up": [(0.5, 1), (1.5, 2), (2.5, 3), (3.5, 4), (-2.5, -3)],
+    # Internal consistency: the season opener (first chronological opponent,
+    # 'Lions') is designated week 1 -> week is 1-based.
+    "amd13_week_1based": [
+        ((["Lions", "Tigers", "Bears"], 1), "Lions"),
+        ((["Lions", "Tigers", "Bears"], 2), "Tigers"),
     ],
-    "amd13_nth_0based": [
-        ((["a", "b", "c", "d"], 1), "b"),
-        ((["a", "b", "c", "d"], 2), "c"),
+    "amd13_week_0based": [
+        ((["Lions", "Tigers", "Bears"], 1), "Tigers"),
+        ((["Lions", "Tigers", "Bears"], 2), "Bears"),
     ],
-    # b never evenly divides a -> int (floor) and float always differ.
-    "amd13_divide_int": [((7, 2), 3), ((9, 4), 2), ((20, 6), 3)],
-    "amd13_divide_float": [((7, 2), 3.5), ((9, 4), 2.25), ((20, 6), 20 / 6)],
-    # Inputs chosen so every quotient is an EXACT binary float (no rounding noise).
-    "amd13_normalize_sum": [
-        (([1, 1, 2],), [0.25, 0.25, 0.5]),
-        (([1, 3, 4],), [0.125, 0.375, 0.5]),
-    ],
-    "amd13_normalize_max": [
-        (([1, 1, 2],), [0.5, 0.5, 1.0]),
-        (([1, 3, 4],), [0.25, 0.75, 1.0]),
-    ],
+    # divide(-7,2)==-4 uniquely identifies FLOOR (toward -inf); truncate-toward-zero
+    # gives -3, ceiling -3, round-half-even -4 but round fails divide(7,2)==3 (->4).
+    "amd13_divide_floor": [((7, 2), 3), ((-7, 2), -4), ((9, 4), 2), ((-9, 4), -3)],
+    "amd13_divide_trunc": [((7, 2), 3), ((-7, 2), -3), ((9, 4), 2), ((-9, 4), -2)],
+    # Scalar-float returns -> tolerance-safe checking (no list exact-equality).
+    "amd13_share_sum": [(([1, 1, 2], 2), 0.5), (([1, 3, 4], 1), 0.375), (([2, 3, 5], 0), 0.2)],
+    "amd13_share_max": [(([1, 1, 2], 2), 1.0), (([1, 3, 4], 1), 0.75), (([2, 3, 5], 0), 0.4)],
 }
 
 # =====================================================================================
@@ -200,10 +197,12 @@ def _cs_roundhalf() -> FullSpec:
             "Write a function `round_half(x)` that rounds a float `x` to the "
             "nearest whole number and returns it as an `int`. When `x` is exactly "
             "halfway between two integers, resolve the tie according to the "
-            "convention shown by these examples:\n\n"
+            "convention shown by ALL of these examples:\n\n"
             "    round_half(0.5) == 0\n"
+            "    round_half(1.5) == 2\n"
             "    round_half(2.5) == 2\n"
-            "    round_half(4.5) == 4"
+            "    round_half(3.5) == 4\n"
+            "    round_half(-2.5) == -2"
         ),
         requirement_classes=[
             RequirementClass(
@@ -218,13 +217,20 @@ def _cs_roundhalf() -> FullSpec:
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="NON-default: round half to even (banker's). Pinned by the examples.",
+                description=(
+                    "NON-default: round half to even (banker's). UNIQUELY pinned by "
+                    "the examples: 0.5->0 & 2.5->2 rule out half-up; 1.5->2 & 3.5->4 "
+                    "rule out truncate/floor; -2.5->-2 rules out half-up on negatives."
+                ),
                 is_target=True,
                 gold_check="amd13_roundhalf_even",
             ),
             InterpretationBranch(
                 id="I1",
-                description="MODEL DEFAULT [combined-default]: round half up (away from zero).",
+                description=(
+                    "MODEL DEFAULT [combined-default]: round half UP (away from zero). "
+                    "Fails the shown 0.5->0, 2.5->2, -2.5->-2 examples."
+                ),
                 is_target=False,
                 gold_check="amd13_roundhalf_up",
                 opened_by="tie_convention",
@@ -237,46 +243,52 @@ def _cs_roundhalf() -> FullSpec:
     )
 
 
-def _cs_nth() -> FullSpec:
+def _cs_weekopponent() -> FullSpec:
     return FullSpec(
         domain="code_spec",
-        task_id="code_nthelement_001",
+        task_id="code_weekopponent_001",
         regime="H2_derivable",
         prompt_core=(
-            "Write a function `nth_element(items, n)` that returns the element at "
-            "position `n` of the list `items`. The position convention is fixed by "
-            "these examples:\n\n"
-            "    nth_element(['a', 'b', 'c', 'd'], 1) == 'a'\n"
-            "    nth_element(['a', 'b', 'c', 'd'], 2) == 'b'"
+            "Write a function `week_opponent(schedule, week)` that returns the "
+            "opponent a team faces in a given `week` of the season. `schedule` "
+            "lists the opponents in chronological order, one entry per week. As "
+            "background: this team's SEASON OPENER — the very first game they play "
+            "— is against the 'Lions', and that opener is designated 'week 1'. A "
+            "sample schedule is ['Lions', 'Tigers', 'Bears']."
         ),
         requirement_classes=[
             RequirementClass(
-                id="index_base",
-                description="Index base of the position argument",
+                id="week_base",
+                description="Numbering base of the week argument",
                 clauses=[
-                    "Positions are 1-BASED: n=1 refers to the first element, n=2 to "
-                    "the second, and so on."
+                    "Weeks are 1-BASED: week=1 returns the first opponent in the "
+                    "schedule (the season opener), week=2 the second, and so on."
                 ],
             ),
         ],
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="NON-default: 1-based positions. Pinned by the examples.",
+                description=(
+                    "NON-default: 1-based weeks. Derivable by internal consistency — "
+                    "the season opener (first entry, 'Lions') is called week 1, so "
+                    "week=1 must map to schedule[0]. A 0-based reading (week 1 -> "
+                    "'Tigers') contradicts 'the opener against Lions is week 1'."
+                ),
                 is_target=True,
-                gold_check="amd13_nth_1based",
+                gold_check="amd13_week_1based",
             ),
             InterpretationBranch(
                 id="I1",
-                description="MODEL DEFAULT [combined-default]: Python 0-based indexing.",
+                description="MODEL DEFAULT [combined-default]: 0-based indexing (week -> schedule[week]).",
                 is_target=False,
-                gold_check="amd13_nth_0based",
-                opened_by="index_base",
+                gold_check="amd13_week_0based",
+                opened_by="week_base",
             ),
         ],
         key_questions=[
-            "Is `n` a 1-based position (n=1 is the first element) or a 0-based "
-            "index (n=0 is the first element)?",
+            "Is `week` a 1-based number (week 1 is the season opener / first "
+            "opponent) or a 0-based index (week 0 is the first opponent)?",
         ],
     )
 
@@ -289,80 +301,105 @@ def _cs_divide() -> FullSpec:
         prompt_core=(
             "Write a function with exactly this signature:\n\n"
             "    def divide(a: int, b: int) -> int:\n\n"
-            "The function divides `a` by `b`. `b` is always a positive integer "
-            "that does not evenly divide `a`."
+            "It returns the integer quotient of dividing `a` by `b` (`b` never "
+            "evenly divides `a`). The rounding direction is fixed by BOTH of these "
+            "examples:\n\n"
+            "    divide(7, 2) == 3\n"
+            "    divide(-7, 2) == -4"
         ),
         requirement_classes=[
             RequirementClass(
-                id="division_kind",
-                description="Integer vs real-valued division",
+                id="rounding_direction",
+                description="Direction the integer quotient is rounded",
                 clauses=[
-                    "Return the INTEGER quotient using floor division (a // b), "
-                    "discarding the remainder."
+                    "Return the FLOOR of the quotient — round toward negative "
+                    "infinity (Python's `a // b`), NOT truncation toward zero."
                 ],
             ),
         ],
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="NON-default: integer floor division. Pinned by the `-> int` return type.",
+                description=(
+                    "NON-default: floor division (toward -inf). UNIQUELY pinned: "
+                    "divide(-7,2)==-4 rules out truncate-toward-zero (-3) and ceiling "
+                    "(-3); divide(7,2)==3 rules out round-half-even (would give 4)."
+                ),
                 is_target=True,
-                gold_check="amd13_divide_int",
+                gold_check="amd13_divide_floor",
             ),
             InterpretationBranch(
                 id="I1",
-                description="MODEL DEFAULT [combined-default]: real-valued true division (float).",
+                description=(
+                    "MODEL DEFAULT [combined-default]: truncate toward zero (drop the "
+                    "fractional part, int(a/b)). Also returns an int, but gives "
+                    "divide(-7,2)==-3."
+                ),
                 is_target=False,
-                gold_check="amd13_divide_float",
-                opened_by="division_kind",
+                gold_check="amd13_divide_trunc",
+                opened_by="rounding_direction",
             ),
         ],
         key_questions=[
-            "Should the function return the integer quotient (floor division) or "
-            "the exact real-valued quotient (true division)?",
+            "Should the integer quotient be floored toward negative infinity "
+            "(a // b) or truncated toward zero (drop the fractional part)?",
         ],
     )
 
 
-def _cs_normalize() -> FullSpec:
+def _cs_share() -> FullSpec:
     return FullSpec(
         domain="code_spec",
-        task_id="code_normalize_001",
+        task_id="code_share_001",
         regime="H2_derivable",
         prompt_core=(
-            "Write a function `normalize(xs)` that rescales a list of positive "
-            "numbers `xs` and returns a new list of floats. The function must "
-            "satisfy this invariant for every input:\n\n"
-            "    sum(normalize(xs)) == 1.0"
+            "Write a function `share(xs, i)` that returns the normalized weight of "
+            "element `xs[i]` (a list of positive numbers) as a float. The result "
+            "must satisfy BOTH of these properties for every input:\n\n"
+            "    1. PROPORTIONAL: share(xs, i) / share(xs, j) equals xs[i] / xs[j] "
+            "for all i, j (ratios between elements are preserved).\n"
+            "    2. NORMALIZED: the shares of all elements add up to 1 — i.e. "
+            "sum(share(xs, k) for k in range(len(xs))) is 1 (to within floating "
+            "-point tolerance)."
         ),
         requirement_classes=[
             RequirementClass(
                 id="scaling_basis",
-                description="Denominator used to rescale the values",
+                description="Denominator used to rescale each value",
                 clauses=[
-                    "Normalize by dividing each element by the SUM of all elements, "
-                    "so the result is a probability distribution that sums to 1."
+                    "Compute each share by dividing the element by the SUM of all "
+                    "elements (so the shares form a proportional distribution that "
+                    "adds up to 1)."
                 ],
             ),
         ],
         interpretations=[
             InterpretationBranch(
                 id="I0",
-                description="NON-default: divide by the sum. Pinned by the sum==1.0 invariant.",
+                description=(
+                    "NON-default: divide by the sum. UNIQUELY pinned — proportional "
+                    "means share_i = c*xs[i] for a constant c; summing to 1 forces "
+                    "c = 1/sum(xs). Divide-by-max (c=1/max) is proportional but sums "
+                    "to more than 1, violating property 2."
+                ),
                 is_target=True,
-                gold_check="amd13_normalize_sum",
+                gold_check="amd13_share_sum",
             ),
             InterpretationBranch(
                 id="I1",
-                description="MODEL DEFAULT [combined-default]: divide by the maximum (max scaled to 1).",
+                description=(
+                    "MODEL DEFAULT [combined-default]: divide by the maximum "
+                    "(rescale so the largest element becomes 1). Proportional but "
+                    "does NOT sum to 1."
+                ),
                 is_target=False,
-                gold_check="amd13_normalize_max",
+                gold_check="amd13_share_max",
                 opened_by="scaling_basis",
             ),
         ],
         key_questions=[
-            "Should each element be divided by the sum of all elements (result "
-            "sums to 1) or by the maximum element (result scaled so the max is 1)?",
+            "Should each element be divided by the sum of all elements (shares add "
+            "up to 1) or by the maximum element (largest share becomes 1)?",
         ],
     )
 
@@ -564,7 +601,7 @@ def _pq_discount() -> FullSpec:
     )
 
 
-_CODE_SPECS = [_cs_roundhalf(), _cs_nth(), _cs_divide(), _cs_normalize()]
+_CODE_SPECS = [_cs_roundhalf(), _cs_weekopponent(), _cs_divide(), _cs_share()]
 _POLICY_SPECS = [_pq_interest(), _pq_parking(), _pq_tip(), _pq_discount()]
 
 

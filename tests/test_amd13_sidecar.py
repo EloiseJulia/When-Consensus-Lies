@@ -100,23 +100,20 @@ def test_k1_is_amb_pos_and_k0_is_amb_neg():
 
 def test_anti_leakage_prompt_hygiene():
     """k1 prompt must not leak the deleted convention clause or key_questions text,
-    yet must retain the in-prompt derivable artifact (== the k0 prompt_core)."""
-    for t in _load(_CODE_FILE):
+    yet must retain the in-prompt derivable artifact (the k1 prompt is a strict
+    prefix of the full latent_spec — only the explicit convention clause is cut)."""
+    for t in _load(_CODE_FILE) + _load(_POLICY_FILE):
         if t.ambiguity_level == 0:
             continue
         # key_questions text never appears verbatim in the tested prompt.
         for kq in t.key_questions:
-            assert kq not in t.prompt
-        # the derivable artifact (example I/O or signature) is retained.
-        assert ("==" in t.prompt) or ("->" in t.prompt) or ("def " in t.prompt)
-
-    for t in _load(_POLICY_FILE):
-        if t.ambiguity_level == 0:
-            continue
-        for kq in t.key_questions:
-            assert kq not in t.prompt
-        # the worked numeric example (a '$' figure) is retained in the passage.
-        assert "$" in t.prompt
+            assert kq not in t.prompt, (t.id, "key_question leaked into prompt")
+        # k1 prompt is strictly less specified than latent, and is contained in it
+        # (the derivable artifact is retained; only the explicit clause is removed).
+        assert t.prompt != t.latent_spec
+        assert t.prompt in t.latent_spec
+        deleted = t.latent_spec[len(t.prompt):].strip()
+        assert deleted and deleted not in t.prompt, (t.id, "deleted clause not removed")
 
 
 def test_registration_is_additive_only():
