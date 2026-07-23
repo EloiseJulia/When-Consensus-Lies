@@ -343,9 +343,11 @@ class LLMClient:
         outputs). Temperature is included so different temperatures hash differently,
         making offline behavior temperature-aware.
         """
-        # Resolve model info (explicit params override role-based routing)
-        if family is not None and model is not None:
-            model_family = family
+        # Resolve model info (an explicit model overrides role-based routing even
+        # when no family is given, so a multi-model sweep that varies only the slug
+        # produces per-model outputs instead of the role default for every model).
+        if model is not None:
+            model_family = family  # may be None when only the slug is provided
             model_name = model
         else:
             from common.config import model_for_role
@@ -394,9 +396,13 @@ class LLMClient:
         """
         mode = "offline" if self.offline else "online"
         
-        # Use explicit family/model if provided, otherwise resolve from role
-        if family is not None and model is not None:
-            identity = f"{family}:{model}"
+        # Use explicit model if provided, otherwise resolve from role. When a model
+        # is given without a family (e.g. a multi-model sweep that only varies the
+        # slug), the identity must still reflect the model so different models never
+        # collide in a shared cache dir; the family+model form stays byte-identical
+        # to avoid needlessly invalidating existing correct caches.
+        if model is not None:
+            identity = f"{family}:{model}" if family is not None else f"model:{model}"
         else:
             identity = self._role_identity(role)
         
@@ -505,7 +511,10 @@ class LLMClient:
           Missing token   → permanent error, not retried
         """
         # ── Resolve slug ───────────────────────────────────────────────────────
-        if family is not None and model is not None:
+        # An explicit model overrides role-based routing even when no family is
+        # given (mirrors _cache_key / _mock_generate) so a caller that passes only
+        # the slug gets that model's completion, not the role default for every model.
+        if model is not None:
             slug = model  # explicit override (e.g. heterogeneous-MAD passes full slug)
         else:
             from common.config import model_for_role

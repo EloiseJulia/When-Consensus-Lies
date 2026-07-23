@@ -78,6 +78,99 @@ def test_cache_key_is_mode_and_model_aware(tmp_path):
     assert offline_key != online_key
 
 
+def test_cache_key_distinguishes_models_without_family(tmp_path):
+    """Regression: model passed without family must not collide across models.
+
+    scripts/lps_method.py calls complete(role=..., model=model) with family=None.
+    Different models sharing a role/prompt/seed must produce DIFFERENT cache keys,
+    otherwise a shared cache replays the first model's response for all models.
+    """
+    cfg = load_config()
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+    key_a = client._cache_key("tested_agents", "p", 1, None, "openai/gpt-4o-mini")
+    key_b = client._cache_key("tested_agents", "p", 1, None, "meta/llama-3-8b")
+    assert key_a != key_b
+
+
+def test_cache_key_family_model_form_unchanged(tmp_path):
+    """Backward-compat: family+model and role-only keys must be byte-identical
+    to the pre-fix format so existing correct caches are not invalidated."""
+    import hashlib
+
+    cfg = load_config()
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+
+    def expected_key(identity):
+        content = (
+            f"offline|{client.provider}|{client.base_url}|{identity}|"
+            f"tested_agents|p|1|None"
+        )
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    # family + model path: identity stays "family:model"
+    fm_key = client._cache_key("tested_agents", "p", 1, "openai", "gpt-4o-mini")
+    assert fm_key == expected_key("openai:gpt-4o-mini")
+
+    # role-only path: identity stays the resolved role identity
+    role_identity = client._role_identity("tested_agents")
+    role_key = client._cache_key("tested_agents", "p", 1, None, None)
+    assert role_key == expected_key(role_identity)
+
+
+def test_mock_generation_honors_model_without_family(tmp_path):
+    """End-to-end: offline complete(role, model=X) with family=None must produce
+    per-model output AND completion.model == X, not the role default for every model.
+
+    Regression for the generation-path twin of the cache-key bug: _mock_generate
+    (and _generate_online) previously ignored an explicit model unless family was
+    also given, returning the role model for all callers that pass only the slug.
+    """
+    cfg = load_config()
+
+    def complete_with(model):
+        # Fresh cache dir per model so we exercise generation (a cache MISS), not a hit.
+        client = LLMClient(cfg, cache_dir=str(tmp_path / model.replace("/", "_")),
+                           offline=True)
+        return client.complete(role="tested_agents", prompt="p", seed=1, model=model)
+
+    a = complete_with("openai/gpt-4o-mini")
+    b = complete_with("meta/llama-3-8b")
+
+    # completion.model reflects the RESOLVED slug, not the role default
+    assert a.model == "openai/gpt-4o-mini"
+    assert b.model == "meta/llama-3-8b"
+    # different models → different deterministic mock text
+    assert a.text != b.text
+
+
+def test_mock_generation_family_model_and_role_unchanged(tmp_path):
+    """Guard: family+model and role-only mock outputs are byte-identical to before.
+
+    Only the model-without-family case changes; these two paths must be stable.
+    """
+    import hashlib
+
+    cfg = load_config()
+    client = LLMClient(cfg, cache_dir=str(tmp_path / "c"), offline=True)
+
+    def expected_mock(model_family, model_name):
+        content = f"{model_family}|{model_name}|p|1|None"
+        h = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return f"MOCK_OUTPUT_{h[:16]}"
+
+    # family + model path: identity/output unchanged (family and model both used)
+    fm = client._mock_generate("tested_agents", "p", 1, "openai", "gpt-4o-mini", None)
+    assert fm.text == expected_mock("openai", "gpt-4o-mini")
+    assert fm.model == "gpt-4o-mini"
+
+    # role-only path: resolves the role's family/model exactly as before
+    from common.config import model_for_role
+    info = model_for_role("tested_agents", cfg)
+    ro = client._mock_generate("tested_agents", "p", 1, None, None, None)
+    assert ro.text == expected_mock(info["family"], info["model"])
+    assert ro.model == info["model"]
+
+
 def test_unknown_role_fails_fast(tmp_path):
     """A typoed role must raise, not fabricate mock-model provenance."""
     cfg = load_config()
