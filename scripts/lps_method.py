@@ -88,6 +88,12 @@ DEFAULT_TAU = 0.5          # H_ctx flag threshold (bits) — pilot-calibrated
 DEFAULT_TAU_S = 0.5        # H_seed low-confidence ceiling (bits) — pilot-calibrated
 _ROLE = "tested_agents"    # generic answering role
 
+#: Method-version stamp for run provenance / checkpoint fingerprinting. Bump this
+#: whenever the H_seed/H_ctx measurement changes so a resume cannot silently reuse
+#: results computed under an incompatible method. Current: mutual-equivalence
+#: H_ctx clustering with tolerance-aware output signing (frozen-harness FLOAT_TOL).
+METHOD_VERSION = "lps-2026-07-23-v4-tol-equiv"
+
 #: The ineligible "degenerate/noise" label. Refinement 1 (2026-07-23): H_ctx is
 #: computed over VALID enumerated interpretations only, EXCLUDING I_perp — mirror
 #: cd_primary's rule that I_perp is ineligible. A pin like "language=Java" /
@@ -439,6 +445,45 @@ def _is_format_dim(dim: Dict[str, Any]) -> bool:
 
 _EXEC_TIMEOUT_SECONDS = 5.0
 
+#: Float-equivalence tolerance for clustering executed outputs. Mirrors the FROZEN
+#: harness's ``_runner._compare`` semantics (bench.<domain>._runner.FLOAT_TOL = 1e-9,
+#: with bool kept type-distinct from numbers): two answers whose outputs agree to
+#: this tolerance form ONE mutual-equivalence cluster. Without this, exact-string
+#: signing split 0.3 vs 0.30000000000000004 into spurious clusters, inflating H_ctx.
+_FLOAT_TOL = 1e-9
+_CANON_NDIGITS = 9  # round to 9 decimals ≈ FLOAT_TOL, canonicalises float noise
+
+
+def _canonical(value: Any) -> Any:
+    """Tolerance-aware canonical form of an executed result for clustering.
+
+    Mirrors the frozen harness output-equivalence (``_runner._compare``):
+      * ``bool`` is kept DISTINCT from numbers (True must not equal 1);
+      * ``int``/``float`` are unified by VALUE and rounded to ``_CANON_NDIGITS``
+        (so ``3`` == ``3.0`` and ``0.3`` == ``0.30000000000000004``);
+      * non-finite floats keep a stable textual tag;
+      * lists/tuples/dicts are canonicalised RECURSIVELY.
+    Two results equivalent under the harness's tolerance map to the SAME canonical
+    form (hence the same signature).
+    """
+    if isinstance(value, bool):
+        return ("bool", value)
+    if isinstance(value, int):
+        return ("num", float(value))
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return ("num_special", repr(value))
+        return ("num", round(value, _CANON_NDIGITS))
+    if isinstance(value, str):
+        return ("str", value)
+    if isinstance(value, (list, tuple)):
+        return ("seq", tuple(_canonical(v) for v in value))
+    if isinstance(value, dict):
+        return ("map", tuple(sorted((str(k), _canonical(v)) for k, v in value.items())))
+    if value is None:
+        return ("none",)
+    return ("other", repr(value))
+
 
 def _numeric_signature(output_text: str) -> Optional[str]:
     """Signature for numeric answers: extracted value at cent tolerance.
@@ -552,9 +597,11 @@ def _run_code_outputs(
             if out.get("status") != "ok":
                 return None
             try:
-                results.append(json.dumps(out.get("result"), sort_keys=True, default=repr))
+                results.append(
+                    json.dumps(_canonical(out.get("result")), sort_keys=True, default=repr)
+                )
             except (TypeError, ValueError):
-                results.append(repr(out.get("result")))
+                results.append(repr(_canonical(out.get("result"))))
     finally:
         _rmtree_quiet(sandbox)
     return "code:" + "||".join(results)
@@ -711,8 +758,11 @@ def lpp_detect(
 
     h_seed = seed_res["H_seed"]
     h_ctx_max = ctx_res["H_ctx_max"]
-    # PRIMARY item-level flag: any answer-changing dimension + confident reseed.
-    is_flagged = bool(h_ctx_max > 0.0 and h_seed <= tau_s)
+    # PRIMARY item-level flag: an answer-changing dimension ABOVE tau + confident
+    # reseed. tau is the operating threshold on H_ctx (default operating point in
+    # the pilot is tau=0.0, i.e. "any answer-changing dimension"); a higher tau
+    # suppresses borderline flags.
+    is_flagged = bool(h_ctx_max > tau and h_seed <= tau_s)
 
     # Coverage: how many pinned answers came back parseable/runnable (contract fix).
     n_pins_total = sum(len(d["values"]) for d in ctx_res["per_dim"])

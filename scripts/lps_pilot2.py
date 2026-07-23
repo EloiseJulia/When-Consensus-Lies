@@ -120,7 +120,7 @@ def _join_gold(results: List[Dict[str, Any]], gold_by_id: Dict[str, Dict[str, An
 
 
 def analyze(results: List[Dict[str, Any]], gold_by_id: Dict[str, Dict[str, Any]],
-            *, tau_s: float = lps.DEFAULT_TAU_S) -> Dict[str, Any]:
+            *, tau: float = 0.0, tau_s: float = lps.DEFAULT_TAU_S) -> Dict[str, Any]:
     """Compute the decisive detection read against the executable gold."""
     rows = _join_gold(results, gold_by_id)
     amb_pos = [r for r in rows if r["stratum"] == AMB_POS]
@@ -141,8 +141,8 @@ def analyze(results: List[Dict[str, Any]], gold_by_id: Dict[str, Dict[str, Any]]
     fp = sum(1 for r in amb_neg if r["is_flagged"])
     tn = len(amb_neg) - fp
 
-    # ── Danger-quadrant mass: AMB+ with low H_seed AND high H_ctx-self ───────
-    danger = [r for r in amb_pos if r["H_seed"] <= tau_s and r["H_ctx_max"] > 0.0]
+    # ── Danger-quadrant mass: AMB+ with low H_seed AND high H_ctx-self (> tau) ─
+    danger = [r for r in amb_pos if r["H_seed"] <= tau_s and r["H_ctx_max"] > tau]
     low_hseed_pos = [r for r in amb_pos if r["H_seed"] <= tau_s]
 
     # ── Localization on AMB+ (argmax dim == true deleted axis) ───────────────

@@ -17,6 +17,7 @@ All tests run OFFLINE (no network). They assert:
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -531,3 +532,115 @@ def test_axis_match_positive_and_negative():
     assert lps.axis_match("output color theme", kq) is False
     assert lps.axis_match("", kq) is False
     assert lps.axis_match("anything", []) is False
+
+
+# ── Auditor Issue 1: tolerance-aware executable-equality clustering ───────────
+
+def test_canonical_float_tolerance_merges_noise():
+    # 0.3 vs 0.30000000000000004 (float noise) must canonicalise IDENTICALLY so
+    # they cluster together, matching the frozen harness's tolerant float equality.
+    assert lps._canonical(0.3) == lps._canonical(0.1 + 0.2)
+    # int/float numeric-type equivalence: 3 and 3.0 are one value.
+    assert lps._canonical(3) == lps._canonical(3.0)
+    # bool stays TYPE-DISTINCT from numbers (True must not equal 1).
+    assert lps._canonical(True) != lps._canonical(1)
+    # Recurses into nested structures (lists/dicts).
+    assert lps._canonical([0.3, {"a": 0.1 + 0.2}]) == \
+        lps._canonical([0.1 + 0.2, {"a": 0.3}])
+    # Genuinely different values stay distinct.
+    assert lps._canonical(0.3) != lps._canonical(0.4)
+
+
+def test_run_code_outputs_tolerant_signatures_merge():
+    # Two candidates whose executed results differ only by float noise must
+    # produce the SAME code signature (one mutual-equivalence cluster), matching
+    # the signing performed inside ``_run_code_outputs``.
+    def _sign(result):
+        return "code:" + json.dumps(lps._canonical(result), sort_keys=True, default=repr)
+
+    assert _sign(0.3) == _sign(0.1 + 0.2)
+    assert _sign([1, 0.3]) == _sign([1, 0.1 + 0.2])
+    # Genuinely different outputs remain distinct clusters.
+    assert _sign(0.3) != _sign(0.31)
+
+
+# ── Auditor Issue 2: configured tau actually suppresses borderline flags ──────
+
+def test_tau_suppresses_borderline_flag(monkeypatch):
+    _sig_by_text(monkeypatch)
+    # Two distinct pin results → 2 clusters over 2 pins → H_ctx = 1.0 bit.
+    # H_seed = 0 (constant reseed) → danger quadrant.
+    client = _detect_client({"V1": "RA", "V2": "RB"}, lambda seed: "SAME")
+    # tau = 0.0 (pilot operating point): borderline H_ctx=1.0 IS flagged.
+    res0 = lps.lpp_detect(_dummy_task(), client, "m", k=5, base_seed=0, tau=0.0)
+    assert res0["H_ctx_max"] == pytest.approx(1.0)
+    assert res0["is_flagged"] is True
+    # Raise tau above the borderline H_ctx → the SAME item is now suppressed.
+    res_hi = lps.lpp_detect(_dummy_task(), client, "m", k=5, base_seed=0, tau=1.5)
+    assert res_hi["H_ctx_max"] == pytest.approx(1.0)
+    assert res_hi["is_flagged"] is False
+
+
+# ── Auditor Issue 3: checkpoint fingerprint prevents silent incompatible reuse ─
+
+def _fp_checkpoint_paths():
+    cp = _REPO_ROOT / ".run_partitions" / "cp_lps_test_fingerprint.jsonl"
+    cache = _REPO_ROOT / ".llm_cache_lps_test_fingerprint"
+    return cp, cache
+
+
+@pytest.fixture()
+def _fp_checkpoint():
+    cp, cache = _fp_checkpoint_paths()
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    if cp.exists():
+        cp.unlink()
+    yield cp, cache
+    if cp.exists():
+        cp.unlink()
+
+
+def test_resume_refuses_incompatible_fingerprint(monkeypatch, _fp_checkpoint):
+    _sig_by_text(monkeypatch)
+    cp, cache = _fp_checkpoint
+    task = _dummy_task()
+    client = _detect_client({"V1": "RA", "V2": "RB"}, lambda seed: "SAME")
+
+    # Seed a checkpoint recorded under k=5.
+    fp5 = lps_pilot.run_fingerprint(models=["m"], k=5, base_seed=0, tau=0.0, tau_s=0.5)
+    with cp.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"_header": True, "_fingerprint": fp5}) + "\n")
+        fh.write(json.dumps({"task_id": task.id, "model": "m",
+                             "_fingerprint": fp5}) + "\n")
+
+    # Re-running with a DIFFERENT k must refuse to reuse the old record.
+    with pytest.raises(RuntimeError, match="fingerprint mismatch"):
+        lps_pilot.run(
+            [task], {}, models=["m"], checkpoint_path=str(cp), cache_dir=str(cache),
+            k=3, base_seed=0, tau=0.0, tau_s=0.5, select_pilot=False,
+            _client_override=client,
+        )
+
+
+def test_resume_reuses_matching_fingerprint(monkeypatch, _fp_checkpoint):
+    _sig_by_text(monkeypatch)
+    cp, cache = _fp_checkpoint
+    task = _dummy_task()
+    client = _detect_client({"V1": "RA", "V2": "RB"}, lambda seed: "SAME")
+
+    fp5 = lps_pilot.run_fingerprint(models=["m"], k=5, base_seed=0, tau=0.0, tau_s=0.5)
+    with cp.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"_header": True, "_fingerprint": fp5}) + "\n")
+        fh.write(json.dumps({"task_id": task.id, "model": "m",
+                             "_fingerprint": fp5}) + "\n")
+
+    # Same fingerprint (k=5) → the record is reused (skipped), no error, no rerun.
+    res = lps_pilot.run(
+        [task], {}, models=["m"], checkpoint_path=str(cp), cache_dir=str(cache),
+        k=5, base_seed=0, tau=0.0, tau_s=0.5, select_pilot=False,
+        _client_override=client,
+    )
+    assert res["status"] == "ok"
+    assert res["skipped"] == 1
+    assert res["completed"] == 0
+

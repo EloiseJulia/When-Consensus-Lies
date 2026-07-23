@@ -178,6 +178,30 @@ def enumerate_jobs(tasks: List[Any], models: List[str]) -> List[Dict[str, Any]]:
 
 # ── Core run ─────────────────────────────────────────────────────────────────
 
+def run_fingerprint(
+    *,
+    models: List[str],
+    k: int,
+    base_seed: int,
+    tau: float,
+    tau_s: float,
+) -> Dict[str, Any]:
+    """Canonical run fingerprint stored in the checkpoint (Issue 3 guard).
+
+    Captures every knob whose change makes previously-recorded H_seed/H_ctx numbers
+    incompatible: the method version, k, base seed, tau, tau_s and the model set.
+    On resume, records whose fingerprint differs are refused (not silently reused).
+    """
+    return {
+        "method_version": lps.METHOD_VERSION,
+        "k": int(k),
+        "base_seed": int(base_seed),
+        "tau": float(tau),
+        "tau_s": float(tau_s),
+        "models": sorted(models),
+    }
+
+
 def run(
     tasks: List[Any],
     cfg: Dict[str, Any],
@@ -188,7 +212,7 @@ def run(
     rpm: int = RPM,
     base_seed: int = PILOT_BASE_SEED,
     k: int = lps.DEFAULT_K,
-    tau: float = lps.DEFAULT_TAU,
+    tau: float = 0.0,
     tau_s: float = lps.DEFAULT_TAU_S,
     dry_run: bool = False,
     offline: bool = False,
@@ -220,7 +244,15 @@ def run(
     cp = Path(checkpoint_path)
     cp.parent.mkdir(parents=True, exist_ok=True)
 
-    # Resume: skip (task_id, model) cells already recorded.
+    # Run FINGERPRINT: any change to these makes prior records incompatible.
+    fingerprint = run_fingerprint(
+        models=models, k=k, base_seed=base_seed, tau=tau, tau_s=tau_s
+    )
+
+    # Resume: skip (task_id, model) cells already recorded — but ONLY reuse records
+    # whose stored fingerprint matches this run. A mismatch (different k/seed/tau/
+    # tau_s/method-version/models) means the cached number was computed under an
+    # incompatible method; refuse to silently reuse it and fail loudly instead.
     done: set = set()
     results: List[Dict[str, Any]] = []
     if cp.exists():
@@ -233,8 +265,26 @@ def run(
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if rec.get("_header"):
+                    continue  # header line; fingerprint validated per-record below
+                rec_fp = rec.get("_fingerprint")
+                if rec_fp != fingerprint:
+                    raise RuntimeError(
+                        "LPS checkpoint fingerprint mismatch — refusing to reuse "
+                        "incompatible results.\n"
+                        f"  checkpoint: {checkpoint_path}\n"
+                        f"  record (task={rec.get('task_id')}, model={rec.get('model')}) "
+                        f"fingerprint: {rec_fp}\n"
+                        f"  current run fingerprint: {fingerprint}\n"
+                        "Delete/namespace the checkpoint before re-running with "
+                        "different k/seed/tau/tau_s/method-version/models."
+                    )
                 done.add((rec.get("task_id"), rec.get("model")))
                 results.append(rec)
+    else:
+        # Fresh checkpoint: write a header line recording the run fingerprint.
+        with cp.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"_header": True, "_fingerprint": fingerprint}) + "\n")
 
     if _client_override is not None:
         client = _client_override
@@ -266,6 +316,7 @@ def run(
         res["deleted_axis"] = list(task.key_questions)
         res["axis_match"] = lps.axis_match(res["flagged_dimension"] or "", task.key_questions)
         res["category"] = _category(task)
+        res["_fingerprint"] = fingerprint
         with cp.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(res) + "\n")
         results.append(res)
