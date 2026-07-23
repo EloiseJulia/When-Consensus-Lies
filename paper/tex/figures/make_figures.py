@@ -569,6 +569,257 @@ def make_silent_failure(df_with_output: pd.DataFrame,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 5b. Study 2 figures (LPP detector) — F-DQ danger quadrant & F-AUROC comparison
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# These two figures are INDEPENDENT of the Study-1 CD pipeline above. All plotted
+# values trace to REAL sources (no fabrication):
+#   * F-DQ scatter points are the 54 pre-registered items at their POOLED per-item
+#     (H_seed, H_ctx-self) means, extracted by REUSING the frozen aggregation of
+#     scripts/lps_confirm_report.aggregate_by_item on the confirmatory checkpoint
+#     .run_partitions/cp_lps_confirm__*.jsonl (via scripts/lps_danger_quadrant_export).
+#     The extracted data is cached in fig_danger_quadrant_data.json so the figure is
+#     reproducible without the live checkpoints and each point is auditable.
+#   * F-AUROC values are the FROZEN numbers from files/study2_stage2_results.md
+#     (per-model + pooled AUROC and 95% CIs). They are transcribed verbatim below;
+#     no number is recomputed or invented.
+
+_DQ_DATA_JSON = _FIGURES_DIR / "fig_danger_quadrant_data.json"
+
+# Frozen operating point (prereg §2): H_seed convergent cutoff / H_ctx flag threshold.
+TAU_S = 0.5   # bits — low-H_seed ("convergent") cutoff defining the danger quadrant
+TAU = 0.0     # bits — H_ctx flag threshold
+
+# Colorblind-safe strata colors (reuse the Wong palette already defined above).
+C_AMB_POS = C_H1     # amber  — AMB+ (executable-ambiguous; the dangerous items)
+C_AMB_NEG = C_H2     # sky    — AMB- (executable-unambiguous; controls)
+
+
+def _load_danger_quadrant_data() -> dict:
+    """Load the per-item F-DQ scatter data (real, frozen-aggregation extraction).
+
+    Prefers a LIVE extraction from the confirmatory checkpoint shards when present
+    (reusing the frozen aggregation and refreshing the cached asset); otherwise
+    falls back to the committed fig_danger_quadrant_data.json data asset. Never
+    fabricates points.
+    """
+    shards = sorted(_PART_DIR.glob("cp_lps_confirm__*.jsonl"))
+    if shards:
+        try:
+            scripts_dir = str(_REPO_ROOT / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            import lps_danger_quadrant_export as dqx
+            data = dqx.extract_items(str(_PART_DIR / "cp_lps_confirm__*.jsonl"))
+            _DQ_DATA_JSON.write_text(json.dumps(data, indent=2) + "\n",
+                                     encoding="utf-8")
+            print("  F-DQ: live extraction from confirm checkpoints (asset refreshed)")
+            return data
+        except Exception as exc:  # noqa: BLE001
+            print(f"  F-DQ: live extraction failed ({exc}); using committed asset")
+    if not _DQ_DATA_JSON.exists():
+        raise FileNotFoundError(
+            f"F-DQ data asset missing and no confirm checkpoints found: "
+            f"{_DQ_DATA_JSON}")
+    print("  F-DQ: using committed data asset (no live checkpoints)")
+    return json.loads(_DQ_DATA_JSON.read_text(encoding="utf-8"))
+
+
+def make_danger_quadrant() -> dict:
+    """fig_danger_quadrant.pdf: data-driven scatter of the 54 items in the
+
+    (H_seed, H_ctx-self) plane, colored by executable gold stratum (AMB+/AMB-),
+    with the low-H_seed AND high-H_ctx DANGER quadrant shaded and the frozen
+    thresholds (tau_s=0.5, tau=0) marked. Every point is a REAL per-item mean.
+    """
+    data = _load_danger_quadrant_data()
+    points = data["points"]
+    counts = data["counts"]
+
+    pos = [p for p in points if p["stratum"] == "AMB+"]
+    neg = [p for p in points if p["stratum"] == "AMB-"]
+
+    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+
+    x_max = 0.80
+    y_max = 1.70
+
+    # ── Danger zone: H_seed <= tau_s AND H_ctx > tau (SOTA-blind quadrant) ──────
+    ax.axvspan(0.0, TAU_S, ymin=0.0, ymax=1.0, color="#D55E00", alpha=0.07,
+               zorder=0)
+    ax.add_patch(plt.Rectangle((-0.03, TAU + 1e-9), TAU_S + 0.03, y_max - TAU,
+                               facecolor="#D55E00", alpha=0.10, edgecolor="none",
+                               zorder=0))
+
+    # Frozen thresholds.
+    ax.axvline(TAU_S, color="black", linestyle="--", linewidth=1.1, alpha=0.7,
+               zorder=1)
+    ax.axhline(TAU, color="black", linestyle=":", linewidth=1.0, alpha=0.6,
+               zorder=1)
+
+    # ── Scatter (true per-item means; small alpha for overplot density) ────────
+    ax.scatter([p["H_seed"] for p in neg], [p["H_ctx_self"] for p in neg],
+               marker="s", s=46, facecolor=C_AMB_NEG, edgecolor="black",
+               linewidth=0.5, alpha=0.75, zorder=4,
+               label=f"AMB\u2212 (unambiguous, n={len(neg)})")
+    ax.scatter([p["H_seed"] for p in pos], [p["H_ctx_self"] for p in pos],
+               marker="o", s=52, facecolor=C_AMB_POS, edgecolor="black",
+               linewidth=0.5, alpha=0.8, zorder=5,
+               label=f"AMB+ (executable-ambiguous, n={len(pos)})")
+
+    # ── Origin overplot callout (many items share the exact (0,0) point) ───────
+    eps = 1e-9
+    n_origin_pos = sum(1 for p in pos
+                       if abs(p["H_seed"]) < eps and abs(p["H_ctx_self"]) < eps)
+    n_origin_neg = sum(1 for p in neg
+                       if abs(p["H_seed"]) < eps and abs(p["H_ctx_self"]) < eps)
+    if (n_origin_pos + n_origin_neg) > 1:
+        ax.annotate(
+            f"{n_origin_pos + n_origin_neg} items at $(0,0)$\n"
+            f"({n_origin_neg} AMB\u2212, {n_origin_pos} AMB+)",
+            xy=(0.0, 0.0), xytext=(0.20, 0.28),
+            fontsize=TICK_SIZE - 0.5, ha="left", va="bottom",
+            arrowprops=dict(arrowstyle="->", color="#555555", lw=0.8),
+            color="#333333", zorder=6)
+
+    # ── Danger-zone label with the frozen mass ─────────────────────────────────
+    dmass = counts["danger_mass"]
+    ax.text(0.02, y_max - 0.08,
+            "DANGER ZONE\n"
+            "confident latent-premise ambiguity\n"
+            "(semantic-entropy-blind)\n"
+            f"AMB+ mass: {counts['n_danger_AMB_pos']}/{counts['n_AMB_pos']} "
+            f"= {dmass:.3f}",
+            fontsize=TICK_SIZE - 0.5, ha="left", va="top", color="#7A2E00",
+            fontweight="bold", zorder=3,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                      edgecolor="#D55E00", alpha=0.85, linewidth=0.8))
+
+    ax.text(TAU_S + 0.012, y_max - 0.02, r"$\tau_s=0.5$", fontsize=TICK_SIZE - 0.5,
+            ha="left", va="top", color="black", rotation=90, alpha=0.8)
+
+    ax.set_xlabel(r"$H_{\mathrm{seed}}$ — semantic entropy (bits)  [SOTA baseline]",
+                  fontsize=LABEL_SIZE)
+    ax.set_ylabel(r"$H_{\mathrm{ctx\text{-}self}}$ — latent-premise pinning (bits)",
+                  fontsize=LABEL_SIZE)
+    ax.set_xlim(-0.03, x_max)
+    ax.set_ylim(-0.06, y_max)
+    ax.legend(loc="lower right", frameon=True, fontsize=LEGEND_SIZE - 0.5,
+              framealpha=0.9)
+    ax.grid(True, alpha=0.25, linestyle="--")
+    _save(fig, _FIGURES_DIR / "fig_danger_quadrant.pdf")
+
+    return {
+        "counts": counts,
+        "n_origin_overlap": {"AMB+": n_origin_pos, "AMB-": n_origin_neg},
+        "provenance": data.get("provenance", {}),
+    }
+
+
+def make_auroc_comparison() -> dict:
+    """fig_auroc_comparison.pdf: per-model + pooled AUROC for LPP (H_ctx-self) vs
+
+    semantic entropy (H_seed) vs requirements-probing, with 95% CIs. All values are
+    transcribed VERBATIM from files/study2_stage2_results.md (frozen). Chance = 0.5.
+    """
+    # (auroc, ci_lo, ci_hi) per model, verbatim from study2_stage2_results.md §2.
+    models = [
+        "claude-haiku-4.5", "claude-opus-4.8", "gemini-3.1-pro",
+        "gemini-3.5-flash", "gpt-4o-mini", "gpt-5.6-sol", "POOLED",
+    ]
+    lpp = [
+        (0.869, 0.787, 0.941), (0.887, 0.808, 0.956), (0.857, 0.771, 0.934),
+        (0.880, 0.797, 0.955), (0.856, 0.768, 0.933), (0.857, 0.774, 0.932),
+        (0.895, 0.815, 0.966),
+    ]
+    sem = [
+        (0.567, 0.483, 0.648), (0.591, 0.529, 0.662), (0.606, 0.534, 0.682),
+        (0.580, 0.493, 0.667), (0.551, 0.472, 0.629), (0.563, 0.467, 0.657),
+        (0.581, 0.484, 0.675),
+    ]
+    reqp = [
+        (0.802, 0.677, 0.914), (0.832, 0.717, 0.934), (0.794, 0.667, 0.909),
+        (0.802, 0.662, 0.922), (0.807, 0.683, 0.918), (0.802, 0.674, 0.922),
+        (0.810, 0.680, 0.931),
+    ]
+
+    signals = [
+        ("LPP  ($H_{\\mathrm{ctx\\text{-}self}}$, detector)", lpp, C_HETERO, "o"),
+        ("requirements-probing", reqp, C_H1, "^"),
+        ("semantic entropy ($H_{\\mathrm{seed}}$, SOTA)", sem, C_SINGLE, "s"),
+    ]
+
+    n_models = len(models)
+    fig, ax = plt.subplots(figsize=(5.6, 4.6))
+
+    offsets = [0.26, 0.0, -0.26]  # LPP top, req-probing mid, sem-entropy bottom
+    y_base = np.arange(n_models)[::-1]  # pooled at bottom row visually
+
+    for (label, vals, color, marker), off in zip(signals, offsets):
+        ys = y_base + off
+        xs = [v[0] for v in vals]
+        lo = [v[0] - v[1] for v in vals]
+        hi = [v[2] - v[0] for v in vals]
+        ax.errorbar(xs, ys, xerr=[lo, hi], fmt=marker, color=color,
+                    markersize=6, markeredgecolor="black", markeredgewidth=0.4,
+                    elinewidth=1.3, capsize=2.6, capthick=1.0, linestyle="none",
+                    label=label, zorder=4)
+
+    # Chance line.
+    ax.axvline(0.5, color="black", linestyle="--", linewidth=1.0, alpha=0.6,
+               zorder=1)
+    ax.text(0.5, y_base[0] + 0.62, "chance (0.5)", fontsize=TICK_SIZE - 0.5,
+            ha="center", va="bottom", color="#333333")
+
+    # Divider above the POOLED row.
+    ax.axhline(y_base[-1] + 0.5, color="#888888", linestyle="-", linewidth=0.7,
+               alpha=0.6, zorder=1)
+
+    ax.set_yticks(y_base)
+    labels = [m if m != "POOLED" else "POOLED" for m in models]
+    ax.set_yticklabels(labels, fontsize=TICK_SIZE)
+    for tick, m in zip(ax.get_yticklabels(), models):
+        if m == "POOLED":
+            tick.set_fontweight("bold")
+
+    ax.set_xlabel("AUROC vs executable gold-ambiguity (higher = better)",
+                  fontsize=LABEL_SIZE)
+    ax.set_xlim(0.4, 1.0)
+    ax.set_ylim(y_base[-1] - 0.6, y_base[0] + 0.9)
+    ax.grid(True, axis="x", alpha=0.25, linestyle="--")
+    ax.grid(False, axis="y")
+
+    # Honest annotation of the modest LPP - req-probing pooled gap (+0.085),
+    # placed in the empty strip just above the POOLED row.
+    pooled_y = y_base[-1]
+    ax.annotate("", xy=(0.895, pooled_y + 0.26), xytext=(0.810, pooled_y + 0.26),
+                arrowprops=dict(arrowstyle="<->", color="#555555", lw=0.9))
+    ax.text(0.852, pooled_y + 0.44,
+            "LPP $+0.085$ over req.-probing (pooled; modest)",
+            fontsize=TICK_SIZE - 1.0, ha="center", va="center", color="#333333")
+
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3,
+              frameon=True, fontsize=LEGEND_SIZE - 0.5, framealpha=0.92,
+              columnspacing=1.0, handletextpad=0.4)
+    _save(fig, _FIGURES_DIR / "fig_auroc_comparison.pdf")
+
+    return {
+        "models": models,
+        "lpp": lpp, "semantic_entropy": sem, "requirements_probing": reqp,
+        "pooled_gap_lpp_minus_reqprobing": round(lpp[-1][0] - reqp[-1][0], 3),
+    }
+
+
+def make_study2_figures() -> dict:
+    """Generate both Study-2 figures (independent of the Study-1 CD pipeline)."""
+    print("  \u2192 fig_danger_quadrant.pdf")
+    dq = make_danger_quadrant()
+    print("  \u2192 fig_auroc_comparison.pdf")
+    au = make_auroc_comparison()
+    return {"danger_quadrant": dq, "auroc_comparison": au}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6. Main orchestration
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -602,6 +853,15 @@ def _to_json_safe(obj):
 def main():
     print("=== make_figures.py ===")
     _apply_cscw_style()
+
+    # Study-2 figures (F-DQ, F-AUROC) are independent of the Study-1 CD pipeline.
+    # `--study2-only` generates just those two (does not need the Study-1
+    # code/data/policy checkpoints).
+    if "--study2-only" in sys.argv:
+        print("[study2-only] Generating Study-2 figures ...")
+        make_study2_figures()
+        print("\nDone (study2-only).")
+        return
 
     # 1. Load tasks
     print("[1/6] Loading benchmark tasks ...")
@@ -652,6 +912,9 @@ def main():
     print("  → fig_silent_failure.pdf")
     cells_for_sf = compute_cell_cd(df)
     sf_data = make_silent_failure(df_out, cells_for_sf)
+
+    print("  → Study-2 figures (fig_danger_quadrant.pdf, fig_auroc_comparison.pdf)")
+    make_study2_figures()
 
     # 7. Dump figures_data.json
     print("[6/6] Writing figures_data.json ...")
@@ -760,6 +1023,8 @@ def main():
         "fig_capability_invariance.pdf",
         "fig_fake_redundancy.pdf",
         "fig_silent_failure.pdf",
+        "fig_danger_quadrant.pdf",
+        "fig_auroc_comparison.pdf",
         "figures_data.json",
     ]:
         p = _FIGURES_DIR / fname

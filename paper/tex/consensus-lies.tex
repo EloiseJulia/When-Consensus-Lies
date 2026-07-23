@@ -791,6 +791,25 @@ once a latent premise is pinned differently). That combination---\emph{low \Hsee
 fake-redundancy condition of Study~1 (many agents share one lossy reading and agree with confidence) and
 precisely where same-prompt semantic entropy, looking only at resampling variance, is blind.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.86\linewidth]{fig_danger_quadrant.pdf}
+\caption{The danger quadrant, on real data. Each point is one of the 54
+pre-registered items at its \emph{pooled} per-item mean of $\Hseed{}$ (semantic
+entropy; SOTA baseline) and $\Hctx{}$ (latent-premise pinning), aggregated across
+model$\times$seed cells exactly as in the confirmatory analysis
+(\texttt{lps\_confirm\_report}). Executable gold-ambiguity colors the points
+(AMB+ $=$ ambiguous, AMB$-$ $=$ unambiguous). The shaded low-$\Hseed{}$
+($\le\tau_s{=}0.5$) $\wedge$ high-$\Hctx{}$ ($>\tau{=}0$) region is the danger
+quadrant: \textbf{25 of 33 ($0.758$) AMB+ items} sit there---confidently
+self-consistent under resampling, yet their answer flips once a latent premise is
+pinned---exactly where semantic entropy is blind. Many low-signal items coincide at
+$(0,0)$ (annotated); AMB$-$ controls stay near the origin. No point position is
+invented.}
+\label{fig:danger-quadrant}
+\end{figure}
+
+
 \paragraph{Positioning against input-clarification ensembling.} The closest prior method is
 \emph{Input Clarification Ensembling} (ICE)~\cite{hou2024decomposing}, which separates an LLM's
 \emph{aleatoric} (input-ambiguity) uncertainty from its \emph{epistemic} (model-ignorance) uncertainty by
@@ -864,6 +883,22 @@ items} fall in the low-\Hseed{} $\wedge$ high-\Hctx{} zone (pre-committed $\ge 0
 answer depends on a latent axis that same-prompt entropy never flags. At the frozen operating point
 ($\tau=0$, $\tau_s=0.5$) the pooled detector runs at \textbf{precision $0.926$, recall $0.758$}, with a
 $k{=}0$ false-positive rate of $0.095$ (Table~\ref{tab:lps-op}).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{fig_auroc_comparison.pdf}
+\caption{Detection AUROC against executable gold-ambiguity, per model and pooled,
+with cluster (\texttt{task\_id}) bootstrap 95\% CIs (values and CIs transcribed from
+the confirmatory results). The detector $\Hctx{}$ (LPP) separates ambiguous from
+unambiguous prompts (pooled $0.895$), while same-prompt semantic entropy $\Hseed{}$
+sits near chance ($0.581$)---the SOTA-blind crux. Honestly, the
+requirements-probing baseline (assumption-surfacing \emph{without} the pinning test)
+is \emph{also} strong (pooled $0.810$); counterfactual pinning adds a real but
+\textbf{modest $+0.085$}. The pattern is consistent across all six models
+(three families, two tiers).}
+\label{fig:auroc-comparison}
+\end{figure}
+
 
 \begin{table}[t]
 \centering

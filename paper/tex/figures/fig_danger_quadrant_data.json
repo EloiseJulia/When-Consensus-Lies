@@ -1,0 +1,452 @@
+{
+  "provenance": {
+    "source": "confirmatory checkpoint cp_lps_confirm__*.jsonl (6 shards)",
+    "aggregation": "pooled per-item mean across model x seed cells (scripts/lps_confirm_report.aggregate_by_item)",
+    "frozen_operating_point": {
+      "tau": 0.0,
+      "tau_s": 0.5
+    },
+    "n_records": 972
+  },
+  "counts": {
+    "n_items": 54,
+    "n_AMB_pos": 33,
+    "n_AMB_neg": 21,
+    "n_danger_AMB_pos": 25,
+    "danger_mass": 0.7575757575757576
+  },
+  "points": [
+    {
+      "task_id": "code_date_001_k1_date_format_convention",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.584962500721156,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_getitems_001_k1_indexing_convention",
+      "stratum": "AMB+",
+      "H_seed": 0.5781274797566385,
+      "H_ctx_self": 1.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k1_date_format_convention",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.2327486116720103,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k1_fiscal_year_start",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k1_rounding_standard",
+      "stratum": "AMB+",
+      "H_seed": 0.712283412213827,
+      "H_ctx_self": 0.9500696763666324,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k2_date_rounding",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.552464584014425,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k2_fiscal_date",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.584962500721156,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k2_fiscal_rounding",
+      "stratum": "AMB+",
+      "H_seed": 0.3761952642982291,
+      "H_ctx_self": 1.0929546297898864,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k3_all",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.4224729171875015,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_quarter_001_k1_fiscal_year_start",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.1111111111111111,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_quarterdate_001_k1_date_format_convention",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.584962500721156,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_quarterdate_001_k1_fiscal_year_start",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.0,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_quarterdate_001_k2_all",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.5199666673076944,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_roundcurr_001_k1_rounding_standard",
+      "stratum": "AMB+",
+      "H_seed": 0.16042846553052495,
+      "H_ctx_self": 1.1775550933137486,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_activeusers_001_k1_active_user_threshold",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.584962500721156,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_avgprice_001_k1_price_weighting",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.16666666666666666,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_cumulative_001_k1_cumulative_interpretation",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.0324979167067307,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_geomean_001_k1_growth_averaging",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.2222222222222222,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_harmonic_001_k1_speed_averaging",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_rate_001_k1_rate_interval",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.8903370376780647,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_report_001_k1_active_user_threshold",
+      "stratum": "AMB+",
+      "H_seed": 0.16042846553052495,
+      "H_ctx_self": 0.9818435186787755,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_report_001_k1_avg_rounding",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_report_001_k2_all",
+      "stratum": "AMB+",
+      "H_seed": 0.20053558191315618,
+      "H_ctx_self": 1.0,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_tierank_001_k1_tie_ranking",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.8151768520121088,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_typical_001_k1_central_tendency",
+      "stratum": "AMB+",
+      "H_seed": 0.24064269829578747,
+      "H_ctx_self": 1.584962500721156,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_discount_001_k1_discount_basis",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.9636870373575509,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_interest_001_k1_compounding",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.6859092595797731,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_overtime_001_k1_overtime_threshold",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.2086048612313038,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_paymileage_001_k1_mileage_rounding",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_paymileage_001_k1_overtime_threshold",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_paymileage_001_k2_all",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_refund_001_k1_fee_basis",
+      "stratum": "AMB+",
+      "H_seed": 0.0,
+      "H_ctx_self": 1.0,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_tip_001_k1_tip_base",
+      "stratum": "AMB+",
+      "H_seed": 0.1341559324571885,
+      "H_ctx_self": 1.0,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_date_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_getitems_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_invoice_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_quarter_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_quarterdate_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "code_roundcurr_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.4636870373575509,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_activeusers_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_avgprice_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_cumulative_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_geomean_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_harmonic_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_rate_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_report_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.18809763214911454,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_tierank_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "data_typical_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_discount_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_interest_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.05101643522524942,
+      "is_danger": true,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_overtime_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_paymileage_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.12032134914789373,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_refund_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    },
+    {
+      "task_id": "policy_tip_001_k0",
+      "stratum": "AMB-",
+      "H_seed": 0.0,
+      "H_ctx_self": 0.0,
+      "is_danger": false,
+      "n_rows": 18
+    }
+  ]
+}
