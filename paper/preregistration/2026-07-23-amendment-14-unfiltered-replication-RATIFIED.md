@@ -1,7 +1,11 @@
-# Amendment 14 (DRAFT — awaiting owner @EloiseJulia PERSONAL ratification) — unfiltered-sample replication
+# Amendment 14 (RATIFIED by owner @EloiseJulia 2026-07-23) — unfiltered-sample replication
 
-> STATUS: **DRAFT. NOT SIGNED. NOT frozen. NO construction or run until owner personally ratifies.** The
-> Manager NEVER self-signs a frozen-contract change. Motivation: owner raised the benchmark SELECTION-BIAS
+> STATUS: **RATIFIED (owner personal sign-off 2026-07-23).** Owner input (verbatim): "按推荐默认 ratify A14
+> （N≈20–30 无筛选题、single+heterogeneous-MAD×3 seed、mai-code 构造、诚信报告不隐负面结果）（Recommended）".
+> The §7 recommended defaults + the §0 scientific-integrity commitment (B reported honestly regardless of
+> outcome; prominence not suppression) are FROZEN and owner-agreed. Construction may proceed; the RUN queues
+> AFTER the Phase 2b 6-model scale + Amendment 13. Additive sidecar ONLY — frozen 54 / schema / metrics /
+> results untouched. The Manager did NOT self-sign; this records the owner's personal ratification. Motivation: owner raised the benchmark SELECTION-BIAS
 > concern (2026-07-23) — the confirmatory benchmark's inclusion was partly conditioned on an empirical
 > default-check (unaware capable models produce the intended foil), which "could inflate observed
 > convergence" (already disclosed in the paper's Construct-validity subsection). This amendment does the
