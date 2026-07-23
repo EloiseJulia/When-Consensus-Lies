@@ -193,6 +193,7 @@ def run(
     dry_run: bool = False,
     offline: bool = False,
     budget_usd: Optional[float] = None,
+    select_pilot: bool = True,
     _client_override: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Run (or dry-run) the LPS pilot. Pure/offline-test-friendly.
@@ -200,11 +201,15 @@ def run(
     On dry_run: returns ``{status, total, jobs}`` with no network.
     On live/offline run: computes LPP results per (item, model), appends each as a
     JSON line to ``checkpoint_path`` (resumable), and returns the collected results.
+
+    ``select_pilot``: if True (default) restrict to the pre-specified 9-item set;
+    if False, run every task in ``tasks`` verbatim (used by the expanded
+    full-set validation pilot, ``lps_pilot2``).
     """
     if models is None:
         models = list(PILOT_MODELS)
 
-    pilot_tasks = _select_pilot_tasks(tasks)
+    pilot_tasks = _select_pilot_tasks(tasks) if select_pilot else list(tasks)
     jobs = enumerate_jobs(pilot_tasks, models)
 
     if dry_run:
