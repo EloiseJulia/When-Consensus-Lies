@@ -1174,3 +1174,60 @@ def test_legit_pilot_roster_validates_and_roundtrips(tmp_path):
     assert reloaded["roster"] == {"models": ["m"], "seed_bases": sorted(seeds),
                                   "items": ["A"]}
     assert len(reloaded["records"]) == 3
+
+
+# ── Concurrent per-model shards: --roster-models declared-roster override ─────
+
+def test_shard_by_model_roster_models_dryrun_stamps_full_roster(capsys):
+    # --shard-by-model --models A --roster-models A B C : enumerate ONLY A's
+    # jobs, but the DECLARED roster stamped into the shard header = {A, B, C}.
+    intv.main(["--shard-by-model", "--models", "gpt-5.6-sol",
+               "--roster-models", "gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro",
+               "--seeds", "30260713", "30270713", "30280713", "--dry-run"])
+    out = capsys.readouterr().out
+    # One processed model × 54 items × 3 seeds = 162 jobs enumerated.
+    assert "162 jobs" in out
+    assert "54 items × 1 models × 3 seeds" in out
+    # Declared roster stamped into every shard is the canonical full set.
+    declared = sorted({"gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro"})
+    assert f"Declared roster (stamped into every shard): {declared}" in out
+
+
+def test_roster_models_forwarded_to_run(monkeypatch):
+    # In the live shard loop the resolved declared roster (full set) — NOT the
+    # single processed --models — is forwarded to run(roster_models=...).
+    monkeypatch.setattr(intv.pilot1, "_live_ok", lambda: True)
+    monkeypatch.setattr(intv.pilot1, "_proxy_reachable", lambda: True)
+    captured: List[Any] = []
+
+    def _stub_run(tasks, cfg, **kw):
+        captured.append(kw)
+        return {"completed": 0, "skipped": 0, "total": 0,
+                "checkpoint": kw.get("checkpoint_path")}
+
+    monkeypatch.setattr(intv, "run", _stub_run)
+    intv.main(["--shard-by-model", "--models", "gpt-5.6-sol",
+               "--roster-models", "gpt-5.6-sol", "claude-opus-4.8",
+               "--seeds", "30260713"])
+    assert len(captured) == 1
+    kw = captured[0]
+    assert kw["models"] == ["gpt-5.6-sol"]                       # processes ONE
+    assert kw["roster_models"] == ["claude-opus-4.8", "gpt-5.6-sol"]  # stamps FULL
+
+
+def test_roster_models_subset_violation_raises():
+    # A processed model NOT in the declared roster fails loud.
+    with pytest.raises(SystemExit):
+        intv.main(["--shard-by-model", "--models", "gpt-5.6-sol",
+                   "--roster-models", "claude-opus-4.8", "gemini-3.1-pro",
+                   "--seeds", "30260713", "--dry-run"])
+
+
+def test_no_roster_models_unchanged_behavior(capsys):
+    # Backward compat: without --roster-models the declared roster is derived
+    # from --models exactly as before.
+    intv.main(["--shard-by-model", "--models", "gpt-5.6-sol",
+               "--seeds", "30260713", "--dry-run"])
+    out = capsys.readouterr().out
+    assert "Declared roster (stamped into every shard): ['gpt-5.6-sol']" in out
+

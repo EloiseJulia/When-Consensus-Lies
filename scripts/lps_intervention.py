@@ -744,6 +744,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--models", nargs="+", default=None,
                         help=f"Override model slugs (default: {DEFAULT_MODELS}). "
                              "Pilot targets gpt-5.6-sol.")
+    parser.add_argument("--roster-models", nargs="+", default=None,
+                        help="DECLARED grid roster stamped into every shard header "
+                             "(default: derived from --models). In --shard-by-model "
+                             "mode set this to the FULL model list so concurrent "
+                             "single-model shards all declare the identical roster "
+                             "and the strict merge accepts them. Every --models slug "
+                             "must be a subset of --roster-models.")
     parser.add_argument("--seeds", "--seed-bases", dest="seed_bases", nargs="+",
                         type=int, default=None,
                         help=f"Override seed bases (default: {DEFAULT_SEED_BASES}).")
@@ -768,6 +775,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     models = args.models or list(DEFAULT_MODELS)
     seed_bases = args.seed_bases or list(DEFAULT_SEED_BASES)
 
+    if args.roster_models is not None:
+        roster_models = sorted(set(args.roster_models))
+        missing = set(models) - set(roster_models)
+        if missing:
+            raise SystemExit(
+                "lps_intervention: --models must be a subset of --roster-models; "
+                f"models not in declared roster: {sorted(missing)} "
+                f"(roster: {roster_models})"
+            )
+    else:
+        roster_models = sorted(set(models))
+
     n_jobs = len(tasks) * len(models) * len(seed_bases)
     print("=" * 76)
     print("STUDY 2 — LPS INTERVENTION grid (Phase 2b: H-B1' + H-B2')")
@@ -780,6 +799,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"  jobs = {len(tasks)} × {len(models)} × {len(seed_bases)} = {n_jobs}")
     if args.shard_by_model:
         print("  shard-by-model: ON — per-model namespaced checkpoint+cache")
+        print(f"  declared roster (stamped into every shard): {roster_models}")
         for m in models:
             print(f"    {m:<20} → {shard_checkpoint(m)}  |  {shard_cache(m)}")
     else:
@@ -792,6 +812,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         print(f"\n[Intervention] Dry-run: {res['total']} jobs "
               f"({len(tasks)} items × {len(models)} models × "
               f"{len(seed_bases)} seeds).")
+        if args.shard_by_model:
+            print(f"[Intervention] Declared roster (stamped into every shard): "
+                  f"{roster_models}")
         return
 
     if not pilot1._live_ok():
@@ -814,7 +837,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 models=[m], seed_bases=seed_bases,
                 checkpoint_path=shard_checkpoint(m), cache_dir=shard_cache(m),
                 rpm=args.rpm, k=args.k, budget_usd=args.budget_usd,
-                roster_models=models, roster_seed_bases=seed_bases,
+                roster_models=roster_models, roster_seed_bases=seed_bases,
                 roster_items=roster_items,
             )
             print(f"[Intervention] shard {m}: completed={r['completed']} "
