@@ -156,6 +156,12 @@ redundancy that supplies no independent evidence because all agents inherit the 
 the task. We stress that an agent's default is often a \emph{locally reasonable} inference from the
 underspecified prompt, not model irrationality; the harm is the \emph{silent}, correlated convergence of
 many agents on one such reading \emph{without} flagging that the task admits others.
+We state the corresponding scope up front. Our items are deliberately \emph{constructed}, and their
+inclusion was partly conditioned on an empirical default check (\S\ref{sec:benchmark}); this study therefore
+does \emph{not} estimate the real-world \emph{prevalence} or base rate of underspecified, non-default
+situations. It \emph{characterizes} and \emph{detects} a failure \emph{mode}---and isolates the mechanism
+(\emph{where} the decisive disambiguator lies) that produces it---under those conditions, and we make no
+claim of generality beyond the tested items and models.
 
 This reframes a question at the heart of human--AI interaction. Reading multi-model agreement is not merely
 an accuracy problem; it is a question about whether the interfaces we build preserve the \emph{epistemic
@@ -414,11 +420,19 @@ before the confirmatory run.
 
 \emph{Default-check disclosure and construct-validity caveat.} Because inclusion required that unaware
 capable models produce the intended foil, item selection is \emph{partly conditioned on the default
-behavior} we then measure---a construct-validity limitation that could inflate observed convergence. Two
-features mitigate it: provenance separation (the constructor family is outside the tested pool, so the
-screen is not run by an evaluated agent) and the R2 cross-family construction control (\S\ref{sec:results}),
-where a second constructor family builds the traps. A fully unfiltered-sample replication (no default screen)
-is future work.
+behavior} we then measure---a construct-validity limitation that could inflate observed convergence. The
+decisive rebuttal is a \emph{within-item} one: the \emph{same} base tasks, run at $k{=}0$ with the
+disambiguator retained (fully specified), yield convergent delusion $\cd\!\approx\!0$, and $H2\_derivable$
+items (the ambiguity is present but derivable from the retained prompt) likewise yield $\cd\!\approx\!0$,
+whereas deleting the disambiguating clause on those very families drives $\cd$ high (\S\ref{sec:results},
+F1/F4). A ``we merely selected hard items'' account cannot produce $\cd\!\approx\!0$ on the $k{=}0$ and
+$H2$ variants of the same item families under the same pipeline, labeler, and metric; the effect therefore
+tracks the ambiguity \emph{structure} (the disambiguator's location), not item difficulty or selection. Two
+further features mitigate the screening concern: provenance separation (the constructor family is outside the
+tested pool, so the screen is not run by an evaluated agent) and the R2 cross-family construction control
+(\S\ref{sec:results}), where a second constructor family builds the traps. A fully unfiltered-sample
+replication (no default screen) is being pursued as a pre-registered robustness extension; we report no
+results for it here.
 
 %% =====================================================================
 \section{Pre-registered Study}
@@ -1046,7 +1060,10 @@ accuracy. These implications await empirical evaluation, which we leave to futur
 involve iteration and human participation, which we do not test. Claims about human trust, teams, and
 high-stakes domains are \emph{implications}, not tested deployments. Construct validity rests on the
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
-pre-registered drop-\iperp{} sensitivity. The abstention detector is rule-based and pending human
+pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, we
+do not estimate the real-world \emph{prevalence} of such situations---we characterize and detect a failure
+\emph{mode}; the within-item $k{=}0$/$H2$ controls (\S\ref{sec:results}), on which the same families yield
+$\cd\!\approx\!0$, guard the causal claim against a ``hard-item selection'' reading. The abstention detector is rule-based and pending human
 validation. Generalization beyond the three domains and the tested roster is future work.
 \paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
 work. First, a \emph{human-subjects study} (a within-subjects design of roughly 50 participants) would test
