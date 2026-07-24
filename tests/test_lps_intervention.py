@@ -1231,3 +1231,221 @@ def test_no_roster_models_unchanged_behavior(capsys):
     out = capsys.readouterr().out
     assert "Declared roster (stamped into every shard): ['gpt-5.6-sol']" in out
 
+
+# ── PER-CELL FAULT TOLERANCE (additive): a hanging/erroring cell → N/A, never a
+#    shard crash; N/A cells count for completeness but leak into NO metric ─────
+
+def _ok_fn():
+    dims_json = '[{"dimension": "d", "values": ["a", "b"]}]'
+
+    def fn(role, prompt, seed):
+        if intv.ORACLE_PREFIX in prompt:
+            return "I0"
+        if "JSON array" in prompt:
+            return dims_json
+        return "I1"
+    return fn
+
+
+def test_run_records_na_on_compute_cell_exception_and_continues(tmp_path, monkeypatch):
+    # (a) A cell that raises must be recorded as an N/A cell (same identity keys +
+    # "na": true + na_reason, NO signal fields) and the loop MUST continue — never
+    # crash the shard. The FIRST cell (item A) raises; the rest succeed.
+    client = ScriptedClient(_ok_fn())
+    cp = str(tmp_path / "cp_lps_intervention.jsonl")
+    cache = str(tmp_path / ".llm_cache_lps_intv")
+    tasks = [_task("A"), _task("B")]
+
+    real_compute = intv.compute_cell
+
+    def _boom_on_A(task, client, model, seed_base, **kw):
+        if task.id == "A":
+            raise TimeoutError("socket read timed out after 240s")
+        return real_compute(task, client, model, seed_base, **kw)
+
+    monkeypatch.setattr(intv, "compute_cell", _boom_on_A)
+
+    r = intv.run(tasks, {}, models=["gpt-5.6-sol"], seed_bases=[30260713, 30270713],
+                 checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client,
+                 allowed_roots=[str(tmp_path)])
+    assert r["status"] == "ok"
+    # 2 items × 1 model × 2 seeds = 4 cells all "completed" (2 real, 2 N/A).
+    assert r["completed"] == 4
+    assert r["na"] == 2
+    recs = [x for x in r["results"] if not x.get("_header")]
+    na_recs = [x for x in recs if x.get("na") is True]
+    ok_recs = [x for x in recs if not x.get("na")]
+    assert len(na_recs) == 2 and len(ok_recs) == 2
+    for na in na_recs:
+        assert na["task_id"] == "A"
+        assert na["na"] is True
+        assert na["na_reason"].startswith("TimeoutError:")
+        assert "signal" not in na  # no leakage-prone key
+        # An N/A cell carries NO signal fields.
+        for k in ("H_seed", "is_flagged", "clarify", "b2", "seed_labels"):
+            assert k not in na
+        # It DOES carry the full identity + a fingerprint the merge needs.
+        for k in ("task_id", "model", "seed_base", "stratum", "_fingerprint"):
+            assert k in na
+    for ok in ok_recs:
+        assert ok["task_id"] == "B"
+        assert "clarify" in ok and ok.get("na") is not True
+
+
+def test_run_records_na_on_wallclock_timeout(tmp_path, monkeypatch):
+    # The per-cell wall-clock guard: a cell that HANGS past CELL_TIMEOUT_SECONDS is
+    # recorded N/A and the loop continues (the daemon worker is abandoned).
+    import threading as _t
+    client = ScriptedClient(_ok_fn())
+    cp = str(tmp_path / "cp_lps_intervention.jsonl")
+    cache = str(tmp_path / ".llm_cache_lps_intv")
+
+    real_compute = intv.compute_cell
+    release = _t.Event()
+
+    def _hang_on_A(task, client, model, seed_base, **kw):
+        if task.id == "A":
+            release.wait(30)  # block until released (or the guard abandons us)
+            return real_compute(task, client, model, seed_base, **kw)
+        return real_compute(task, client, model, seed_base, **kw)
+
+    monkeypatch.setattr(intv, "compute_cell", _hang_on_A)
+    monkeypatch.setattr(intv, "CELL_TIMEOUT_SECONDS", 0.5)
+
+    try:
+        r = intv.run([_task("A"), _task("B")], {}, models=["gpt-5.6-sol"],
+                     seed_bases=[30260713], checkpoint_path=cp, cache_dir=cache,
+                     k=3, _client_override=client, allowed_roots=[str(tmp_path)])
+    finally:
+        release.set()
+    assert r["completed"] == 2 and r["na"] == 1
+    na = [x for x in r["results"] if x.get("na") is True]
+    assert len(na) == 1 and na[0]["task_id"] == "A"
+    assert "CELL_TIMEOUT_SECONDS" in na[0]["na_reason"]
+
+
+def _na_cell(tid, model, seed, fp, reason="TimeoutError: hang"):
+    return {"task_id": tid, "model": model, "seed_base": seed, "stratum": "AMB+",
+            "na": True, "na_reason": reason, "_fingerprint": fp}
+
+
+def test_merge_accepts_grid_with_one_na_cell(tmp_path):
+    # (b) A grid where ONE cell is N/A (2 real + 1 N/A = 3 = complete) merges OK;
+    # the N/A cell counts as present for completeness and is tracked separately.
+    fp = _fp_intv(models=["m"], seed_bases=[100])
+    roster = {"models": ["m"], "seed_bases": [100], "items": ["A", "B", "C"]}
+    recs = [_cell("A", "m", 100, fp), _cell("B", "m", 100, fp),
+            _na_cell("C", "m", 100, fp)]
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, recs,
+                    roster=roster)
+    merged = merge.merge_records([p])
+    assert len(merged["records"]) == 3
+    assert merged["n_na"] == 1
+    assert merged["per_model_na"] == {"m": 1}
+    # Completeness is satisfied — no MergeError raised.
+
+
+def test_merge_missing_real_cell_still_raises_even_with_na(tmp_path):
+    # N/A only fills the cell it OCCUPIES — a genuinely missing cell still aborts.
+    fp = _fp_intv(models=["m"], seed_bases=[100])
+    roster = {"models": ["m"], "seed_bases": [100], "items": ["A", "B", "C"]}
+    recs = [_cell("A", "m", 100, fp), _na_cell("B", "m", 100, fp)]  # C missing
+    p = _write_ckpt(tmp_path / "cp_lps_intervention__m.jsonl", fp, recs,
+                    roster=roster)
+    with pytest.raises(merge.MergeError):
+        merge.merge_records([p])
+
+
+def test_report_excludes_na_from_all_metrics_and_discloses(tmp_path):
+    # (c) The report must EXCLUDE N/A cells from every metric AND disclose them.
+    fp = _fp_intv(models=["gemini-3.5-flash"], seed_bases=[30260713, 30270713,
+                                                           30280713])
+    rows = []
+    # AMB+ item with 3 seeds: 2 real (baseline I1 / oracle I0, clarify all False),
+    # 1 N/A (the pathological hang). The N/A seed must NOT move ANY number.
+    for s in (30260713, 30270713):
+        rows.append({
+            "task_id": "code_invoice_001_k1_date_format_convention",
+            "model": "gemini-3.5-flash", "seed_base": s, "stratum": "AMB+",
+            "H_seed": 0.2, "clarify": {p: True for p in intv.CLARIFY_POLICIES},
+            "b2": {"baseline_label": "I1", "oracle_label": "I0"},
+            "_fingerprint": fp,
+        })
+    rows.append(_na_cell("code_invoice_001_k1_date_format_convention",
+                         "gemini-3.5-flash", 30280713, fp,
+                         reason="TimeoutError: cell exceeded "
+                                "CELL_TIMEOUT_SECONDS=240s"))
+
+    result = report.analyze(rows, {})
+    # Live cells = 2 (N/A excluded); the single item aggregates over 2 of 3 seeds.
+    assert result["n_records"] == 2
+    assert result["n_na"] == 1
+    pooled = result["pooled"]
+    assert pooled["n_items"] == 1
+    # The one AMB+ item used the remaining 2 seeds → clean cd_primary values.
+    hb2 = pooled["hb2"]
+    assert hb2["n_AMB_pos"] == 1
+    assert hb2["baseline_cd"] == pytest.approx(1.0)
+    assert hb2["oracle_cd"] == pytest.approx(0.0)
+    # The item aggregate saw exactly 2 rows (the N/A seed was dropped).
+    items = report.aggregate_by_item(
+        [r for r in rows if r.get("na") is not True], {})
+    assert items[0]["n_rows"] == 2
+
+    md = report.render_markdown(result, checkpoint="cp.jsonl", n_models=1)
+    assert "N/A cells excluded from ALL metrics (1)" in md
+    assert "gemini-3.5-flash 1" in md
+    assert "code_invoice_001_k1_date_format_convention seed 30280713" in md
+
+
+def test_report_na_only_item_dropped_entirely(tmp_path):
+    # An item whose EVERY seed is N/A simply vanishes from the item set (it can
+    # never contribute a metric) — still disclosed.
+    fp = _fp_intv(models=["m"], seed_bases=[100])
+    rows = [_na_cell("Z", "m", 100, fp)]
+    result = report.analyze(rows, {})
+    assert result["n_records"] == 0
+    assert result["pooled"]["n_items"] == 0
+    assert result["n_na"] == 1
+    md = report.render_markdown(result, checkpoint="cp.jsonl", n_models=0)
+    assert "N/A cells excluded from ALL metrics (1)" in md
+
+
+def test_report_no_na_discloses_zero(tmp_path):
+    # A fully-successful grid discloses "N/A cells excluded: 0".
+    result = report.analyze(_hb1_rows(), {})
+    assert result["n_na"] == 0
+    md = report.render_markdown(result, checkpoint="cp.jsonl", n_models=1)
+    assert "N/A cells excluded: 0" in md
+
+
+def test_successful_grid_records_byte_identical_to_compute_cell(tmp_path):
+    # (d) A fully-successful grid is UNCHANGED: each persisted record equals what
+    # compute_cell produces directly (plus the _fingerprint the driver stamps),
+    # with NO "na"/"na_reason" keys anywhere. Proves the SUCCESS path is untouched.
+    fn = _ok_fn()
+    client = ScriptedClient(fn)
+    cp = str(tmp_path / "cp_lps_intervention.jsonl")
+    cache = str(tmp_path / ".llm_cache_lps_intv")
+    tasks = [_task("A", key_questions=["axis?"]), _task("B")]
+
+    r = intv.run(tasks, {}, models=["gpt-5.6-sol"], seed_bases=[30260713],
+                 checkpoint_path=cp, cache_dir=cache, k=3, _client_override=client,
+                 allowed_roots=[str(tmp_path)])
+    assert r["na"] == 0
+    recs = [x for x in r["results"] if not x.get("_header")]
+    assert len(recs) == 2
+    for rec in recs:
+        assert "na" not in rec and "na_reason" not in rec
+        # Reproduce the cell directly and compare (drop the driver-only fingerprint).
+        stratum = rec["stratum"]
+        direct = intv.compute_cell(
+            _task(rec["task_id"], key_questions=["axis?"]
+                  if rec["task_id"] == "A" else None),
+            ScriptedClient(fn), rec["model"], rec["seed_base"],
+            k=3, tau=intv.TAU, tau_s=intv.TAU_S, stratum=stratum)
+        persisted = {k: v for k, v in rec.items() if k != "_fingerprint"}
+        assert persisted == direct
+
+
+

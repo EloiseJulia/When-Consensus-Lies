@@ -63,6 +63,7 @@ import argparse
 import json
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -116,6 +117,15 @@ DEFAULT_MODELS = ["gpt-5.6-sol"]
 DEFAULT_SEED_BASES = [30260713, 30270713, 30280713]
 
 RPM = 30
+
+#: Per-cell wall-clock budget (seconds). A single (item, model, seed) cell that
+#: hangs (a pathological proxy generation-stall — observed on gemini-3.5-flash for
+#: one complex 3-part-output item) must NEVER be able to block a whole shard. When
+#: a cell exceeds this budget the driver records an N/A cell (see ``_na_record``)
+#: and CONTINUES; the leaked worker thread is a daemon so it can never keep the
+#: process alive. Set to ``0``/``None`` to disable the wall-clock guard and rely
+#: solely on the client's own socket timeout raising (still caught → N/A).
+CELL_TIMEOUT_SECONDS = 240
 
 #: FROZEN operating point (prereg §2). Item flag = (H_ctx-self > τ) ∧ (H_seed ≤ τ_s).
 TAU = 0.0
@@ -574,6 +584,103 @@ def compute_cell(
     }
 
 
+# ── Per-cell fault tolerance (ADDITIVE — never touches the SUCCESS path) ──────
+
+#: Unambiguous marker key stamped on a cell that could NOT be computed (a hang or
+#: any exception). It is a dedicated boolean field that can NEVER collide with a
+#: real signal value — an N/A cell carries NO signal fields at all (no ``H_seed`` /
+#: ``is_flagged`` / ``clarify`` / ``b2``), so a downstream reader can excise it by
+#: ``rec.get("na") is True`` without ever mistaking it for a real detector result.
+NA_MARKER = "na"
+
+
+def _na_reason(exc: BaseException) -> str:
+    """Compact, human-readable ``<ExceptionType: message truncated>`` for a cell."""
+    msg = str(exc).strip().replace("\n", " ")
+    if len(msg) > 200:
+        msg = msg[:197] + "…"
+    return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+
+
+def _na_record(task: Any, model: str, seed_base: int, stratum: str,
+               reason: str) -> Dict[str, Any]:
+    """Build an N/A cell: the SAME identity keys a real cell carries + the N/A
+    marker, and NO signal fields. The ``_fingerprint`` / ``_roster`` stamping is
+    applied by the caller exactly as for a real record, so an N/A cell counts as a
+    present, grid-completing cell for merge — while carrying zero signal that could
+    leak into any metric.
+    """
+    return {
+        "task_id": task.id,
+        "model": model,
+        "seed_base": seed_base,
+        "domain": task.domain,
+        "regime": task.regime,
+        "ambiguity_level": task.ambiguity_level,
+        "stratum": stratum,
+        NA_MARKER: True,
+        "na_reason": reason,
+    }
+
+
+def _run_cell(
+    task: Any,
+    client: Any,
+    model: str,
+    seed_base: int,
+    *,
+    k: int,
+    tau: float,
+    tau_s: float,
+    stratum: str,
+    timeout: Optional[float] = CELL_TIMEOUT_SECONDS,
+) -> Dict[str, Any]:
+    """Fault-tolerant wrapper around :func:`compute_cell`.
+
+    On SUCCESS returns the EXACT ``compute_cell`` record (byte-identical to the
+    pre-fault-tolerance behaviour). On ANY exception — a client socket timeout, a
+    network / online-mode error, or an internal failure — OR on exceeding the
+    per-cell wall-clock ``timeout``, returns an N/A record (:func:`_na_record`) so
+    the caller can persist it and CONTINUE instead of crashing the shard.
+
+    The wall-clock guard runs ``compute_cell`` in a DAEMON worker thread and joins
+    with ``timeout``; a genuinely hung cell leaks that daemon (it cannot be safely
+    interrupted on Windows — no ``signal.alarm``) but the daemon can never keep the
+    process alive, and its (discarded) result never reaches the checkpoint. With
+    ``timeout`` falsy the guard is skipped and we rely on the client's own timeout
+    raising into the try/except.
+    """
+    if not timeout or timeout <= 0:
+        try:
+            return compute_cell(task, client, model, seed_base,
+                                k=k, tau=tau, tau_s=tau_s, stratum=stratum)
+        except BaseException as exc:  # noqa: BLE001 — a single cell must never crash the shard
+            return _na_record(task, model, seed_base, stratum, _na_reason(exc))
+
+    box: Dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            box["rec"] = compute_cell(task, client, model, seed_base,
+                                      k=k, tau=tau, tau_s=tau_s, stratum=stratum)
+        except BaseException as exc:  # noqa: BLE001
+            box["exc"] = exc
+
+    th = threading.Thread(target=_worker, daemon=True,
+                          name=f"intv-cell-{task.id}-{model}-{seed_base}")
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        return _na_record(
+            task, model, seed_base, stratum,
+            f"TimeoutError: cell exceeded CELL_TIMEOUT_SECONDS={int(timeout)}s "
+            "(pathological generation hang)",
+        )
+    if "exc" in box:
+        return _na_record(task, model, seed_base, stratum, _na_reason(box["exc"]))
+    return box["rec"]
+
+
 # ── Core run ─────────────────────────────────────────────────────────────────
 
 def run(
@@ -688,15 +795,17 @@ def run(
 
     completed = 0
     skipped = 0
+    na = 0
     for job in jobs:
         key = (job["task_id"], job["model"], job["seed_base"])
         if key in done:
             skipped += 1
             continue
         task = task_by_id[job["task_id"]]
-        rec = compute_cell(
+        rec = _run_cell(
             task, client, job["model"], job["seed_base"],
             k=k, tau=tau, tau_s=tau_s, stratum=stratum_by_id[job["task_id"]],
+            timeout=CELL_TIMEOUT_SECONDS,
         )
         rec["_fingerprint"] = fingerprint
         with cp.open("a", encoding="utf-8") as fh:
@@ -704,12 +813,15 @@ def run(
         results.append(rec)
         done.add(key)
         completed += 1
+        if rec.get(NA_MARKER) is True:
+            na += 1
 
     return {
         "status": "ok",
         "total": len(jobs),
         "completed": completed,
         "skipped": skipped,
+        "na": na,
         "checkpoint": str(cp),
         "results": results,
     }
