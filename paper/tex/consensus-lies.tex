@@ -1004,8 +1004,9 @@ seeds; item-set means and cluster-bootstrap CIs (by \texttt{task\_id}) carry the
 (executable gold; frozen operating point). \emph{Appropriate} $=$ clarify-rate on $\mathrm{AMB}{+}$ (high is
 good); \emph{Over} $=$ clarify-rate on $\mathrm{AMB}{-}$/$k{=}0$ (low is good); \emph{Net} $=$
 appropriate $-$ over (pre-committed $>0$ and $\ge$ each baseline); \emph{Danger} $=$ $\mathrm{AMB}{+}$
-coverage on the low-\Hseed{} ($\le\!\tau_s$) subset, where semantic entropy is blind. LPP wins on net and on
-danger-subset coverage.}
+coverage on the low-\Hseed{} ($\le\!\tau_s$) subset, where semantic entropy is blind. LPP wins on net; in the
+danger zone it far exceeds the uncertainty baselines (semantic entropy and self-consistency) that are blind there,
+without the trivial over-clarification of always-clarify or requirements-probing.}
 \label{tab:study2-intervention}
 \footnotesize
 \setlength{\tabcolsep}{4pt}
@@ -1046,7 +1047,7 @@ real-user study is future work), convergent delusion on $\mathrm{AMB}{+}$ items 
 baseline \cd{} of \textbf{$0.604$ $[0.462, 0.741]$} to \textbf{$0.014$ $[0.000, 0.035]$}---a paired drop of
 $0.591$ $[0.449, 0.731]$, with the target interpretation recovered on $93.1\%$ of items (oracle $I_0$-hit
 $0.931$ $[0.899, 0.963]$). The drop is CI-separated and robust across models (per-model oracle \cd{} is
-$0.000$ for four of six models). This is the strong constructive result: the failure is not intrinsic---once
+$0.000$ for five of six models). This is the strong constructive result: the failure is not intrinsic---once
 the specific unstated premise is surfaced, the shared wrong interpretation is resolvable by executable gold.
 The single-model pilot on gpt-5.6-sol is cleaner still (H-B1$'$ net $0.667$ with over-clarification $0.000$;
 H-B2$'$ baseline \cd{} $0.626\!\to\!0.000$, oracle $I_0$-hit $1.000$), consistent with the capability
