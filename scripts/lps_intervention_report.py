@@ -252,11 +252,39 @@ def analyze_hb2(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _summarize_na(na_cells: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Collate excluded N/A cells (``"na": true``) for honest disclosure.
+
+    Returns ``{"n_total", "by_model": {model: [{task_id, seed_base, na_reason}]}}``.
+    These cells are EXCLUDED from every metric; this summary exists ONLY so the
+    report can disclose WHICH cells (model / item / seed / reason) were dropped.
+    """
+    by_model: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in na_cells:
+        by_model[r.get("model", "?")].append({
+            "task_id": r.get("task_id"),
+            "seed_base": r.get("seed_base"),
+            "na_reason": r.get("na_reason"),
+        })
+    return {"n_total": len(na_cells), "by_model": dict(by_model)}
+
+
 def analyze(records: List[Dict[str, Any]],
             gold_by_id: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    """Per-model + pooled H-B1'/H-B2' analysis over per-item aggregates."""
+    """Per-model + pooled H-B1'/H-B2' analysis over per-item aggregates.
+
+    N/A cells (``"na": true`` — a cell the driver could not compute because of a
+    hang/exception) are EXCLUDED from EVERY aggregation (per-model, pooled, H-B1',
+    H-B2', danger-subset) BEFORE any grouping, so they can never move a number. The
+    per-item aggregation therefore transparently uses the REMAINING seeds (e.g. 2
+    of 3) for an item with one N/A seed. The excluded cells are summarised for
+    honest disclosure.
+    """
+    na_cells = [r for r in records if r.get("na") is True]
+    live = [r for r in records if r.get("na") is not True]
+
     by_model: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for r in records:
+    for r in live:
         by_model[r.get("model", "?")].append(r)
 
     def _group(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -274,8 +302,14 @@ def analyze(records: List[Dict[str, Any]],
         }
 
     per_model = {m: _group(rows) for m, rows in sorted(by_model.items())}
-    pooled = _group(records)
-    return {"per_model": per_model, "pooled": pooled, "n_records": len(records)}
+    pooled = _group(live)
+    return {
+        "per_model": per_model,
+        "pooled": pooled,
+        "n_records": len(live),
+        "n_na": len(na_cells),
+        "na": _summarize_na(na_cells),
+    }
 
 
 # ── Markdown rendering ───────────────────────────────────────────────────────
@@ -320,6 +354,34 @@ def _hb2_table(hb2: Dict[str, Any]) -> List[str]:
             f"| {base} | {orc} | {delta} | {hit} | {hb2['n_AMB_pos']} |"]
 
 
+def _na_disclosure_lines(na: Dict[str, Any]) -> List[str]:
+    """Honesty-note bullets disclosing the N/A cells excluded from ALL metrics.
+
+    Discloses the count PER MODEL and WHICH items/seeds (and why), e.g.
+    ``gemini-3.5-flash 1 (code_invoice_001_k1_date_format_convention seed 30280713
+    — a pathological proxy generation-hang, not a detector result)``.
+    """
+    total = na.get("n_total", 0)
+    if not total:
+        return ["- N/A cells excluded: 0 — every declared cell computed a real "
+                "result (no proxy hang / cell error)."]
+    lines = [f"- **N/A cells excluded from ALL metrics ({total}):** a cell that "
+             "could not be computed (a pathological proxy generation-hang or a "
+             "client/network error — NOT a detector result) is recorded as N/A, "
+             "counts toward grid completeness, and is DROPPED from every H-B1'/"
+             "H-B2'/danger-subset/per-model aggregation (the item's remaining "
+             "seeds carry it):"]
+    for model in sorted(na.get("by_model", {})):
+        cells = na["by_model"][model]
+        detail = "; ".join(
+            f"{c.get('task_id')} seed {c.get('seed_base')} "
+            f"({c.get('na_reason') or 'unknown'})"
+            for c in cells
+        )
+        lines.append(f"    - {model} {len(cells)}: {detail}")
+    return lines
+
+
 def render_markdown(result: Dict[str, Any], *, checkpoint: str,
                     n_models: int) -> str:
     pooled = result["pooled"]
@@ -340,7 +402,9 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
     lines.append(f"- Checkpoint: `{checkpoint}`")
     lines.append(f"- Records analysed: {result['n_records']} run cells "
                  f"aggregated to {pooled['n_items']} pre-registered items "
-                 f"across {n_models} model(s)")
+                 f"across {n_models} model(s)"
+                 + (f" ({result.get('n_na', 0)} N/A cell(s) excluded — see "
+                    "Honesty notes)" if result.get("n_na") else ""))
     sc = pooled["strata_counts"]
     lines.append(f"- Strata (executable gold-ambiguity): AMB+ {sc[AMB_POS]} / "
                  f"NON-DISC {sc[NON_DISC]} / AMB− {sc[AMB_NEG]}")
@@ -422,6 +486,7 @@ def render_markdown(result: Dict[str, Any], *, checkpoint: str,
     # ── Honesty notes ────────────────────────────────────────────────────────
     lines.append("## Honesty notes")
     lines.append("")
+    lines.extend(_na_disclosure_lines(result.get("na") or {}))
     lines.append(f"- NON-DISC items ({sc[NON_DISC]}) are reported SEPARATELY "
                  "(a deleted axis exists but interpretations coincide on the given "
                  "inputs — informative, not a detector error).")

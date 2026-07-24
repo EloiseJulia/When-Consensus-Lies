@@ -418,13 +418,28 @@ def merge_records(paths: List[str], *, strict: bool = True,
     per_model: Dict[str, int] = {}
     for r in records:
         per_model[r.get("model", "?")] = per_model.get(r.get("model", "?"), 0) + 1
+    # N/A cells (``"na": true``) are VALID present cells for grid completeness (a
+    # cell that could not be computed — a proxy hang / exception — was recorded as
+    # N/A by the driver so the shard can complete). They carry the identity keys +
+    # ``_fingerprint`` a real cell does, so they already satisfy the key/version/
+    # roster/completeness checks above WITHOUT special-casing. We only COUNT them
+    # here so the report can disclose them; they still carry no signal fields.
+    n_na = 0
+    per_model_na: Dict[str, int] = {}
+    for r in records:
+        if r.get("na") is True:
+            n_na += 1
+            m = r.get("model", "?")
+            per_model_na[m] = per_model_na.get(m, 0) + 1
     return {
         "records": records,
         "n_read": n_read,
         "n_dup": n_dup,
         "n_conflict": n_conflict,
+        "n_na": n_na,
         "per_shard": per_shard,
         "per_model": per_model,
+        "per_model_na": per_model_na,
         "shared_fingerprint": shared_fp,
         "roster": roster,
     }
@@ -505,6 +520,9 @@ def main(argv: Optional[List[str]] = None, *,
         print(f"    {path}  ({n} records)")
     print(f"[Merge] Read {merged['n_read']}; kept {len(merged['records'])}; "
           f"deduped {merged['n_dup']} (conflicts: {merged['n_conflict']}).")
+    if merged.get("n_na"):
+        print(f"[Merge] N/A cells (recorded, excluded from metrics downstream): "
+              f"{merged['n_na']} — {merged.get('per_model_na')}")
     print(f"[Merge] Per-model: {merged['per_model']}")
     print(f"[Merge] Wrote {args.out}")
 
