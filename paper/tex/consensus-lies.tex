@@ -984,16 +984,74 @@ axis is responsible is a secondary, recall-limited signal, not a headline. Third
 baseline is not applicable} on non-OpenAI models, so we do not report it cross-family. None of these
 undercuts the primary, pre-committed detection result; we state them so the contribution is not overclaimed.
 
-\subsection{Intervention and white-box contrast (pre-registered; results forthcoming)}
+\subsection{Intervention: selective clarification and oracle resolution (pre-registered)}
 \label{sec:study2-intervention}
-Two pre-registered follow-ups extend the detector from diagnosis to action; both are still running, and we
-describe only their frozen \emph{design} here, with no numbers.
-\todo{Phase 2b intervention results forthcoming.} \emph{Selective clarification (H-B1$'$) and oracle
-resolution (H-B2$'$).} The design tests whether LPP triggers clarification on genuinely ambiguous
-($\mathrm{AMB}{+}$) items but not on unambiguous ($\mathrm{AMB}{-}$/$k{=}0$) ones---i.e.\ appropriate minus
-over-clarification $> 0$, and better targeting than both an always-clarify baseline and a
-semantic-entropy-gated baseline---and, in a controlled oracle where the true convention is supplied on
-clarification, whether the model's answer moves to the target interpretation by executable gold.
+Two pre-registered follow-ups extend the detector from diagnosis to action. We report the closed-loop
+intervention (Phase~2b, H-B1$'$/H-B2$'$) here; the white-box contrast (Phase~2c) is still running and we
+describe only its frozen design. Every intervention metric is scored by \emph{executable gold} (the frozen
+\cd{} labeler against target $I_0$), never an LLM judge, at the pre-registered operating point
+($\tau{=}0.0$, $\tau_s{=}0.5$~bits). We pool $809$ run cells over six models into $54$ pre-registered items;
+$163$ cells that could not be computed (a pathological proxy generation-hang and slow-tail truncation on the
+two Gemini endpoints---an operational, not scientific, failure) are recorded as N/A and dropped from every
+aggregation, which uses only real cells. Four models are complete (gpt-5.6-sol, claude-opus-4.8, gpt-4o-mini,
+claude-haiku-4.5); gemini-3.1-pro-preview is partial ($\approx\!73\%$) and gemini-3.5-flash is largely
+excluded. Because committed answers use temperature $0.0$, a single item's per-seed \cd{} is coarse at three
+seeds; item-set means and cluster-bootstrap CIs (by \texttt{task\_id}) carry the resolution.
+
+\begin{table}[t]
+\centering
+\caption{Study~2 intervention (Phase~2b, H-B1$'$), pooled over six models on the $54$ pre-registered items
+(executable gold; frozen operating point). \emph{Appropriate} $=$ clarify-rate on $\mathrm{AMB}{+}$ (high is
+good); \emph{Over} $=$ clarify-rate on $\mathrm{AMB}{-}$/$k{=}0$ (low is good); \emph{Net} $=$
+appropriate $-$ over (pre-committed $>0$ and $\ge$ each baseline); \emph{Danger} $=$ $\mathrm{AMB}{+}$
+coverage on the low-\Hseed{} ($\le\!\tau_s$) subset, where semantic entropy is blind. LPP wins on net and on
+danger-subset coverage.}
+\label{tab:study2-intervention}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Policy & Appropriate & Over & Net & Danger \\
+\midrule
+\textbf{LPP-gated (ours)} & $0.730$ & $0.408$ & $\mathbf{0.321}$ & $\mathbf{0.730}$ \\
+always-clarify           & $1.000$ & $1.000$ & $0.000$ & $1.000$ \\
+semantic-entropy-gated   & $0.149$ & $0.030$ & $0.119$ & $0.149$ \\
+self-consistency-gated   & $0.149$ & $0.030$ & $0.119$ & $0.149$ \\
+requirements-probing     & $0.969$ & $0.853$ & $0.116$ & $0.969$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{H-B1$'$: selective clarification reaches the danger zone SOTA signals miss.} The pre-registered
+direction is met pooled (Table~\ref{tab:study2-intervention}): LPP-gated net clarification is
+\textbf{$0.321$ $[0.188, 0.448]$}, above every baseline---always-clarify ($0.000$ by construction),
+semantic-entropy-gated ($0.119$), and requirements-probing ($0.116$, which fires almost everywhere:
+over-clarification $0.853$, net collapsing despite high coverage). The headline is coverage of the
+\emph{danger subset}---$\mathrm{AMB}{+}$ items with low seed-entropy ($\Hseed\!\le\!\tau_s$), the
+confident-latent-premise zone where same-prompt resampling is blind: LPP reaches \textbf{$0.730$} there
+against \textbf{$0.149$} for semantic entropy (self-consistency is identical). LPP triggers clarification in
+exactly the quadrant semantic entropy under-fires ($0.149$ coverage), where the failure lives.
+
+\paragraph{Honest cross-model nuance: coverage is robust, precision is model-dependent.} The
+\emph{selectivity} of the gate varies with model capability. On the reasoning model gpt-5.6-sol the gate is
+clean---over-clarification $0.032$, net $0.544$---whereas pooling weaker or other models raises
+over-clarification to $0.408$ and lowers the pooled net to $0.321$. Per-model net ranges from $0.149$
+(claude-haiku-4.5) to $0.544$ (gpt-5.6-sol). So LPP reliably \emph{covers} the danger zone across models,
+but its \emph{precision}---avoiding over-clarification on unambiguous items---depends on the underlying
+model; we report this rather than pooling it away.
+
+\paragraph{H-B2$'$: supplying the unstated convention nearly eliminates the delusion.} In a controlled
+oracle that supplies the deleted axis's gold convention on clarification (a simulated-user resolution;
+real-user study is future work), convergent delusion on $\mathrm{AMB}{+}$ items falls from a never-clarify
+baseline \cd{} of \textbf{$0.604$ $[0.462, 0.741]$} to \textbf{$0.014$ $[0.000, 0.035]$}---a paired drop of
+$0.591$ $[0.449, 0.731]$, with the target interpretation recovered on $93.1\%$ of items (oracle $I_0$-hit
+$0.931$ $[0.899, 0.963]$). The drop is CI-separated and robust across models (per-model oracle \cd{} is
+$0.000$ for four of six models). This is the strong constructive result: the failure is not intrinsic---once
+the specific unstated premise is surfaced, the shared wrong interpretation is resolvable by executable gold.
+The single-model pilot on gpt-5.6-sol is cleaner still (H-B1$'$ net $0.667$ with over-clarification $0.000$;
+H-B2$'$ baseline \cd{} $0.626\!\to\!0.000$, oracle $I_0$-hit $1.000$), consistent with the capability
+dependence above.
+
 \todo{Phase 2c AU-Probe white-box contrast forthcoming.} \emph{White-box contrast.} A small open white-box
 model probed on CPU positions LPP as the black-box, cross-vendor-deployable method against a
 representation-level alternative; the pre-registered plan permits a reduced item subset if the full run is
