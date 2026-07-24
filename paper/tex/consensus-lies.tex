@@ -58,8 +58,9 @@ $\approx\!0.03\%$); a nominal $k$-agent ensemble supplies the evidence of $\appr
 ($\neff\!=\!1.10$). When the same information is inside the prompt, no tier---including weaker,
 non-frontier models---converges on a shared wrong interpretation (rate $=\!0.00$). A second benchmark constructed by a \emph{different} model family
 rules out a shared-prior-with-the-constructor artifact. We name this failure \emph{fake redundancy}: under a
-shared information boundary, nominally diverse agents form an \emph{interpretive monoculture}, and consensus
-stops being evidence of correctness. Our aim is not to rediscover that frontier-model errors are correlated,
+shared information boundary, nominally diverse agents form an \emph{interpretive monoculture}. When evidence
+independence is unknown---especially when inputs may lack a decisive disambiguating condition---consensus alone
+is not sufficient evidence of correctness. Our aim is not to rediscover that frontier-model errors are correlated,
 but to isolate a controlled, capability-invariant phase boundary---the disambiguator's location---that
 switches this monoculture on and off on executable-gold tasks. Building on this diagnosis, we contribute a black-box, cross-vendor
 detector (Study~2) that flags precisely this condition at inference time---without ground truth---by testing
@@ -136,7 +137,9 @@ independence produces confident convergence on error rather than accuracy~\cite{
 but it also imports its precondition---and it is far from obvious that sending one prompt to five models
 produces five \emph{independent} interpretations of the task. We show that the middle links of the chain can
 break: \emph{different models do not guarantee independent interpretations or evidence}. Our headline is
-a slogan we thread throughout: \textbf{model diversity is not necessarily evidence diversity}. Same-prompt
+a slogan we thread throughout: \textbf{model diversity is not necessarily evidence diversity}. When evidence
+independence is unknown---especially when inputs may lack a decisive disambiguating condition---consensus alone
+is not sufficient evidence of correctness. Same-prompt
 pluralism can create answer multiplicity without evidential independence.
 
 We identify \emph{when} it does---and when it does not---for a class of underspecified tasks. Our study concerns \emph{underspecified}
@@ -151,8 +154,8 @@ $k$-agent ensemble collapses to roughly one effective independent judgment. When
 present \emph{inside} the prompt, no tier converges on a shared wrong interpretation (Figure~\ref{fig:overview} previews the setup and
 result). We call the wrong-consensus failure
 \emph{convergent delusion}, and the structural condition that produces it \emph{fake redundancy}: apparent
-redundancy that supplies no independent evidence because all agents inherit the same lossy representation of
-the task. We stress that an agent's default is often a \emph{locally reasonable} inference from the
+redundancy that, under the shared information boundary we test, is not sufficient as independent corroboration
+because all agents inherit the same lossy representation of the task. We stress that an agent's default is often a \emph{locally reasonable} inference from the
 underspecified prompt, not model irrationality; the harm is the \emph{silent}, correlated convergence of
 many agents on one such reading \emph{without} flagging that the task admits others.
 We state the corresponding scope up front. Our items are deliberately \emph{constructed}, and their
@@ -1077,7 +1080,13 @@ is absent even when the aggregated systems are nominally diverse. The failure is
 (reasoners fail with no detectable advantage), nor that they are homogeneous (cross-family pools show
 equivalent convergence; \S\ref{sec:f2}), but that
 they share the \emph{same lossy representation of the task}. Consensus then measures the concentration of a
-shared prior, not the corroboration of independent evidence.
+shared prior, not the corroboration of independent evidence. When evidence independence is unknown---especially
+when inputs may lack a decisive disambiguating condition---consensus alone is not sufficient evidence of correctness.
+This does not mean consensus is worthless: its evidential value is conditional on whether the input contains the
+decisive information, whether agents draw on independent evidence, whether their errors are correlated, and
+whether they adopt the same default interpretation; our study shows that consensus can lose that value when these
+conditions fail, specifically when the disambiguator is external, and characterizes and detects that regime without
+estimating how often it occurs in the wild.
 
 \subsection{Shared-input failure, not groupthink}
 The outcome resembles groupthink---unanimous, confident error~\cite{janis1972}---but the mechanism differs.
@@ -1173,7 +1182,9 @@ A permanent archival link will be provided on acceptance.
 \section{Conclusion}
 \label{sec:conclusion}
 When collaborative systems aggregate AI judgments, they inherit an assumption that is easy to state and easy
-to violate: that agreement reflects independent evidence. Under underspecification, that assumption fails
+to violate: that agreement reflects independent evidence. When evidence independence is unknown---especially
+when inputs may lack a decisive disambiguating condition---consensus alone is not sufficient evidence of
+correctness. Under underspecification, that assumption fails
 silently---nominally diverse agents form an interpretive monoculture, a $k$-agent ensemble collapses to one
 effective voice, and confident consensus becomes an artifact of a shared prior rather than a warrant for a
 decision. The fix is not more agents but a different question. For multi-model interface design, supporting
@@ -1262,4 +1273,3 @@ The chronological record, with commit SHAs, is in the project's decision log; th
 accompany the release.
 
 \end{document}
-
