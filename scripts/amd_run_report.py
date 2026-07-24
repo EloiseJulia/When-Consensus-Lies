@@ -284,6 +284,23 @@ def _min_agents_for_config(config: str) -> int:
     return 1
 
 
+def _pool_member_models(pool_identity: str) -> Set[str]:
+    """Extract member model slugs from a canonical ``pool:[family|model;...]`` id."""
+    if not isinstance(pool_identity, str):
+        return set()
+    if not (pool_identity.startswith("pool:[") and pool_identity.endswith("]")):
+        return set()
+    body = pool_identity[len("pool:["):-1]
+    members: Set[str] = set()
+    for entry in body.split(";"):
+        if "|" not in entry:
+            continue
+        _family, model = entry.split("|", 1)
+        if model:
+            members.add(model)
+    return members
+
+
 def tidy_grid_completeness(
     tidy,
     which: str,
@@ -323,6 +340,13 @@ def tidy_grid_completeness(
     expected = expected_run_jobs(which, tasks=tasks, seeds=seeds)
     expected_seed_set = {int(s) for s in seeds}
     seed_ok = len(expected_seed_set) >= 3
+    pool_expected_by_cell: Dict[Tuple[str, str, int], str] = {}
+    pool_members_by_cell: Dict[Tuple[str, str, int], Set[str]] = {}
+    for task_id, config, model_id, seed in expected:
+        if _min_agents_for_config(config) > 1:
+            cell = (task_id, config, seed)
+            pool_expected_by_cell[cell] = model_id
+            pool_members_by_cell[cell] = _pool_member_models(model_id)
 
     counts: Dict[Tuple[str, str, str, int], int] = {}
     unexpected: Dict[Tuple[str, str, str, int], int] = {}
@@ -336,6 +360,17 @@ def tidy_grid_completeness(
             )
             if key in expected:
                 counts[key] = counts.get(key, 0) + 1
+                continue
+
+            task_id, config, model_id, seed = key
+            pool_cell = (task_id, config, seed)
+            pool_identity = pool_expected_by_cell.get(pool_cell)
+            if (
+                pool_identity is not None
+                and model_id in pool_members_by_cell.get(pool_cell, set())
+            ):
+                canonical_key = (task_id, config, pool_identity, seed)
+                counts[canonical_key] = counts.get(canonical_key, 0) + 1
             else:
                 unexpected[key] = unexpected.get(key, 0) + 1
 
