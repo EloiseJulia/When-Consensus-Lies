@@ -20,6 +20,7 @@ by RUNNER_LIVE=1 which is NEVER set here. Covers:
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -126,6 +127,69 @@ def _passing_gate() -> Dict[str, Any]:
         "verdict_status": "PASS",
         "_authoritative_recomputed": True,
     }
+
+
+def _write_report_authority(tmp_path: Path, which: str, tidy: pd.DataFrame, *, seeds=None) -> str:
+    """Write a real manifest + checkpoint completion markers for report authority."""
+    if seeds is None:
+        seeds = report._expected_seeds()
+    cp = tmp_path / f"cp_amd_run__{which}.jsonl"
+    tasks = amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
+    amd_run.write_run_manifest(
+        str(cp), which=which, seeds=seeds, configs=amd_run.AMD_CONFIGS,
+        tasks=tasks, include_h1_anchors=(which == "amd13"),
+    )
+    with cp.open("w", encoding="utf-8") as fh:
+        for task_id, config, model, seed in sorted(report.expected_run_jobs(which, tasks=tasks, seeds=seeds)):
+            fh.write(json.dumps({
+                "type": "job_done",
+                "task_id": task_id,
+                "config": config,
+                "model_id": model,
+                "seed": seed,
+            }) + "\n")
+    return str(cp)
+
+
+def _write_manip_authority(tmp_path: Path, *, seeds=None, passing: bool = True) -> str:
+    """Write a real manipulation manifest + checkpoint whose recomputed verdict passes/fails."""
+    if seeds is None:
+        seeds = report._expected_seeds()
+    h2_tasks, h1_tasks = manip.select_manip_tasks()
+    tasks = [manip.build_probe_task(t) for t in (h2_tasks + h1_tasks)]
+    cp = tmp_path / "cp_amd_run__amd13_manip.jsonl"
+    amd_run.write_run_manifest(
+        str(cp), which="amd13", seeds=seeds, configs=["single"],
+        tasks=tasks, include_h1_anchors=True,
+    )
+    with cp.open("w", encoding="utf-8") as fh:
+        for task in tasks:
+            for model in manip.REASONER_SLUGS:
+                for seed in seeds:
+                    if passing:
+                        label = "I0" if task.regime == "H2_derivable" else "I1"
+                    else:
+                        label = "I1"
+                    rec = {
+                        "type": "run",
+                        "task_id": task.id,
+                        "config": "single",
+                        "model_role": "tested_agents",
+                        "model_id": model,
+                        "seed": seed,
+                        "replicate_seed": seed,
+                        "label": label,
+                    }
+                    fh.write(json.dumps(rec) + "\n")
+                    fh.write(json.dumps({
+                        "type": "job_done",
+                        "task_id": task.id,
+                        "config": "single",
+                        "model_role": "tested_agents",
+                        "model_id": model,
+                        "seed": seed,
+                    }) + "\n")
+    return str(cp)
 
 
 def _complete_a14_tidy(k1_labels, *, seeds=None) -> pd.DataFrame:
@@ -332,9 +396,11 @@ def _a13_synthetic_tidy() -> pd.DataFrame:
     return _complete_a13_tidy()
 
 
-def test_a13_per_domain_contrast_and_regime_domain_read():
+def test_a13_per_domain_contrast_and_regime_domain_read(tmp_path):
     tidy = _a13_synthetic_tidy()
-    result = report.a13_analysis(tidy, manip_verdict=_passing_gate())
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
+    manip_cp = _write_manip_authority(tmp_path)
+    result = report.a13_analysis(tidy, checkpoint_path=cp, manip_checkpoint_path=manip_cp)
     for dom in ("code_spec", "policy_qa"):
         r = result["per_domain"][dom]
         assert r["cd_h1"] == pytest.approx(1.0)
@@ -366,11 +432,12 @@ def test_a13_requires_both_named_domains(monkeypatch):
     assert result["crossing_supported"] is False
 
 
-def test_a13_gate_fail_renders_no_crossing_claim():
+def test_a13_gate_fail_renders_no_crossing_claim(tmp_path):
     """MAJOR 4: a missing/failed manipulation verdict → validity-failure render only."""
     tidy = _a13_synthetic_tidy()
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
     # (a) verdict absent
-    res_absent = report.a13_analysis(tidy, manip_verdict=None)
+    res_absent = report.a13_analysis(tidy, manip_verdict=None, checkpoint_path=cp)
     assert res_absent["gate_pass"] is False
     assert res_absent["crossing_supported"] is False
     md_absent = report.render_amd13(res_absent)
@@ -378,7 +445,8 @@ def test_a13_gate_fail_renders_no_crossing_claim():
     assert "no regime×domain crossing is asserted" in md_absent
     assert "H-A13 crossing supported: True" not in md_absent
     # (b) verdict present but FAILED
-    res_fail = report.a13_analysis(tidy, manip_verdict={"gate_pass": False})
+    fail_manip_cp = _write_manip_authority(tmp_path, passing=False)
+    res_fail = report.a13_analysis(tidy, manip_verdict={"gate_pass": False}, checkpoint_path=cp, manip_checkpoint_path=fail_manip_cp)
     md_fail = report.render_amd13(res_fail)
     assert "VALIDITY FAILURE" in md_fail
     assert "crossing supported" not in md_fail.lower()
@@ -399,29 +467,56 @@ def test_manip_verdict_without_completeness_is_incomplete_and_gate_closed():
     {"gate_pass": True, "grid_complete": False, "verdict_status": "PASS"},
     {"gate_pass": True, "grid_complete": True},
 ])
-def test_report_gate_rejects_stale_or_hand_edited_verdict(verdict):
+def test_report_gate_rejects_stale_or_hand_edited_verdict(verdict, tmp_path):
     assert report._gate_passed(verdict) is False
-    res = report.a13_analysis(_a13_synthetic_tidy(), manip_verdict=verdict)
+    tidy = _a13_synthetic_tidy()
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
+    res = report.a13_analysis(
+        tidy, manip_verdict=verdict, checkpoint_path=cp,
+        manip_checkpoint_path=str(tmp_path / "cp_amd_run__amd13_manip_missing.jsonl"),
+    )
     assert res["gate_pass"] is False
     assert res["crossing_supported"] is False
     assert "VALIDITY FAILURE" in report.render_amd13(res)
 
 
-def test_a13_gate_pass_renders_crossing_and_interaction():
+def test_injected_fully_shaped_verdict_cannot_authorize_a13(tmp_path):
+    tidy = _a13_synthetic_tidy()
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
+    fabricated = {
+        "gate_pass": True,
+        "grid_complete": True,
+        "verdict_status": "PASS",
+        "_authoritative_recomputed": True,
+    }
+    res = report.a13_analysis(
+        tidy, manip_verdict=fabricated, checkpoint_path=cp,
+        manip_checkpoint_path=str(tmp_path / "cp_amd_run__amd13_manip_missing.jsonl"),
+    )
+    assert res["grid_complete"] is True
+    assert res["gate_pass"] is False
+    assert res["crossing_supported"] is False
+    assert "VALIDITY FAILURE" in report.render_amd13(res)
+
+
+def test_a13_gate_pass_renders_crossing_and_interaction(tmp_path):
     """Gate PASS → full render includes the interaction read + crossing verdict."""
     tidy = _a13_synthetic_tidy()
-    res = report.a13_analysis(tidy, manip_verdict=_passing_gate())
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
+    manip_cp = _write_manip_authority(tmp_path)
+    res = report.a13_analysis(tidy, checkpoint_path=cp, manip_checkpoint_path=manip_cp)
     md = report.render_amd13(res)
     assert "GATE PASSED: True" in md
     assert "INTERACTION" in md
     assert "H-A13 crossing supported: True" in md
 
 
-def test_nondefault_authoritative_seeds_complete_pass_and_analyze_exactly_them():
+def test_nondefault_authoritative_seeds_complete_pass_and_analyze_exactly_them(tmp_path):
     seeds = [10101, 20202, 30303]
     tidy = _complete_a14_tidy("I1", seeds=seeds)
+    cp = _write_report_authority(tmp_path, "amd14", tidy, seeds=seeds)
     comp = report.tidy_grid_completeness(tidy, "amd14", seeds=seeds)
-    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=seeds)
+    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=seeds, checkpoint_path=cp)
     assert comp["complete"] is True
     assert comp["expected_seeds"] == seeds
     assert result["status"] == "COMPLETE"
@@ -430,7 +525,7 @@ def test_nondefault_authoritative_seeds_complete_pass_and_analyze_exactly_them()
     assert result["pooled_cd_primary"] == pytest.approx(1.0)
 
 
-def test_partial_fourth_requested_seed_is_incomplete_and_not_reported():
+def test_partial_fourth_requested_seed_is_incomplete_and_not_reported(tmp_path):
     default_seeds = report._expected_seeds()
     requested_seeds = default_seeds + [909090]
     tidy = _complete_a14_tidy("I0", seeds=default_seeds)
@@ -445,8 +540,13 @@ def test_partial_fourth_requested_seed_is_incomplete_and_not_reported():
         "seed": 909090,
     }])
     tidy = pd.concat([tidy, partial_fourth], ignore_index=True)
+    cp = tmp_path / "cp_amd_run__amd14_partial_fourth.jsonl"
+    amd_run.write_run_manifest(
+        str(cp), which="amd14", seeds=requested_seeds, configs=amd_run.AMD_CONFIGS,
+        tasks=amd_run.load_amd_tasks("amd14"), include_h1_anchors=False,
+    )
     comp = report.tidy_grid_completeness(tidy, "amd14", seeds=requested_seeds)
-    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=requested_seeds)
+    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=requested_seeds, checkpoint_path=str(cp))
     assert comp["complete"] is False
     assert comp["expected_seeds"] == sorted(requested_seeds)
     assert comp["n_missing_jobs"] > 0
@@ -457,15 +557,15 @@ def test_partial_fourth_requested_seed_is_incomplete_and_not_reported():
 
 def test_analysis_without_authoritative_manifest_seed_set_fails_closed():
     a13 = _a13_synthetic_tidy().copy()
-    a13.attrs.clear()
-    r13 = report.a13_analysis(a13, manip_verdict=_passing_gate())
+    a13.attrs["expected_seeds"] = report._expected_seeds()
+    r13 = report.a13_analysis(a13, manip_verdict=_passing_gate(), expected_seeds=report._expected_seeds())
     assert r13["grid_complete"] is False
     assert r13["crossing_supported"] is False
     assert "hardcoded/default seed fallback" in r13["grid_completeness"]["reason"]
 
     a14 = _complete_a14_tidy("I1").copy()
-    a14.attrs.clear()
-    r14 = report.a14_analysis(a14)
+    a14.attrs["expected_seeds"] = report._expected_seeds()
+    r14 = report.a14_analysis(a14, expected_seeds=report._expected_seeds())
     assert r14["status"] == "INCOMPLETE"
     assert r14["grid_complete"] is False
     assert r14["pooled_cd_primary"] != r14["pooled_cd_primary"]
@@ -525,7 +625,7 @@ def test_manifest_requested_fourth_seed_fails_closed_on_three_seed_checkpoint(tm
     tidy = _complete_a14_tidy("I1", seeds=completed_seeds)
     requested, manifest_comp = report.requested_seeds_from_manifest(str(cp), "amd14")
     comp = report.tidy_grid_completeness(tidy, "amd14", tasks=tasks, seeds=requested)
-    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=requested)
+    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=requested, checkpoint_path=str(cp))
     assert manifest_comp["complete"] is True
     assert requested == manifest_seeds
     assert comp["complete"] is False
@@ -596,11 +696,13 @@ def test_a13_provenance_holdout_drops_constructor_cells():
     assert all(filtered["model"] != "mai-code-1-flash")
 
 
-def test_a14_unconditioned_rate_and_delta():
+def test_a14_unconditioned_rate_and_delta(tmp_path):
     # Complete 24-item unfiltered grid: 12 k1 items cd=1 and 12 cd=0 → pooled 0.5.
     tasks = [t for t in amd_run.load_amd_tasks("amd14") if t.ambiguity_level >= 1]
     labels = {t.id: ("I1" if i < 12 else "I0") for i, t in enumerate(tasks)}
-    result = report.a14_analysis(_complete_a14_tidy(labels))
+    tidy = _complete_a14_tidy(labels)
+    cp = _write_report_authority(tmp_path, "amd14", tidy)
+    result = report.a14_analysis(tidy, checkpoint_path=cp)
     assert result["status"] == "COMPLETE"
     assert result["n_items"] == 24
     assert result["pooled_cd_primary"] == pytest.approx(0.5)
@@ -648,7 +750,7 @@ def test_a14_partial_grid_not_unconditioned_result():
     (["I1", "I0"], 0.5),   # ATTENUATED: partly enrichment-driven
     (["I0", "I0"], 0.0),   # NULL: effect vanishes on the unfiltered sample
 ])
-def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled):
+def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled, tmp_path):
     """Integrity: report STRUCTURE + mandatory fields identical across all three
     outcomes (high / attenuated / null); only the numbers differ."""
     if labels == ["I1", "I0"]:
@@ -656,7 +758,9 @@ def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled)
         k1 = {t.id: ("I1" if i < 12 else "I0") for i, t in enumerate(tasks)}
     else:
         k1 = labels[0]
-    result = report.a14_analysis(_complete_a14_tidy(k1))
+    tidy = _complete_a14_tidy(k1)
+    cp = _write_report_authority(tmp_path, "amd14", tidy)
+    result = report.a14_analysis(tidy, checkpoint_path=cp)
     assert result["pooled_cd_primary"] == pytest.approx(expected_pooled)
     md = report.render_amd14(result)
     # Mandatory structural anchors — MUST be present for every outcome.
@@ -673,6 +777,7 @@ def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled)
     # Mandatory result keys are identical across outcomes.
     assert set(result.keys()) == {
         "status", "grid_complete", "grid_completeness", "n_items",
+        "authoritative_expected_seeds",
         "pooled_cd_primary", "ci_lo", "ci_hi", "screened_rate",
         "delta_vs_screened", "fraction_convergent", "per_item",
         "provenance_dropped_cells",
@@ -681,7 +786,9 @@ def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled)
 
 def test_report_writes_markdown(tmp_path):
     tidy = _a13_synthetic_tidy()
-    md = report.render_amd13(report.a13_analysis(tidy, manip_verdict=_passing_gate()))
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
+    manip_cp = _write_manip_authority(tmp_path)
+    md = report.render_amd13(report.a13_analysis(tidy, checkpoint_path=cp, manip_checkpoint_path=manip_cp))
     path = report.write_report("amd13", md, out_dir=str(tmp_path))
     assert Path(path).exists()
     assert "Amendment 13" in Path(path).read_text(encoding="utf-8")

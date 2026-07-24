@@ -126,10 +126,13 @@ def load_manip_verdict(path: str = MANIP_VERDICT_PATH) -> Optional[Dict[str, Any
     return data if isinstance(data, dict) else None
 
 
-def _gate_passed(verdict: Optional[Dict[str, Any]]) -> bool:
+def _gate_passed(
+    verdict: Optional[Dict[str, Any]], *, authoritative_recomputed: bool = False
+) -> bool:
+    if not authoritative_recomputed:
+        return False
     return bool(
         verdict
-        and verdict.get("_authoritative_recomputed") is True
         and verdict.get("gate_pass") is True
         and verdict.get("grid_complete") is True
         and verdict.get("verdict_status") == "PASS"
@@ -138,6 +141,7 @@ def _gate_passed(verdict: Optional[Dict[str, Any]]) -> bool:
 
 def recompute_manip_verdict(
     checkpoint_path: Optional[str] = None,
+    manifest_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Recompute the A13 manipulation gate from checkpoint + manifest.
 
@@ -153,7 +157,9 @@ def recompute_manip_verdict(
     h2_tasks, h1_tasks = manip.select_manip_tasks()
     tasks = [manip.build_probe_task(t) for t in (h2_tasks + h1_tasks)]
 
-    requested_seeds, manifest_complete = requested_seeds_from_manifest(cp, "amd13")
+    requested_seeds, manifest_complete = requested_seeds_from_manifest(
+        cp, "amd13", manifest_path=manifest_path,
+    )
     if requested_seeds is None:
         requested_seeds = []
     expected_task_ids = {t.id for t in tasks}
@@ -204,21 +210,32 @@ def _expected_seeds() -> List[int]:
     return amd_run._default_seeds(load_config())
 
 
-def load_run_manifest(checkpoint_path: str) -> Optional[Dict[str, Any]]:
+def load_run_manifest(checkpoint_path: str, manifest_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Load the amd_run sidecar manifest that records requested seeds."""
     amd_run = _load("amd_run", "amd_run.py")
-    return amd_run.load_run_manifest(checkpoint_path)
+    if manifest_path is None:
+        return amd_run.load_run_manifest(checkpoint_path)
+    p = Path(manifest_path)
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
-def requested_seeds_from_manifest(checkpoint_path: str, which: str) -> Tuple[Optional[List[int]], Dict[str, Any]]:
+def requested_seeds_from_manifest(
+    checkpoint_path: str, which: str, *, manifest_path: Optional[str] = None,
+) -> Tuple[Optional[List[int]], Dict[str, Any]]:
     """Return the run-authoritative requested seeds, or fail-closed metadata."""
-    manifest = load_run_manifest(checkpoint_path)
+    manifest = load_run_manifest(checkpoint_path, manifest_path=manifest_path)
     if not manifest:
         return None, {
             "complete": False,
             "which": which,
             "reason": "run manifest missing or unreadable; requested seeds are unknown",
-            "manifest_path": _load("amd_run", "amd_run.py").run_manifest_path(checkpoint_path),
+            "manifest_path": manifest_path or _load("amd_run", "amd_run.py").run_manifest_path(checkpoint_path),
         }
     if manifest.get("which") != which:
         return None, {
@@ -440,6 +457,32 @@ def filter_tidy_to_seeds(tidy, seeds: Optional[List[int]]):
     return tidy[tidy[COLS["seed"]].map(lambda s: int(s) in allowed)].copy()
 
 
+def file_backed_grid_authority(
+    tidy,
+    which: str,
+    *,
+    checkpoint_path: Optional[str] = None,
+    manifest_path: Optional[str] = None,
+) -> Tuple[List[Any], Optional[List[int]], Dict[str, Any], Any]:
+    """Derive claim authority only from checkpoint + manifest files."""
+    tasks = _expected_tasks(which)
+    if checkpoint_path is None:
+        comp = tidy_grid_completeness(tidy, which, tasks=tasks, seeds=None)
+        return tasks, None, comp, tidy
+    requested_seeds, manifest_complete = requested_seeds_from_manifest(
+        checkpoint_path, which, manifest_path=manifest_path,
+    )
+    done_complete = checkpoint_done_completeness(
+        checkpoint_path, which, tasks=tasks, seeds=requested_seeds,
+    )
+    tidy_complete = tidy_grid_completeness(
+        tidy, which, tasks=tasks, seeds=requested_seeds,
+    )
+    return tasks, requested_seeds, _merge_completeness(
+        manifest_complete, done_complete, tidy_complete,
+    ), filter_tidy_to_seeds(tidy, requested_seeds)
+
+
 # ── Provenance holdout (tested-family ≠ constructor-family) ──────────────────
 
 def _model_family(model_id: str) -> str:
@@ -544,10 +587,14 @@ def _bootstrap_ci_interaction(
 
 
 def a13_analysis(tidy, *, domains: List[str] = None,
-                 manip_verdict: Any = "__load__",
+                 manip_verdict: Any = "__ignored__",
                  grid_completeness: Optional[Dict[str, Any]] = None,
                  expected_tasks: Optional[List[Any]] = None,
-                 expected_seeds: Optional[List[int]] = None) -> Dict[str, Any]:
+                 expected_seeds: Optional[List[int]] = None,
+                 checkpoint_path: Optional[str] = None,
+                 manifest_path: Optional[str] = None,
+                 manip_checkpoint_path: Optional[str] = None,
+                 manip_manifest_path: Optional[str] = None) -> Dict[str, Any]:
     """Per-domain cd_primary(H1) − cd_primary(H2) + regime×domain INTERACTION read.
 
     Implements the pre-registered Amendment 13 H-A13 analysis (MAJOR 5) AND the
@@ -563,24 +610,28 @@ def a13_analysis(tidy, *, domains: List[str] = None,
       * the crossing claim is GATED on a PASS manipulation verdict — if the verdict
         is absent or not PASS, ``gate_pass`` is False and no crossing is claimed.
 
-    ``manip_verdict``: pass a dict to inject a verdict (tests), ``None`` to force
-    "absent", or leave the sentinel to load from ``MANIP_VERDICT_PATH``.
+    Claim authorization is file-backed only: manipulation verdict, requested
+    seeds, and grid completeness are recomputed from checkpoint+manifest files.
+    ``manip_verdict=None`` is retained only as a force-absent test hook; dict
+    values, caller grid completeness, caller seeds, and tidy.attrs are ignored.
     """
     rr = _load("registered_run", "registered_run.py")
     if domains is None:
         domains = list(A13_REQUIRED_DOMAINS)
 
-    if manip_verdict == "__load__":
-        manip_verdict = recompute_manip_verdict()
-    gate_pass = _gate_passed(manip_verdict)
-    if expected_seeds is None:
-        expected_seeds = tidy.attrs.get("expected_seeds")
-    if grid_completeness is None:
-        grid_completeness = tidy_grid_completeness(
-            tidy, "amd13", tasks=expected_tasks, seeds=expected_seeds,
+    _ = (grid_completeness, expected_tasks, expected_seeds)
+    if manip_verdict is None:
+        recomputed_verdict = None
+    else:
+        recomputed_verdict = recompute_manip_verdict(
+            checkpoint_path=manip_checkpoint_path,
+            manifest_path=manip_manifest_path,
         )
+    gate_pass = _gate_passed(recomputed_verdict, authoritative_recomputed=True)
+    _, authoritative_seeds, grid_completeness, tidy_for_analysis = file_backed_grid_authority(
+        tidy, "amd13", checkpoint_path=checkpoint_path, manifest_path=manifest_path,
+    )
     grid_complete = bool(grid_completeness.get("complete"))
-    tidy_for_analysis = filter_tidy_to_seeds(tidy, expected_seeds)
 
     held, n_dropped = apply_provenance_holdout(tidy_for_analysis)
 
@@ -677,8 +728,9 @@ def a13_analysis(tidy, *, domains: List[str] = None,
         "gate_pass": gate_pass,
         "grid_complete": grid_complete,
         "grid_completeness": grid_completeness,
-        "manip_verdict_present": manip_verdict is not None,
-        "manip_verdict": manip_verdict,
+        "authoritative_expected_seeds": authoritative_seeds,
+        "manip_verdict_present": recomputed_verdict is not None,
+        "manip_verdict": recomputed_verdict,
         "per_domain": per_domain,
         "required_domains": list(A13_REQUIRED_DOMAINS),
         "both_domains_sufficient": both_domains_sufficient,
@@ -712,17 +764,16 @@ def a13_analysis(tidy, *, domains: List[str] = None,
 def a14_analysis(tidy, *,
                  grid_completeness: Optional[Dict[str, Any]] = None,
                  expected_tasks: Optional[List[Any]] = None,
-                 expected_seeds: Optional[List[int]] = None) -> Dict[str, Any]:
+                 expected_seeds: Optional[List[int]] = None,
+                 checkpoint_path: Optional[str] = None,
+                 manifest_path: Optional[str] = None) -> Dict[str, Any]:
     """Pooled UNCONDITIONED cd_primary on the unfiltered k1 items + delta vs 0.53."""
     rr = _load("registered_run", "registered_run.py")
-    if expected_seeds is None:
-        expected_seeds = tidy.attrs.get("expected_seeds")
-    if grid_completeness is None:
-        grid_completeness = tidy_grid_completeness(
-            tidy, "amd14", tasks=expected_tasks, seeds=expected_seeds,
-        )
+    _ = (grid_completeness, expected_tasks, expected_seeds)
+    _, authoritative_seeds, grid_completeness, tidy_for_analysis = file_backed_grid_authority(
+        tidy, "amd14", checkpoint_path=checkpoint_path, manifest_path=manifest_path,
+    )
     grid_complete = bool(grid_completeness.get("complete"))
-    tidy_for_analysis = filter_tidy_to_seeds(tidy, expected_seeds)
     held, n_dropped = apply_provenance_holdout(tidy_for_analysis)
 
     per_item = _per_item_cd(held, regime="H1_external", k_min=1)
@@ -743,6 +794,7 @@ def a14_analysis(tidy, *,
         "status": status,
         "grid_complete": grid_complete,
         "grid_completeness": grid_completeness,
+        "authoritative_expected_seeds": authoritative_seeds,
         "n_items": len(vals),
         "pooled_cd_primary": pooled,
         "ci_lo": ci_lo,
@@ -996,10 +1048,10 @@ def main(argv=None) -> None:
               "writing a placeholder report (run the driver live first).", file=sys.stderr)
 
     if args.which == "amd13":
-        result = a13_analysis(tidy, grid_completeness=tidy.attrs.get("grid_completeness"))
+        result = a13_analysis(tidy, checkpoint_path=checkpoint)
         md = render_amd13(result)
     else:
-        result = a14_analysis(tidy, grid_completeness=tidy.attrs.get("grid_completeness"))
+        result = a14_analysis(tidy, checkpoint_path=checkpoint)
         md = render_amd14(result)
 
     path = write_report(args.which, md, out_dir=args.out_dir)
