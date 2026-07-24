@@ -112,6 +112,51 @@ def _complete_tidy(which: str, label_for, *, seeds=None) -> pd.DataFrame:
     return df
 
 
+POOL_IDENTITY = "pool:[openai|gpt-5.4;anthropic|claude-sonnet-4.6;google|gemini-3.1-pro-preview]"
+POOL_MEMBER_TIDY_MODELS = [
+    "gpt-5.4",
+    "claude-sonnet-4.6",
+    "gemini-3.1-pro-preview",
+    "gpt-5.4",
+]
+
+
+def _complete_tidy_with_member_labeled_pools(which: str, label_for, *, seeds=None, tasks=None) -> pd.DataFrame:
+    """Build a complete grid where pool rows carry member model slugs, as analysis.io does."""
+    if seeds is None:
+        seeds = report._expected_seeds()
+    if tasks is None:
+        tasks = amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
+    by_id = {t.id: t for t in tasks}
+    rows = []
+    for task_id, config, model, seed in sorted(report.expected_run_jobs(which, tasks=tasks, seeds=seeds)):
+        task = by_id[task_id]
+        n_agents = 4 if config == "heterogeneous-MAD" else 1
+        labels = label_for(task, config, model, seed)
+        if isinstance(labels, str):
+            labels = [labels] * n_agents
+        assert len(labels) == n_agents
+        tidy_models = POOL_MEMBER_TIDY_MODELS if config == "heterogeneous-MAD" else [model]
+        if config == "heterogeneous-MAD":
+            assert model == POOL_IDENTITY
+        for lb, tidy_model in zip(labels, tidy_models):
+            rows.append({
+                "task": task.id,
+                "method": config,
+                "model_class": _model_class_for(config, tidy_model),
+                "seed": seed,
+                "label": lb,
+                "target": "I0",
+                "regime": task.regime,
+                "ambiguity_k": task.ambiguity_level,
+                "model": tidy_model,
+                "domain": task.domain,
+            })
+    df = pd.DataFrame(rows)
+    df.attrs["expected_seeds"] = list(seeds)
+    return df
+
+
 def _complete_a13_tidy() -> pd.DataFrame:
     def _label(task, *_):
         if task.ambiguity_level >= 1 and task.regime == "H1_external":
@@ -414,6 +459,105 @@ def test_a13_per_domain_contrast_and_regime_domain_read(tmp_path):
     assert result["regime_effect_holds_within_domain"] is True
     assert result["crossing_supported"] is True
     assert result["provenance_dropped_cells"] == 0
+
+
+def test_tidy_grid_completeness_reconciles_complete_member_labeled_pool():
+    tasks = amd_run.load_amd_tasks("amd13", include_h1_anchors=True)[:1]
+    seeds = [101, 202, 303]
+    tidy = _complete_tidy_with_member_labeled_pools(
+        "amd13", lambda *_: "I0", seeds=seeds, tasks=tasks,
+    )
+    comp = report.tidy_grid_completeness(tidy, "amd13", tasks=tasks, seeds=seeds)
+    assert comp["complete"] is True
+    assert comp["n_expected_jobs"] == len(tasks) * 8 * len(seeds)
+    assert comp["n_observed_jobs"] == comp["n_expected_jobs"]
+    assert comp["n_missing_jobs"] == 0
+    assert comp["n_underfilled_jobs"] == 0
+    assert comp["n_unexpected_jobs"] == 0
+
+
+def test_a13_analysis_accepts_complete_member_labeled_pool_grid(tmp_path):
+    def _label(task, *_):
+        if task.ambiguity_level >= 1 and task.regime == "H1_external":
+            return "I1"
+        return "I0"
+
+    tidy = _complete_tidy_with_member_labeled_pools("amd13", _label)
+    cp = _write_report_authority(tmp_path, "amd13", tidy)
+    manip_cp = _write_manip_authority(tmp_path)
+    result = report.a13_analysis(tidy, checkpoint_path=cp, manip_checkpoint_path=manip_cp)
+    assert result["grid_complete"] is True
+    assert result["crossing_supported"] is True
+
+
+def test_tidy_grid_completeness_member_labeled_pool_underfilled_fails_closed():
+    tasks = amd_run.load_amd_tasks("amd13", include_h1_anchors=True)[:1]
+    seeds = [101, 202, 303]
+    tidy = _complete_tidy_with_member_labeled_pools(
+        "amd13", lambda *_: "I0", seeds=seeds, tasks=tasks,
+    )
+    mask = (
+        (tidy["task"] == tasks[0].id)
+        & (tidy["method"] == "heterogeneous-MAD")
+        & (tidy["seed"] == seeds[0])
+    )
+    tidy = tidy.drop(tidy[mask].index[:1]).reset_index(drop=True)
+    comp = report.tidy_grid_completeness(tidy, "amd13", tasks=tasks, seeds=seeds)
+    assert comp["complete"] is False
+    assert comp["n_underfilled_jobs"] == 1
+    assert comp["underfilled_jobs"][0]["required_agents"] == 4
+    assert comp["underfilled_jobs"][0]["observed_agents"] == 3
+
+
+def test_tidy_grid_completeness_unexpected_pool_or_seed_row_fails_closed():
+    tasks = amd_run.load_amd_tasks("amd13", include_h1_anchors=True)[:1]
+    seeds = [101, 202, 303]
+    tidy = _complete_tidy_with_member_labeled_pools(
+        "amd13", lambda *_: "I0", seeds=seeds, tasks=tasks,
+    )
+    stray = pd.DataFrame([{
+        "task": tasks[0].id,
+        "method": "heterogeneous-MAD",
+        "model_class": "reasoning",
+        "seed": seeds[0],
+        "label": "I0",
+        "target": "I0",
+        "regime": tasks[0].regime,
+        "ambiguity_k": tasks[0].ambiguity_level,
+        "model": "not-in-the-heterogeneous-pool",
+        "domain": tasks[0].domain,
+    }])
+    comp = report.tidy_grid_completeness(
+        pd.concat([tidy, stray], ignore_index=True), "amd13", tasks=tasks, seeds=seeds,
+    )
+    assert comp["complete"] is False
+    assert comp["n_unexpected_jobs"] == 1
+    assert comp["unexpected_jobs"][0]["model"] == "not-in-the-heterogeneous-pool"
+
+
+def test_tidy_grid_completeness_single_model_missing_fails_closed():
+    tasks = amd_run.load_amd_tasks("amd13", include_h1_anchors=True)[:1]
+    seeds = [101, 202, 303]
+    tidy = _complete_tidy_with_member_labeled_pools(
+        "amd13", lambda *_: "I0", seeds=seeds, tasks=tasks,
+    )
+    expected_single = next(
+        (t, c, m, s) for t, c, m, s in sorted(report.expected_run_jobs("amd13", tasks=tasks, seeds=seeds))
+        if c == "single"
+    )
+    task_id, _config, model, seed = expected_single
+    mask = (
+        (tidy["task"] == task_id)
+        & (tidy["method"] == "single")
+        & (tidy["model"] == model)
+        & (tidy["seed"] == seed)
+    )
+    tidy = tidy.drop(tidy[mask].index).reset_index(drop=True)
+    comp = report.tidy_grid_completeness(tidy, "amd13", tasks=tasks, seeds=seeds)
+    assert comp["complete"] is False
+    assert comp["n_missing_jobs"] == 1
+    assert comp["missing_jobs"][0]["config"] == "single"
+    assert comp["missing_jobs"][0]["model"] == model
 
 
 def test_a13_requires_both_named_domains(monkeypatch):
