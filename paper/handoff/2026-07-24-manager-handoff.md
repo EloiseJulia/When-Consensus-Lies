@@ -65,11 +65,18 @@ semantic-entropy **0.581**; danger-quadrant 0.758 (25/33); all 6 frontier models
      (+67/−9), self-check green (pdflatex×2 clean, **27 pages**, 0 undefined refs). **NOT merged — needs GPT
      (gpt-5.6-sol) cross-family number-fidelity + overclaim audit FIRST (Law 6), then merge.** Every inserted
      number is listed in the agent's delivery report (see git log / agent transcript) for the audit diff.
-   - `amd-run-apparatus` (branch `slice/amd-run-apparatus`): FIXING **2 BLOCKER + 3 MAJOR + 1 MINOR** from the
-     audit (gold-leakage via config override; report path-guard bypass; **the manipulation-check didn't
-     actually supply the oracle hint**; A13 crossing not gated on the manip-check verdict; regime×domain
-     interaction analysis missing; A14 honesty test). → re-audit → merge. **Do NOT run A13/A14 live until this
-     apparatus is clean+merged.**
+   - `amd-run-apparatus` (branch `slice/amd-run-apparatus`, worktree `.worktrees/amd-run`, agent idle):
+     **FIXES DELIVERED at commit `07ab83f3`.** One GPT audit round already ran (found 2 BLOCKER + 3 MAJOR +
+     1 MINOR — all legit integrity flaws) and the implementer fixed ALL of them: strict
+     `ALLOWED_CONFIGS={single,heterogeneous-MAD}` (kills the `interpretation-diverse` gold-leakage path) +
+     anti-leakage test on ACTUAL generated prompts; report path-isolation guard on every checkpoint read /
+     report write; **the manipulation-check now actually supplies the oracle hint** (deleted-axis key_questions
+     as controlled clarification, scored by executable I0 labeling); A13 crossing claim now REQUIRES a PASS
+     manipulation verdict (executable gate); regime×domain interaction analysis added (both code_spec AND
+     policy_qa must be powered); A14 honesty test parameterized over high/attenuated/null. Full suite **1162
+     passed, 1 skipped**; dry-runs amd13=576, amd14=1152, manip=144; `--configs interpretation-diverse`→exit 2.
+     **NEEDS a fresh GPT cross-family RE-AUDIT of `07ab83f3` (Law 5: one clean audit → merge). Do NOT run
+     A13/A14 live until this is re-audited clean + merged.**
 2. **Run Amendment 13 (regime×domain):** first the MANIPULATION-CHECK gate (`amd13_manipulation_check.py`:
    oracle-hint recovery — H2 high / H1 low; **if it FAILS, report honestly and HOLD — do NOT tune**). Only if
    it PASSES: run `amd_run.py --which amd13` (single + heterogeneous-MAD, ≥3 seeds) → `amd_run_report.py`
