@@ -435,14 +435,19 @@ ambiguity is present but the deciding fact is retained in the prompt so a compet
 $I_0$, yield $\cd\!\approx\!0$ even at $k{\ge}1$. Together these rule out a \emph{generic} hard-item
 difficulty or pipeline/labeler artifact: mere item difficulty cannot explain $\cd\!\approx\!0$ when the same
 task is fully specified, so the effect tracks the ambiguity \emph{structure} (the disambiguator's location).
-They do \emph{not}, however, remove the inflation that screening \emph{specifically} for ambiguous items that
-elicit the foil may add to the observed \emph{rate}; that screen-induced selection effect is what the
-forthcoming replication is pre-registered to bound. Two further features mitigate the screening concern:
-provenance separation (the constructor family is outside the tested pool, so the screen is not run by an
-evaluated agent) and the R2 cross-family construction control (\S\ref{sec:results}), where a second
-constructor family builds the traps. A fully unfiltered-sample replication (no default screen)
-is being pursued as a pre-registered robustness extension to bound the screen-induced rate inflation; we
-report no results for it here.
+They do \emph{not}, however, by themselves remove the inflation that screening \emph{specifically} for
+ambiguous items that elicit the foil may add to the observed \emph{rate}. Amendment~14, a ratified
+pre-registered secondary robustness extension, directly bounds that concern with a fully unfiltered sample
+(no default screen): across 24 unfiltered $k{=}1$ items, pooled unconditioned convergent delusion is
+$\cd=0.685$ with 95\% CI $[0.521,0.839]$, and 79\% of unfiltered items still exhibit convergent delusion.
+The point-estimate delta relative to the screened confirmatory rate is $+0.155$, but the screened rate
+(0.53) lies within the unfiltered CI; the correct conclusion is therefore that the result does
+\emph{not} attenuate, not that it is significantly higher. Accordingly, we find no evidence that screening
+inflated the effect, and the effect
+replicates on the unfiltered sample. Two further features mitigate the screening concern: provenance
+separation (the constructor family is outside the tested pool, so the screen is not run by an evaluated
+agent) and the R2 cross-family construction control (\S\ref{sec:results}), where a second constructor
+family builds the traps.
 
 %% =====================================================================
 \section{Pre-registered Study}
@@ -726,6 +731,18 @@ for a null; the well-powered regime \emph{main} effect carries the claim. Two it
 capable models reach an unenumerated interpretation ($\rightarrow\iperp$); these are handled by the
 pre-registered drop-\iperp{} sensitivity (Appendix~\ref{app:deviations}), under which the effect is
 unchanged.
+
+Amendment~13, a ratified pre-registered secondary robustness check, crosses regime with domain. A
+manipulation check first validated the oracle-hint recovery probe, with mean H2 recovery $1.000$ versus mean
+H1 recovery $0.125$ (separation $0.875$), so the crossing is interpretable. Within both domains, the
+$H1\_external \rightarrow H2\_derivable$ regime contrast holds under the frozen \cd{} metric:
+for \texttt{code\_spec}, $\cd(H1)=0.887$ versus $\cd(H2)=0.042$ (contrast $0.846\,[0.740,0.951]$); for
+\texttt{policy\_qa}, $\cd(H1)=0.986$ versus $\cd(H2)=0.042$ (contrast $0.944\,[0.896,0.986]$). The pooled
+regime main effect is $0.895\,[0.823,0.958]$, while the regime$\times$domain interaction is
+$-0.099\,[-0.219,0.014]$ and not significant. Thus the two-regime effect is not domain-confounded: it holds
+within both tested domains rather than being an artifact of one. This is a small-$n$ secondary robustness
+check ($n=4$ items per cell per domain, with a wide interaction CI), not a primary result, and the frozen
+confirmatory finding is unchanged.
 
 \begin{table}[t]
 \centering
@@ -1145,10 +1162,12 @@ reversed-benchmark design and the default check; two items had incomplete foil s
 pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, we
 do not estimate the real-world \emph{prevalence} of such situations---we characterize and detect a failure
 \emph{mode}. The within-item $k{=}0$-vs-$k{\ge}1$ control (same base task; \S\ref{sec:results}, R1a) and the
-$H2\_derivable$ boundary condition rule out a \emph{generic} hard-item or pipeline artifact, but do not
-remove the screen-induced inflation of the observed rate; that selection effect is left to the forthcoming
-pre-registered unfiltered-sample replication. The abstention detector is rule-based and pending human
-validation. Generalization beyond the three domains and the tested roster is future work.
+$H2\_derivable$ boundary condition rule out a \emph{generic} hard-item or pipeline artifact, but did not by
+themselves remove possible screen-induced inflation of the observed rate. Amendment~14's completed
+pre-registered unfiltered-sample replication did not attenuate relative to the screened confirmatory rate
+(see Construct validity), so we find no evidence of screen-induced inflation. The abstention detector is
+rule-based and pending human validation. Generalization beyond the three domains and the tested roster is
+future work.
 \paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
 work. First, a \emph{human-subjects study} (a within-subjects design of roughly 50 participants) would test
 whether cross-model agreement raises adoption, whether that causes over-reliance when models share a wrong
@@ -1227,6 +1246,8 @@ Amdt & What changed & Direction & Primary? \\
 10 & R2 cross-family construction (second-family constructor for a computable R2) & operationalizes R2 & no \\
 11 & R2 interpretation $+$ H1a/R2 primary-method scope $+$ one construct-invalid item excluded & clarification & no \\
 12 & Two additive \emph{exploratory} conditions (cross-vendor synthesis; generic role-diversified workflow) on the frozen H1/H2 items, metric, and detector & additive (exploratory) & no \\
+13 & regime$\times$domain crossing: matched H1/H2 items in \texttt{code\_spec} + \texttt{policy\_qa} + manipulation-check gate (oracle-hint recovery) & secondary robustness & no \\
+14 & unfiltered-sample replication (no default screen) to bound selection inflation & secondary robustness & no \\
 \bottomrule
 \end{tabular}
 \end{table}
