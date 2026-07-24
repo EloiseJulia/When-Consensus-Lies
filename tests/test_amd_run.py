@@ -81,6 +81,8 @@ def _model_class_for(config: str, model: str) -> str:
 
 def _complete_tidy(which: str, label_for, *, seeds=None) -> pd.DataFrame:
     """Build a complete synthetic preregistered grid for amd13/amd14."""
+    if seeds is None:
+        seeds = report._expected_seeds()
     tasks = amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
     by_id = {t.id: t for t in tasks}
     rows = []
@@ -104,7 +106,9 @@ def _complete_tidy(which: str, label_for, *, seeds=None) -> pd.DataFrame:
                 "model": model,
                 "domain": task.domain,
             })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    df.attrs["expected_seeds"] = list(seeds)
+    return df
 
 
 def _complete_a13_tidy() -> pd.DataFrame:
@@ -116,7 +120,12 @@ def _complete_a13_tidy() -> pd.DataFrame:
 
 
 def _passing_gate() -> Dict[str, Any]:
-    return {"gate_pass": True, "grid_complete": True, "verdict_status": "PASS"}
+    return {
+        "gate_pass": True,
+        "grid_complete": True,
+        "verdict_status": "PASS",
+        "_authoritative_recomputed": True,
+    }
 
 
 def _complete_a14_tidy(k1_labels, *, seeds=None) -> pd.DataFrame:
@@ -386,6 +395,7 @@ def test_manip_verdict_without_completeness_is_incomplete_and_gate_closed():
 
 
 @pytest.mark.parametrize("verdict", [
+    {"gate_pass": True, "grid_complete": True, "verdict_status": "PASS"},
     {"gate_pass": True, "grid_complete": False, "verdict_status": "PASS"},
     {"gate_pass": True, "grid_complete": True},
 ])
@@ -443,6 +453,114 @@ def test_partial_fourth_requested_seed_is_incomplete_and_not_reported():
     assert result["status"] == "INCOMPLETE"
     assert result["pooled_cd_primary"] != result["pooled_cd_primary"]  # NaN: no partial-seed analysis
     assert "Pooled UNCONDITIONED cd_primary" not in report.render_amd14(result)
+
+
+def test_analysis_without_authoritative_manifest_seed_set_fails_closed():
+    a13 = _a13_synthetic_tidy().copy()
+    a13.attrs.clear()
+    r13 = report.a13_analysis(a13, manip_verdict=_passing_gate())
+    assert r13["grid_complete"] is False
+    assert r13["crossing_supported"] is False
+    assert "hardcoded/default seed fallback" in r13["grid_completeness"]["reason"]
+
+    a14 = _complete_a14_tidy("I1").copy()
+    a14.attrs.clear()
+    r14 = report.a14_analysis(a14)
+    assert r14["status"] == "INCOMPLETE"
+    assert r14["grid_complete"] is False
+    assert r14["pooled_cd_primary"] != r14["pooled_cd_primary"]
+    assert "hardcoded/default seed fallback" in r14["grid_completeness"]["reason"]
+
+
+def test_manip_unexpected_or_duplicate_rows_fail_closed_and_do_not_flip_gate():
+    h2_tasks, h1_tasks = manip.select_manip_tasks()
+    seeds = [101, 202, 303]
+    specs = []
+    for task in h2_tasks + h1_tasks:
+        for model in manip.REASONER_SLUGS:
+            for seed in seeds:
+                specs.append({
+                    "item": task.id, "regime": task.regime, "domain": task.domain,
+                    # Expected H1 rows recover I0, so stale I1 rows would be able
+                    # to flip H1 low if aggregation trusted non-authoritative rows.
+                    "labels": ["I0"],
+                    "model": model, "seed": seed,
+                })
+    tidy = _tidy_rows(specs)
+    stale = _tidy_rows([
+        {"item": h1_tasks[0].id, "regime": h1_tasks[0].regime, "domain": h1_tasks[0].domain,
+         "labels": ["I1"] * 20, "model": "gpt-5.6-sol", "seed": 999999},
+        {"item": h1_tasks[1].id, "regime": h1_tasks[1].regime, "domain": h1_tasks[1].domain,
+         "labels": ["I1"] * 20, "model": "unexpected-reasoner", "seed": seeds[0]},
+        {"item": h1_tasks[2].id, "regime": h1_tasks[2].regime, "domain": h1_tasks[2].domain,
+         "labels": ["I1"], "model": "gpt-5.6-sol", "seed": seeds[0]},
+    ])
+    # Duplicate an already-seen authoritative tuple.
+    duplicate = tidy[
+        (tidy["task"] == h1_tasks[2].id)
+        & (tidy["model"] == "gpt-5.6-sol")
+        & (tidy["seed"] == seeds[0])
+    ].copy()
+    poisoned = pd.concat([tidy, stale, duplicate], ignore_index=True)
+
+    verdict = manip.build_verdict_from_tidy(poisoned, h2_tasks, h1_tasks, expected_seeds=seeds)
+    assert verdict["verdict_status"] == "INCOMPLETE"
+    assert verdict["gate_pass"] is False
+    comp = verdict["completeness"]
+    assert comp["n_unexpected_observations"] >= 2
+    assert comp["n_duplicate_observations"] >= 1
+    # Authoritative rows only are scored; stale I1 rows did not lower H1 recovery.
+    assert verdict["mean_h1_recovery"] == pytest.approx(1.0)
+
+
+def test_manifest_requested_fourth_seed_fails_closed_on_three_seed_checkpoint(tmp_path):
+    cp = tmp_path / "cp_amd_run__amd14_resume.jsonl"
+    tasks = amd_run.load_amd_tasks("amd14")
+    manifest_seeds = [101, 202, 303, 404]
+    completed_seeds = [101, 202, 303]
+    amd_run.write_run_manifest(
+        str(cp), which="amd14", seeds=manifest_seeds, configs=amd_run.AMD_CONFIGS,
+        tasks=tasks, include_h1_anchors=False,
+    )
+    tidy = _complete_a14_tidy("I1", seeds=completed_seeds)
+    requested, manifest_comp = report.requested_seeds_from_manifest(str(cp), "amd14")
+    comp = report.tidy_grid_completeness(tidy, "amd14", tasks=tasks, seeds=requested)
+    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=requested)
+    assert manifest_comp["complete"] is True
+    assert requested == manifest_seeds
+    assert comp["complete"] is False
+    assert comp["n_missing_jobs"] > 0
+    assert result["status"] == "INCOMPLETE"
+    assert "Pooled UNCONDITIONED cd_primary" not in report.render_amd14(result)
+
+
+def test_amd_run_writes_expanded_manifest_before_runner_construction(monkeypatch, tmp_path):
+    cp = tmp_path / "cp_amd_run__amd14_resume.jsonl"
+    cache = tmp_path / ".llm_cache_amd_run_resume"
+    seeds = [101, 202, 303, 404]
+    monkeypatch.setenv("RUNNER_LIVE", "1")
+
+    class FakeRunner:
+        def run(self, dry_run=False):
+            return {"done": 0, "pending": 0, "total": 0}
+
+    class FakeClient:
+        _total_cost_usd = 0.0
+
+    def fake_build(cfg, tasks, **kwargs):
+        manifest = amd_run.load_run_manifest(str(cp))
+        assert manifest is not None
+        assert manifest["requested_seeds"] == seeds
+        assert kwargs["seeds"] == seeds
+        return FakeRunner(), FakeClient()
+
+    monkeypatch.setattr(amd_run, "build_amd_runner", fake_build)
+    amd_run.main([
+        "--which", "amd14",
+        "--checkpoint", str(cp),
+        "--cache-dir", str(cache),
+        "--seeds", *[str(s) for s in seeds],
+    ])
 
 
 def test_a13_null_contrast_reported_honestly():

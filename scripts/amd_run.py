@@ -45,6 +45,7 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -161,7 +162,7 @@ def write_run_manifest(
     tasks: List[Any],
     include_h1_anchors: bool,
 ) -> str:
-    """Persist the requested seed/config/task set next to the checkpoint.
+    """Atomically persist the requested seed/config/task set next to the checkpoint.
 
     Reports consume this manifest as the run-authoritative seed set; they never
     infer "requested" seeds from whatever rows happened to finish.
@@ -177,7 +178,19 @@ def write_run_manifest(
         "task_ids": [t.id for t in tasks],
         "n_tasks": len(tasks),
     }
-    p.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent), text=True
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, indent=2, sort_keys=True))
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, p)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
     return str(p)
 
 
@@ -497,7 +510,21 @@ def main(argv=None) -> None:
     print(f"  EXPECTED JOB COUNT: {expected}")
     print("=" * 72)
 
-    # dry-run also uses no network (offline client) as a defense-in-depth.
+    if not args.dry_run:
+        manifest = write_run_manifest(
+            checkpoint,
+            which=args.which,
+            seeds=seeds,
+            configs=configs,
+            tasks=tasks,
+            include_h1_anchors=include_anchors,
+        )
+        print(f"  manifest={manifest}")
+
+    # dry-run also uses no network (offline client) as a defense-in-depth. For
+    # live/resume runs, the manifest is already durable before Runner construction,
+    # so an interrupted expanded-seed resume fails closed instead of reporting the
+    # old complete seed set.
     runner, client = build_amd_runner(
         cfg, tasks,
         which=args.which,
@@ -509,17 +536,6 @@ def main(argv=None) -> None:
         rpm=args.rpm,
         offline=args.dry_run,
     )
-
-    if not args.dry_run:
-        manifest = write_run_manifest(
-            checkpoint,
-            which=args.which,
-            seeds=seeds,
-            configs=configs,
-            tasks=tasks,
-            include_h1_anchors=include_anchors,
-        )
-        print(f"  manifest={manifest}")
 
     result = runner.run(dry_run=args.dry_run)
 

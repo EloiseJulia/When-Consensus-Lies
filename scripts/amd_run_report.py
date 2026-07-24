@@ -48,9 +48,9 @@ SCREENED_CONFIRMATORY_RATE = 0.53
 # model family equals this (none exist, since mai-code is not in the tested roster).
 CONSTRUCTOR_FAMILY = "mai-code"
 
-# The A13 validity gate reads this verdict artifact (written by
-# scripts/amd13_manipulation_check.py). The regime×domain crossing is claimed ONLY
-# when this file exists AND records gate_pass == True (MAJOR 4). Non-protected name.
+# Retained only for provenance/backward-compatible inspection. The report does
+# NOT trust this persisted PASS; it recomputes the manipulation verdict from the
+# current manipulation checkpoint + manifest at render time.
 MANIP_VERDICT_PATH = str(_REPO_ROOT / "files" / "amd13_manipulation_verdict.json")
 
 # The two named domains Amendment 13 REQUIRES (both must be sufficiently powered;
@@ -129,9 +129,65 @@ def load_manip_verdict(path: str = MANIP_VERDICT_PATH) -> Optional[Dict[str, Any
 def _gate_passed(verdict: Optional[Dict[str, Any]]) -> bool:
     return bool(
         verdict
+        and verdict.get("_authoritative_recomputed") is True
         and verdict.get("gate_pass") is True
         and verdict.get("grid_complete") is True
         and verdict.get("verdict_status") == "PASS"
+    )
+
+
+def recompute_manip_verdict(
+    checkpoint_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Recompute the A13 manipulation gate from checkpoint + manifest.
+
+    Persisted verdict JSON is provenance only. This is the only default gate path
+    used by the report: missing manifests, stale seeds, unexpected/duplicate rows,
+    or absent checkpoints all produce INCOMPLETE and cannot authorize H-A13.
+    """
+    manip = _load("amd13_manipulation_check", "amd13_manipulation_check.py")
+    amd_run = _load("amd_run", "amd_run.py")
+    from analysis.io import load_runs_tidy, FRONTIER_MODEL_CLASS_MAP
+
+    cp = checkpoint_path or manip._CHECKPOINT
+    h2_tasks, h1_tasks = manip.select_manip_tasks()
+    tasks = [manip.build_probe_task(t) for t in (h2_tasks + h1_tasks)]
+
+    requested_seeds, manifest_complete = requested_seeds_from_manifest(cp, "amd13")
+    if requested_seeds is None:
+        requested_seeds = []
+    expected_task_ids = {t.id for t in tasks}
+    manifest = (manifest_complete or {}).get("manifest") or {}
+    manifest_task_ids = set(manifest.get("task_ids") or [])
+    manifest_tasks_ok = manifest_complete.get("complete") is True and manifest_task_ids == expected_task_ids
+    manifest_configs_ok = manifest.get("configs") == ["single"]
+    manifest_check = {
+        "complete": bool(manifest_complete.get("complete") and manifest_tasks_ok and manifest_configs_ok),
+        "which": "amd13",
+        "requested_seeds": requested_seeds,
+        "manifest_path": amd_run.run_manifest_path(cp),
+        "manifest_tasks_ok": manifest_tasks_ok,
+        "manifest_configs_ok": manifest_configs_ok,
+        "reason": None if (manifest_tasks_ok and manifest_configs_ok) else "manipulation manifest task/config set mismatch",
+    }
+
+    try:
+        tidy = load_runs_tidy(cp, tasks, model_class_map=FRONTIER_MODEL_CLASS_MAP)
+    except Exception as exc:  # fail closed on absent/unreadable/stale checkpoints
+        tidy = __import__("pandas").DataFrame()
+        manifest_check["load_error"] = str(exc)
+        manifest_check["complete"] = False
+
+    done_complete = manip._checkpoint_done_completeness(
+        cp, h2_tasks, h1_tasks, expected_seeds=requested_seeds,
+    )
+    return manip.build_verdict_from_tidy(
+        tidy, h2_tasks, h1_tasks,
+        expected_seeds=requested_seeds,
+        extra_completeness={"complete": all([
+            manifest_check.get("complete"),
+            done_complete.get("complete"),
+        ]), "checks": [manifest_check, done_complete]},
     )
 
 
@@ -230,7 +286,23 @@ def tidy_grid_completeness(
     if tasks is None:
         tasks = _expected_tasks(which)
     if seeds is None:
-        seeds = _expected_seeds()
+        return {
+            "complete": False,
+            "which": which,
+            "reason": "authoritative requested seeds missing; refusing hardcoded/default seed fallback",
+            "seed_count_ok": False,
+            "expected_seeds": [],
+            "n_expected_jobs": 0,
+            "n_observed_jobs": 0,
+            "n_missing_jobs": 0,
+            "n_underfilled_jobs": 0,
+            "n_overfilled_jobs": 0,
+            "n_unexpected_jobs": 0,
+            "missing_jobs": [],
+            "underfilled_jobs": [],
+            "overfilled_jobs": [],
+            "unexpected_jobs": [],
+        }
     expected = expected_run_jobs(which, tasks=tasks, seeds=seeds)
     expected_seed_set = {int(s) for s in seeds}
     seed_ok = len(expected_seed_set) >= 3
@@ -252,6 +324,7 @@ def tidy_grid_completeness(
 
     missing = []
     underfilled = []
+    overfilled = []
     for task_id, config, model_id, seed in sorted(expected):
         n = counts.get((task_id, config, model_id, seed), 0)
         need = _min_agents_for_config(config)
@@ -262,9 +335,14 @@ def tidy_grid_completeness(
                 "task": task_id, "config": config, "model": model_id,
                 "seed": seed, "observed_agents": n, "required_agents": need,
             })
+        elif n > need:
+            overfilled.append({
+                "task": task_id, "config": config, "model": model_id,
+                "seed": seed, "observed_agents": n, "required_agents": need,
+            })
 
     return {
-        "complete": bool(seed_ok and not missing and not underfilled and not unexpected),
+        "complete": bool(seed_ok and not missing and not underfilled and not overfilled and not unexpected),
         "which": which,
         "seed_count_ok": seed_ok,
         "expected_seeds": sorted(expected_seed_set),
@@ -272,9 +350,11 @@ def tidy_grid_completeness(
         "n_observed_jobs": sum(1 for k in expected if counts.get(k, 0) >= _min_agents_for_config(k[1])),
         "n_missing_jobs": len(missing),
         "n_underfilled_jobs": len(underfilled),
+        "n_overfilled_jobs": len(overfilled),
         "n_unexpected_jobs": len(unexpected),
         "missing_jobs": missing[:50],
         "underfilled_jobs": underfilled[:50],
+        "overfilled_jobs": overfilled[:50],
         "unexpected_jobs": [
             {"task": t, "config": c, "model": m, "seed": s, "rows": n}
             for (t, c, m, s), n in list(sorted(unexpected.items()))[:50]
@@ -293,7 +373,18 @@ def checkpoint_done_completeness(
     if tasks is None:
         tasks = _expected_tasks(which)
     if seeds is None:
-        seeds = _expected_seeds()
+        return {
+            "complete": False,
+            "which": which,
+            "reason": "authoritative requested seeds missing; refusing hardcoded/default seed fallback",
+            "expected_seeds": [],
+            "n_expected_jobs": 0,
+            "n_done_jobs": 0,
+            "n_missing_done_jobs": 0,
+            "n_unexpected_done_jobs": 0,
+            "missing_done_jobs": [],
+            "unexpected_done_jobs": [],
+        }
     expected = expected_run_jobs(which, tasks=tasks, seeds=seeds)
     done: Set[Tuple[str, str, str, int]] = set()
     p = Path(checkpoint_path)
@@ -480,15 +571,15 @@ def a13_analysis(tidy, *, domains: List[str] = None,
         domains = list(A13_REQUIRED_DOMAINS)
 
     if manip_verdict == "__load__":
-        manip_verdict = load_manip_verdict()
+        manip_verdict = recompute_manip_verdict()
     gate_pass = _gate_passed(manip_verdict)
+    if expected_seeds is None:
+        expected_seeds = tidy.attrs.get("expected_seeds")
     if grid_completeness is None:
         grid_completeness = tidy_grid_completeness(
             tidy, "amd13", tasks=expected_tasks, seeds=expected_seeds,
         )
     grid_complete = bool(grid_completeness.get("complete"))
-    if expected_seeds is None:
-        expected_seeds = tidy.attrs.get("expected_seeds")
     tidy_for_analysis = filter_tidy_to_seeds(tidy, expected_seeds)
 
     held, n_dropped = apply_provenance_holdout(tidy_for_analysis)
@@ -624,13 +715,13 @@ def a14_analysis(tidy, *,
                  expected_seeds: Optional[List[int]] = None) -> Dict[str, Any]:
     """Pooled UNCONDITIONED cd_primary on the unfiltered k1 items + delta vs 0.53."""
     rr = _load("registered_run", "registered_run.py")
+    if expected_seeds is None:
+        expected_seeds = tidy.attrs.get("expected_seeds")
     if grid_completeness is None:
         grid_completeness = tidy_grid_completeness(
             tidy, "amd14", tasks=expected_tasks, seeds=expected_seeds,
         )
     grid_complete = bool(grid_completeness.get("complete"))
-    if expected_seeds is None:
-        expected_seeds = tidy.attrs.get("expected_seeds")
     tidy_for_analysis = filter_tidy_to_seeds(tidy, expected_seeds)
     held, n_dropped = apply_provenance_holdout(tidy_for_analysis)
 

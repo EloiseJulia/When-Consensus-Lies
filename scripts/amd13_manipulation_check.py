@@ -295,6 +295,16 @@ def run_recovery_probe(
 
     reasoner_models = [("tested_agents", slug) for slug in REASONER_SLUGS]
 
+    if not dry_run:
+        amd_run.write_run_manifest(
+            checkpoint_path,
+            which="amd13",
+            seeds=seeds,
+            configs=["single"],
+            tasks=tasks,
+            include_h1_anchors=True,
+        )
+
     if _runner_override is not None:
         runner, client = _runner_override
     else:
@@ -343,14 +353,33 @@ def write_verdict(verdict: Dict[str, Any], path: str = MANIP_VERDICT_PATH) -> st
     return str(p)
 
 
-def _observed_labels_by_item(tidy) -> Dict[str, List[str]]:
+def _observed_labels_by_item(
+    tidy,
+    *,
+    expected_items: Optional[Set[str]] = None,
+    expected_reasoners: Tuple[str, ...] = REASONER_SLUGS,
+    expected_seeds: Optional[List[int]] = None,
+) -> Dict[str, List[str]]:
     from analysis.contrasts import COLS
     item_col = COLS["item"]
     label_col = COLS["label"]
     labels_by_item: Dict[str, List[str]] = {}
+    if expected_items is None or expected_seeds is None:
+        return labels_by_item
+    allowed_reasoners = set(expected_reasoners)
+    allowed_seeds = {int(s) for s in expected_seeds}
+    seen: Set[Tuple[str, str, int]] = set()
     if len(tidy) > 0:
-        for iid, grp in tidy.groupby(item_col):
-            labels_by_item[iid] = list(grp[label_col])
+        for _, row in tidy.iterrows():
+            iid = row.get(item_col)
+            model = row.get("model")
+            seed = int(row.get(COLS["seed"]))
+            key = (iid, model, seed)
+            if key in seen:
+                continue
+            if iid in expected_items and model in allowed_reasoners and seed in allowed_seeds:
+                seen.add(key)
+                labels_by_item.setdefault(iid, []).append(row.get(label_col))
     return labels_by_item
 
 
@@ -365,8 +394,9 @@ def _manip_completeness(
     """Validate the preregistered manipulation-check grid before any PASS.
 
     Expected grid = every H2 k1 item + every matched H1 k1 anchor, crossed with
-    the required reasoner roster and ≥3 distinct seeds. Missing observations are
-    reported as INCOMPLETE, never converted to 0.0 recovery.
+    the required reasoner roster and ≥3 distinct manifest-requested seeds. Missing,
+    unexpected, or duplicate observations are INCOMPLETE; expected seeds are never
+    inferred from observed rows.
     """
     from analysis.contrasts import COLS
 
@@ -375,29 +405,58 @@ def _manip_completeness(
     expected_items = h2_ids | h1_ids
 
     if expected_seeds is None:
-        observed_seeds = sorted(set(tidy[COLS["seed"]])) if len(tidy) and COLS["seed"] in tidy else []
-        expected_seeds = observed_seeds
+        return {
+            "complete": False,
+            "reason": "authoritative requested seeds missing; refusing to infer seeds from observed rows",
+            "seed_count_ok": False,
+            "expected_n_seeds": DEFAULT_N_SEEDS,
+            "observed_or_requested_seeds": [],
+            "expected_reasoners": list(expected_reasoners),
+            "expected_h2_items": sorted(h2_ids),
+            "expected_h1_items": sorted(h1_ids),
+            "n_expected_observations": 0,
+            "n_observed_observations": 0,
+            "n_missing_observations": 0,
+            "n_unexpected_observations": 0,
+            "n_duplicate_observations": 0,
+            "missing_observations": [],
+            "unexpected_observations": [],
+            "duplicate_observations": [],
+        }
     expected_seed_set: Set[int] = {int(s) for s in expected_seeds}
     seed_ok = len(expected_seed_set) >= DEFAULT_N_SEEDS
 
-    observed: Set[Tuple[str, str, int]] = set()
+    observed_counts: Dict[Tuple[str, str, int], int] = {}
+    unexpected_counts: Dict[Tuple[str, str, int], int] = {}
+    expected = {
+        (iid, model, seed)
+        for iid in expected_items
+        for model in expected_reasoners
+        for seed in expected_seed_set
+    }
     if len(tidy) > 0:
         for _, row in tidy.iterrows():
             iid = row.get(COLS["item"])
             model = row.get("model")
             seed = int(row.get(COLS["seed"]))
-            if iid in expected_items:
-                observed.add((iid, model, seed))
+            key = (iid, model, seed)
+            if key in expected:
+                observed_counts[key] = observed_counts.get(key, 0) + 1
+            else:
+                unexpected_counts[key] = unexpected_counts.get(key, 0) + 1
+
+    observed = {k for k, n in observed_counts.items() if n == 1}
+    duplicates = {k: n for k, n in observed_counts.items() if n > 1}
 
     missing = [
         {"item": iid, "model": model, "seed": seed}
         for iid in sorted(expected_items)
         for model in expected_reasoners
         for seed in sorted(expected_seed_set)
-        if (iid, model, seed) not in observed
+        if (iid, model, seed) not in observed_counts
     ]
     return {
-        "complete": bool(seed_ok and not missing),
+        "complete": bool(seed_ok and not missing and not unexpected_counts and not duplicates),
         "seed_count_ok": seed_ok,
         "expected_n_seeds": DEFAULT_N_SEEDS,
         "observed_or_requested_seeds": sorted(expected_seed_set),
@@ -407,7 +466,17 @@ def _manip_completeness(
         "n_expected_observations": len(expected_items) * len(expected_reasoners) * len(expected_seed_set),
         "n_observed_observations": len(observed),
         "n_missing_observations": len(missing),
+        "n_unexpected_observations": len(unexpected_counts),
+        "n_duplicate_observations": len(duplicates),
         "missing_observations": missing[:50],
+        "unexpected_observations": [
+            {"item": iid, "model": model, "seed": seed, "rows": n}
+            for (iid, model, seed), n in list(sorted(unexpected_counts.items()))[:50]
+        ],
+        "duplicate_observations": [
+            {"item": iid, "model": model, "seed": seed, "rows": n}
+            for (iid, model, seed), n in list(sorted(duplicates.items()))[:50]
+        ],
     }
 
 
@@ -485,11 +554,18 @@ def build_verdict_from_tidy(
         _combine_completeness(tidy_completeness, extra_completeness)
         if extra_completeness is not None else tidy_completeness
     )
-    labels_by_item = _observed_labels_by_item(tidy)
+    labels_by_item = _observed_labels_by_item(
+        tidy,
+        expected_items=h2_ids | h1_ids,
+        expected_reasoners=expected_reasoners,
+        expected_seeds=expected_seeds,
+    )
 
     h2_rec = per_item_recovery({i: labels_by_item[i] for i in h2_ids if i in labels_by_item})
     h1_rec = per_item_recovery({i: labels_by_item[i] for i in h1_ids if i in labels_by_item})
-    return manipulation_verdict(h2_rec, h1_rec, completeness=completeness)
+    verdict = manipulation_verdict(h2_rec, h1_rec, completeness=completeness)
+    verdict["_authoritative_recomputed"] = True
+    return verdict
 
 
 def _live_ok() -> bool:
