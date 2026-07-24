@@ -73,6 +73,61 @@ def _tidy_rows(specs: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _model_class_for(config: str, model: str) -> str:
+    if config == "heterogeneous-MAD":
+        return "heterogeneous"
+    return "reasoning" if any(s in model for s in ("gpt-5.6", "claude-opus", "gemini-3.1")) else "weak"
+
+
+def _complete_tidy(which: str, label_for) -> pd.DataFrame:
+    """Build a complete synthetic preregistered grid for amd13/amd14."""
+    tasks = amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
+    by_id = {t.id: t for t in tasks}
+    rows = []
+    for task_id, config, model, seed in sorted(report.expected_run_jobs(which, tasks=tasks)):
+        task = by_id[task_id]
+        n_agents = 4 if config == "heterogeneous-MAD" else 1
+        labels = label_for(task, config, model, seed)
+        if isinstance(labels, str):
+            labels = [labels] * n_agents
+        assert len(labels) == n_agents
+        for lb in labels:
+            rows.append({
+                "task": task.id,
+                "method": config,
+                "model_class": _model_class_for(config, model),
+                "seed": seed,
+                "label": lb,
+                "target": "I0",
+                "regime": task.regime,
+                "ambiguity_k": task.ambiguity_level,
+                "model": model,
+                "domain": task.domain,
+            })
+    return pd.DataFrame(rows)
+
+
+def _complete_a13_tidy() -> pd.DataFrame:
+    def _label(task, *_):
+        if task.ambiguity_level >= 1 and task.regime == "H1_external":
+            return "I1"
+        return "I0"
+    return _complete_tidy("amd13", _label)
+
+
+def _complete_a14_tidy(k1_labels) -> pd.DataFrame:
+    def _label(task, config, *_):
+        if task.ambiguity_level >= 1:
+            if isinstance(k1_labels, dict):
+                return k1_labels.get(task.id, "I0")
+            if isinstance(k1_labels, list):
+                n = 4 if config == "heterogeneous-MAD" else 1
+                return [k1_labels[i % len(k1_labels)] for i in range(n)]
+            return k1_labels
+        return "I0"
+    return _complete_tidy("amd14", _label)
+
+
 # ═══════════════════════════ 1. DRIVER ═══════════════════════════
 
 def test_load_amd13_tasks_grid():
@@ -201,27 +256,44 @@ def test_manip_recovery_rate():
 
 
 def test_build_verdict_from_tidy_pass():
-    h2_specs = [
-        {"item": "code_roundhalf_001_k1_tie_convention", "regime": "H2_derivable",
-         "domain": "code_spec", "labels": ["I0", "I0", "I0"]},
-        {"item": "policy_parking_001_k1_partial_hour", "regime": "H2_derivable",
-         "domain": "policy_qa", "labels": ["I0", "I0", "I1"]},
-    ]
-    h1_specs = [
-        {"item": "code_roundcurr_001_k1_rounding_standard", "regime": "H1_external",
-         "domain": "code_spec", "labels": ["I1", "I1", "I1"]},
-        {"item": "policy_interest_001_k1_compounding", "regime": "H1_external",
-         "domain": "policy_qa", "labels": ["I1", "I0", "I1"]},
-    ]
-    tidy = _tidy_rows(h2_specs + h1_specs)
-
-    class _T:
-        def __init__(self, i): self.id = i
-    h2_tasks = [_T(s["item"]) for s in h2_specs]
-    h1_tasks = [_T(s["item"]) for s in h1_specs]
-    v = manip.build_verdict_from_tidy(tidy, h2_tasks, h1_tasks)
+    h2_tasks, h1_tasks = manip.select_manip_tasks()
+    seeds = [101, 202, 303]
+    specs = []
+    for task in h2_tasks + h1_tasks:
+        for model in manip.REASONER_SLUGS:
+            for seed in seeds:
+                specs.append({
+                    "item": task.id, "regime": task.regime, "domain": task.domain,
+                    "labels": ["I0" if task.regime == "H2_derivable" else "I1"],
+                    "model": model, "seed": seed,
+                })
+    tidy = _tidy_rows(specs)
+    v = manip.build_verdict_from_tidy(tidy, h2_tasks, h1_tasks, expected_seeds=seeds)
     assert v["mean_h2_recovery"] > v["mean_h1_recovery"]
     assert v["gate_pass"] is True
+    assert v["verdict_status"] == "PASS"
+
+
+def test_manip_missing_h1_controls_is_incomplete_not_pass():
+    h2_tasks, h1_tasks = manip.select_manip_tasks()
+    seeds = [101, 202, 303]
+    specs = []
+    # H2 present/recovered, but ALL H1 controls absent: must be INCOMPLETE,
+    # not a low-H1 pass manufactured by converting missing H1 to 0.0.
+    for task in h2_tasks:
+        for model in manip.REASONER_SLUGS:
+            for seed in seeds:
+                specs.append({
+                    "item": task.id, "regime": task.regime, "domain": task.domain,
+                    "labels": ["I0"], "model": model, "seed": seed,
+                })
+    tidy = _tidy_rows(specs)
+    v = manip.build_verdict_from_tidy(tidy, h2_tasks, h1_tasks, expected_seeds=seeds)
+    assert v["gate_pass"] is False
+    assert v["verdict_status"] == "INCOMPLETE"
+    assert v["grid_complete"] is False
+    assert v["n_h1"] == 0
+    assert v["completeness"]["n_missing_observations"] == len(h1_tasks) * len(manip.REASONER_SLUGS) * len(seeds)
 
 
 def test_manip_selected_prompts_anti_leakage():
@@ -242,20 +314,9 @@ def test_manip_selected_prompts_anti_leakage():
 # ═══════════════════════════ 3. REPORT ═══════════════════════════
 
 def _a13_synthetic_tidy() -> pd.DataFrame:
-    specs = []
-    # code_spec: 2 H1 items (converge to wrong I1, cd≈1) + 2 H2 items (resolve I0, cd≈0)
-    for i in range(2):
-        specs.append({"item": f"cs_h1_{i}", "regime": "H1_external", "domain": "code_spec",
-                      "labels": ["I1", "I1", "I1"]})
-        specs.append({"item": f"cs_h2_{i}", "regime": "H2_derivable", "domain": "code_spec",
-                      "labels": ["I0", "I0", "I0"]})
-    # policy_qa: same structure
-    for i in range(2):
-        specs.append({"item": f"pq_h1_{i}", "regime": "H1_external", "domain": "policy_qa",
-                      "labels": ["I1", "I1", "I1"]})
-        specs.append({"item": f"pq_h2_{i}", "regime": "H2_derivable", "domain": "policy_qa",
-                      "labels": ["I0", "I0", "I0"]})
-    return _tidy_rows(specs)
+    # Complete A13 preregistered grid: H1 k1 anchors converge to wrong I1
+    # (cd≈1), H2 sidecar items resolve to I0 (cd≈0).
+    return _complete_a13_tidy()
 
 
 def test_a13_per_domain_contrast_and_regime_domain_read():
@@ -354,18 +415,50 @@ def test_a13_provenance_holdout_drops_constructor_cells():
 
 
 def test_a14_unconditioned_rate_and_delta():
-    # 4 unfiltered items: cd values 1.0, 1.0, 0.0, 0.0 → pooled 0.5, delta -0.03.
-    specs = [
-        {"item": "u0", "regime": "H1_external", "domain": "code_spec", "labels": ["I1", "I1"]},
-        {"item": "u1", "regime": "H1_external", "domain": "policy_qa", "labels": ["I1", "I1"]},
-        {"item": "u2", "regime": "H1_external", "domain": "code_spec", "labels": ["I0", "I0"]},
-        {"item": "u3", "regime": "H1_external", "domain": "data_analysis", "labels": ["I0", "I0"]},
-    ]
-    result = report.a14_analysis(_tidy_rows(specs))
-    assert result["n_items"] == 4
+    # Complete 24-item unfiltered grid: 12 k1 items cd=1 and 12 cd=0 → pooled 0.5.
+    tasks = [t for t in amd_run.load_amd_tasks("amd14") if t.ambiguity_level >= 1]
+    labels = {t.id: ("I1" if i < 12 else "I0") for i, t in enumerate(tasks)}
+    result = report.a14_analysis(_complete_a14_tidy(labels))
+    assert result["status"] == "COMPLETE"
+    assert result["n_items"] == 24
     assert result["pooled_cd_primary"] == pytest.approx(0.5)
     assert result["delta_vs_screened"] == pytest.approx(0.5 - 0.53)
     assert result["fraction_convergent"] == pytest.approx(0.5)
+
+
+def test_a13_partial_grid_not_powered_or_crossing_supported():
+    # Reproduces the MAJOR finding shape: only one model/seed and a few item IDs
+    # have data. It may have an apparent strong effect, but it is not the exact
+    # preregistered task × config × model/pool × seed grid.
+    specs = []
+    for dom, prefix in (("code_spec", "cs"), ("policy_qa", "pq")):
+        for i in range(2):
+            specs.append({"item": f"{prefix}_h1_{i}", "regime": "H1_external", "domain": dom,
+                          "labels": ["I1"], "model": "gpt-5.6-sol", "seed": 1})
+            specs.append({"item": f"{prefix}_h2_{i}", "regime": "H2_derivable", "domain": dom,
+                          "labels": ["I0"], "model": "gpt-5.6-sol", "seed": 1})
+    result = report.a13_analysis(_tidy_rows(specs), manip_verdict={"gate_pass": True})
+    assert result["grid_complete"] is False
+    assert result["both_domains_sufficient"] is False
+    assert result["main_effect"]["significant"] is False
+    assert result["crossing_supported"] is False
+    md = report.render_amd13(result)
+    assert "INCOMPLETE / VALIDITY NOT MET" in md
+    assert "H-A13 crossing supported: True" not in md
+
+
+def test_a14_partial_grid_not_unconditioned_result():
+    specs = [
+        {"item": "code_amd14_quarter_001_k1_fiscal_year_start", "regime": "H1_external",
+         "domain": "code_spec", "labels": ["I1"], "model": "gpt-5.6-sol", "seed": 1},
+    ]
+    result = report.a14_analysis(_tidy_rows(specs))
+    assert result["status"] == "INCOMPLETE"
+    assert result["grid_complete"] is False
+    assert result["pooled_cd_primary"] != result["pooled_cd_primary"]  # NaN
+    md = report.render_amd14(result)
+    assert "INCOMPLETE / VALIDITY NOT MET" in md
+    assert "Pooled UNCONDITIONED cd_primary" not in md
 
 
 @pytest.mark.parametrize("labels,expected_pooled", [
@@ -376,11 +469,12 @@ def test_a14_unconditioned_rate_and_delta():
 def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled):
     """Integrity: report STRUCTURE + mandatory fields identical across all three
     outcomes (high / attenuated / null); only the numbers differ."""
-    specs = [
-        {"item": "u0", "regime": "H1_external", "domain": "code_spec", "labels": list(labels)},
-        {"item": "u1", "regime": "H1_external", "domain": "policy_qa", "labels": list(labels)},
-    ]
-    result = report.a14_analysis(_tidy_rows(specs))
+    if labels == ["I1", "I0"]:
+        tasks = [t for t in amd_run.load_amd_tasks("amd14") if t.ambiguity_level >= 1]
+        k1 = {t.id: ("I1" if i < 12 else "I0") for i, t in enumerate(tasks)}
+    else:
+        k1 = labels[0]
+    result = report.a14_analysis(_complete_a14_tidy(k1))
     assert result["pooled_cd_primary"] == pytest.approx(expected_pooled)
     md = report.render_amd14(result)
     # Mandatory structural anchors — MUST be present for every outcome.
@@ -396,8 +490,10 @@ def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled)
         assert anchor in md, f"missing structural field {anchor!r} for outcome {labels}"
     # Mandatory result keys are identical across outcomes.
     assert set(result.keys()) == {
-        "n_items", "pooled_cd_primary", "ci_lo", "ci_hi", "screened_rate",
-        "delta_vs_screened", "fraction_convergent", "per_item", "provenance_dropped_cells",
+        "status", "grid_complete", "grid_completeness", "n_items",
+        "pooled_cd_primary", "ci_lo", "ci_hi", "screened_rate",
+        "delta_vs_screened", "fraction_convergent", "per_item",
+        "provenance_dropped_cells",
     }
 
 

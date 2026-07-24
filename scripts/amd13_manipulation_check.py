@@ -41,7 +41,7 @@ import os
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SCRIPTS_DIR.parent
@@ -159,6 +159,7 @@ def manipulation_verdict(
     h2_recoveries: Dict[str, float],
     h1_recoveries: Dict[str, float],
     *,
+    completeness: Optional[Dict[str, Any]] = None,
     high_thr: float = RECOVERY_HIGH_THR,
     low_thr: float = RECOVERY_LOW_THR,
     margin: float = SEPARATION_MARGIN,
@@ -184,17 +185,22 @@ def manipulation_verdict(
         iid: {"recovery": r, "behaves_as_control": r <= low_thr}
         for iid, r in sorted(h1_recoveries.items())
     }
-    mean_h2 = _mean(list(h2_recoveries.values()))
-    mean_h1 = _mean(list(h1_recoveries.values()))
+    mean_h2 = _mean(list(h2_recoveries.values())) if h2_recoveries else float("nan")
+    mean_h1 = _mean(list(h1_recoveries.values())) if h1_recoveries else float("nan")
     separation = mean_h2 - mean_h1
 
-    cond_high = mean_h2 >= high_thr
-    cond_low = mean_h1 <= low_thr
-    cond_sep = separation >= margin
-    gate_pass = bool(cond_high and cond_low and cond_sep)
+    cond_high = bool(h2_recoveries and mean_h2 >= high_thr)
+    cond_low = bool(h1_recoveries and mean_h1 <= low_thr)
+    cond_sep = bool(h2_recoveries and h1_recoveries and separation >= margin)
+    grid_complete = bool((completeness or {}).get("complete", True))
+    gate_pass = bool(grid_complete and cond_high and cond_low and cond_sep)
+    status = "PASS" if gate_pass else ("FAIL" if grid_complete else "INCOMPLETE")
 
     return {
         "gate_pass": gate_pass,
+        "verdict_status": status,
+        "grid_complete": grid_complete,
+        "completeness": completeness or {"complete": True},
         "mean_h2_recovery": mean_h2,
         "mean_h1_recovery": mean_h1,
         "separation": separation,
@@ -237,11 +243,18 @@ def render_verdict(report: Dict[str, Any]) -> str:
     lines.append(f"separation       = {report['separation']:.3f}  "
                  f"(>= {thr['margin']:.2f}? {report['cond_separation']})")
     lines.append("")
-    lines.append(f"GATE VERDICT: {'PASS' if report['gate_pass'] else 'FAIL'}")
+    if not report.get("grid_complete", True):
+        comp = report.get("completeness") or {}
+        lines.append(
+            "GRID STATUS: INCOMPLETE "
+            f"({comp.get('n_missing_observations', 'unknown')} missing observations)"
+        )
+    lines.append(f"GATE VERDICT: {report.get('verdict_status', 'PASS' if report['gate_pass'] else 'FAIL')}")
     if not report["gate_pass"]:
         lines.append("HONEST NOTE: the construction did NOT separate as pre-committed. "
                      "Per Amendment 13 §4 we report this honestly and do NOT claim the "
-                     "regime×domain crossing; items are NOT tuned to rescue separation.")
+                     "regime×domain crossing; items are NOT tuned to rescue separation. "
+                     "Incomplete grids are INVALID and never count as a passing gate.")
     lines.append("=" * 72)
     return "\n".join(lines)
 
@@ -310,7 +323,14 @@ def run_recovery_probe(
         checkpoint_path, tasks,
         model_class_map=FRONTIER_MODEL_CLASS_MAP, expected_endpoint=ep,
     )
-    verdict = build_verdict_from_tidy(tidy, h2_tasks, h1_tasks)
+    done_complete = _checkpoint_done_completeness(
+        checkpoint_path, h2_tasks, h1_tasks, expected_seeds=seeds,
+    )
+    verdict = build_verdict_from_tidy(
+        tidy, h2_tasks, h1_tasks,
+        expected_seeds=seeds,
+        extra_completeness=done_complete,
+    )
     write_verdict(verdict)
     return verdict
 
@@ -323,23 +343,153 @@ def write_verdict(verdict: Dict[str, Any], path: str = MANIP_VERDICT_PATH) -> st
     return str(p)
 
 
-def build_verdict_from_tidy(tidy, h2_tasks: List[Any], h1_tasks: List[Any]) -> Dict[str, Any]:
-    """Aggregate a tidy run table into the per-item recovery verdict."""
+def _observed_labels_by_item(tidy) -> Dict[str, List[str]]:
     from analysis.contrasts import COLS
     item_col = COLS["item"]
     label_col = COLS["label"]
-
-    h2_ids = {t.id for t in h2_tasks}
-    h1_ids = {t.id for t in h1_tasks}
-
     labels_by_item: Dict[str, List[str]] = {}
     if len(tidy) > 0:
         for iid, grp in tidy.groupby(item_col):
             labels_by_item[iid] = list(grp[label_col])
+    return labels_by_item
 
-    h2_rec = per_item_recovery({i: labels_by_item.get(i, []) for i in h2_ids})
-    h1_rec = per_item_recovery({i: labels_by_item.get(i, []) for i in h1_ids})
-    return manipulation_verdict(h2_rec, h1_rec)
+
+def _manip_completeness(
+    tidy,
+    h2_tasks: List[Any],
+    h1_tasks: List[Any],
+    *,
+    expected_reasoners: Tuple[str, ...] = REASONER_SLUGS,
+    expected_seeds: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """Validate the preregistered manipulation-check grid before any PASS.
+
+    Expected grid = every H2 k1 item + every matched H1 k1 anchor, crossed with
+    the required reasoner roster and ≥3 distinct seeds. Missing observations are
+    reported as INCOMPLETE, never converted to 0.0 recovery.
+    """
+    from analysis.contrasts import COLS
+
+    h2_ids = {t.id for t in h2_tasks}
+    h1_ids = {t.id for t in h1_tasks}
+    expected_items = h2_ids | h1_ids
+
+    if expected_seeds is None:
+        observed_seeds = sorted(set(tidy[COLS["seed"]])) if len(tidy) and COLS["seed"] in tidy else []
+        expected_seeds = observed_seeds
+    expected_seed_set: Set[int] = {int(s) for s in expected_seeds}
+    seed_ok = len(expected_seed_set) >= DEFAULT_N_SEEDS
+
+    observed: Set[Tuple[str, str, int]] = set()
+    if len(tidy) > 0:
+        for _, row in tidy.iterrows():
+            iid = row.get(COLS["item"])
+            model = row.get("model")
+            seed = int(row.get(COLS["seed"]))
+            if iid in expected_items:
+                observed.add((iid, model, seed))
+
+    missing = [
+        {"item": iid, "model": model, "seed": seed}
+        for iid in sorted(expected_items)
+        for model in expected_reasoners
+        for seed in sorted(expected_seed_set)
+        if (iid, model, seed) not in observed
+    ]
+    return {
+        "complete": bool(seed_ok and not missing),
+        "seed_count_ok": seed_ok,
+        "expected_n_seeds": DEFAULT_N_SEEDS,
+        "observed_or_requested_seeds": sorted(expected_seed_set),
+        "expected_reasoners": list(expected_reasoners),
+        "expected_h2_items": sorted(h2_ids),
+        "expected_h1_items": sorted(h1_ids),
+        "n_expected_observations": len(expected_items) * len(expected_reasoners) * len(expected_seed_set),
+        "n_observed_observations": len(observed),
+        "n_missing_observations": len(missing),
+        "missing_observations": missing[:50],
+    }
+
+
+def _checkpoint_done_completeness(
+    checkpoint_path: str,
+    h2_tasks: List[Any],
+    h1_tasks: List[Any],
+    *,
+    expected_reasoners: Tuple[str, ...] = REASONER_SLUGS,
+    expected_seeds: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """Validate job_done completion markers for the manipulation-check grid."""
+    if expected_seeds is None:
+        expected_seeds = []
+    expected_items = {t.id for t in h2_tasks} | {t.id for t in h1_tasks}
+    expected = {
+        (iid, "single", "tested_agents", model, int(seed))
+        for iid in expected_items
+        for model in expected_reasoners
+        for seed in expected_seeds
+    }
+    done: Set[Tuple[str, str, str, str, int]] = set()
+    p = Path(checkpoint_path)
+    if p.exists():
+        with p.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") == "job_done":
+                    done.add((
+                        rec.get("task_id", ""),
+                        rec.get("config", ""),
+                        rec.get("model_role", ""),
+                        rec.get("model_id", ""),
+                        int(rec.get("seed", 0)),
+                    ))
+    missing = [
+        {"item": iid, "config": cfg, "role": role, "model": model, "seed": seed}
+        for iid, cfg, role, model, seed in sorted(expected - done)
+    ]
+    return {
+        "complete": len(missing) == 0 and len(set(expected_seeds)) >= DEFAULT_N_SEEDS,
+        "n_expected_done_jobs": len(expected),
+        "n_done_jobs": len(expected & done),
+        "n_missing_done_jobs": len(missing),
+        "missing_done_jobs": missing[:50],
+    }
+
+
+def _combine_completeness(*parts: Dict[str, Any]) -> Dict[str, Any]:
+    return {"complete": all(p.get("complete") for p in parts), "checks": list(parts)}
+
+
+def build_verdict_from_tidy(
+    tidy,
+    h2_tasks: List[Any],
+    h1_tasks: List[Any],
+    *,
+    expected_seeds: Optional[List[int]] = None,
+    expected_reasoners: Tuple[str, ...] = REASONER_SLUGS,
+    extra_completeness: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Aggregate a tidy run table into the per-item recovery verdict."""
+    h2_ids = {t.id for t in h2_tasks}
+    h1_ids = {t.id for t in h1_tasks}
+
+    tidy_completeness = _manip_completeness(
+        tidy, h2_tasks, h1_tasks,
+        expected_reasoners=expected_reasoners,
+        expected_seeds=expected_seeds,
+    )
+    completeness = (
+        _combine_completeness(tidy_completeness, extra_completeness)
+        if extra_completeness is not None else tidy_completeness
+    )
+    labels_by_item = _observed_labels_by_item(tidy)
+
+    h2_rec = per_item_recovery({i: labels_by_item[i] for i in h2_ids if i in labels_by_item})
+    h1_rec = per_item_recovery({i: labels_by_item[i] for i in h1_ids if i in labels_by_item})
+    return manipulation_verdict(h2_rec, h1_rec, completeness=completeness)
 
 
 def _live_ok() -> bool:

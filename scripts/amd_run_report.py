@@ -35,7 +35,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SCRIPTS_DIR.parent
@@ -56,7 +56,8 @@ MANIP_VERDICT_PATH = str(_REPO_ROOT / "files" / "amd13_manipulation_verdict.json
 # The two named domains Amendment 13 REQUIRES (both must be sufficiently powered;
 # a missing/underpowered domain must NOT pass as "holds" — MAJOR 5).
 A13_REQUIRED_DOMAINS: Tuple[str, ...] = ("code_spec", "policy_qa")
-# Minimum item count PER regime PER domain for a domain to count as "testable".
+# Backward-compatible display only. Scientific sufficiency is the exact
+# preregistered task × condition × model/pool × seed grid validated below.
 A13_MIN_ITEMS_PER_CELL = 2
 
 
@@ -127,6 +128,164 @@ def load_manip_verdict(path: str = MANIP_VERDICT_PATH) -> Optional[Dict[str, Any
 
 def _gate_passed(verdict: Optional[Dict[str, Any]]) -> bool:
     return bool(verdict) and verdict.get("gate_pass") is True
+
+
+# ── Exact preregistered grid completeness (MAJOR scientific-integrity fix) ───
+
+def _expected_tasks(which: str) -> List[Any]:
+    amd_run = _load("amd_run", "amd_run.py")
+    return amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
+
+
+def _expected_seeds() -> List[int]:
+    amd_run = _load("amd_run", "amd_run.py")
+    from common.config import load_config
+    return amd_run._default_seeds(load_config())
+
+
+def expected_run_jobs(
+    which: str,
+    *,
+    tasks: Optional[List[Any]] = None,
+    seeds: Optional[List[int]] = None,
+) -> Set[Tuple[str, str, str, int]]:
+    """Return exact expected analysis grid as (task, config, model_id, seed)."""
+    amd_run = _load("amd_run", "amd_run.py")
+    rr = _load("registered_run", "registered_run.py")
+    if tasks is None:
+        tasks = _expected_tasks(which)
+    if seeds is None:
+        seeds = _expected_seeds()
+    from common.config import load_config
+
+    cp = str(_REPO_ROOT / ".run_partitions" / f"cp_amd_run__{which}__gridcheck.jsonl")
+    cache = str(_REPO_ROOT / f".llm_cache_amd_run_{which}_gridcheck")
+    runner, _ = amd_run.build_amd_runner(
+        load_config(), tasks, which=which, checkpoint_path=cp, cache_dir=cache,
+        seeds=seeds, configs=amd_run.AMD_CONFIGS, offline=True,
+    )
+    return {(t, cfg, model, int(seed)) for t, cfg, _role, model, seed in runner.enumerate_grid()}
+
+
+def _min_agents_for_config(config: str) -> int:
+    if config == "heterogeneous-MAD":
+        amd_run = _load("amd_run", "amd_run.py")
+        return int(amd_run.AMD_CONFIG_KWARGS["heterogeneous-MAD"].get("n_agents", 4))
+    return 1
+
+
+def tidy_grid_completeness(
+    tidy,
+    which: str,
+    *,
+    tasks: Optional[List[Any]] = None,
+    seeds: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """Validate tidy rows against the exact preregistered run grid.
+
+    This prevents partial checkpoints from being treated as powered A13 evidence
+    or as an A14 unconditioned result. The expected grid is driven by the sidecar
+    item files + matched A13 anchors, pre-registered configs, roster/pool, and
+    ≥3 default seeds.
+    """
+    from analysis.contrasts import COLS
+
+    if tasks is None:
+        tasks = _expected_tasks(which)
+    if seeds is None:
+        seeds = _expected_seeds()
+    expected = expected_run_jobs(which, tasks=tasks, seeds=seeds)
+    expected_seed_set = {int(s) for s in seeds}
+    seed_ok = len(expected_seed_set) >= 3
+
+    counts: Dict[Tuple[str, str, str, int], int] = {}
+    if len(tidy) > 0:
+        for _, row in tidy.iterrows():
+            key = (
+                row.get(COLS["item"]),
+                row.get(COLS["method"]),
+                row.get("model"),
+                int(row.get(COLS["seed"])),
+            )
+            if key in expected:
+                counts[key] = counts.get(key, 0) + 1
+
+    missing = []
+    underfilled = []
+    for task_id, config, model_id, seed in sorted(expected):
+        n = counts.get((task_id, config, model_id, seed), 0)
+        need = _min_agents_for_config(config)
+        if n == 0:
+            missing.append({"task": task_id, "config": config, "model": model_id, "seed": seed})
+        elif n < need:
+            underfilled.append({
+                "task": task_id, "config": config, "model": model_id,
+                "seed": seed, "observed_agents": n, "required_agents": need,
+            })
+
+    return {
+        "complete": bool(seed_ok and not missing and not underfilled),
+        "which": which,
+        "seed_count_ok": seed_ok,
+        "expected_seeds": sorted(expected_seed_set),
+        "n_expected_jobs": len(expected),
+        "n_observed_jobs": sum(1 for k in expected if counts.get(k, 0) >= _min_agents_for_config(k[1])),
+        "n_missing_jobs": len(missing),
+        "n_underfilled_jobs": len(underfilled),
+        "missing_jobs": missing[:50],
+        "underfilled_jobs": underfilled[:50],
+    }
+
+
+def checkpoint_done_completeness(
+    checkpoint_path: str,
+    which: str,
+    *,
+    tasks: Optional[List[Any]] = None,
+    seeds: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """Validate checkpoint job_done markers against the expected grid before load."""
+    if tasks is None:
+        tasks = _expected_tasks(which)
+    if seeds is None:
+        seeds = _expected_seeds()
+    expected = expected_run_jobs(which, tasks=tasks, seeds=seeds)
+    done: Set[Tuple[str, str, str, int]] = set()
+    p = Path(checkpoint_path)
+    if p.exists():
+        with p.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") == "job_done":
+                    done.add((
+                        rec.get("task_id", ""),
+                        rec.get("config", ""),
+                        rec.get("model_id", ""),
+                        int(rec.get("seed", 0)),
+                    ))
+    missing = [
+        {"task": t, "config": c, "model": m, "seed": s}
+        for t, c, m, s in sorted(expected - done)
+    ]
+    return {
+        "complete": len(missing) == 0 and len(set(seeds)) >= 3,
+        "which": which,
+        "n_expected_jobs": len(expected),
+        "n_done_jobs": len(expected & done),
+        "n_missing_done_jobs": len(missing),
+        "missing_done_jobs": missing[:50],
+    }
+
+
+def _merge_completeness(*parts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    present = [p for p in parts if p is not None]
+    if not present:
+        return {"complete": False, "reason": "no completeness validation supplied"}
+    merged: Dict[str, Any] = {"complete": all(p.get("complete") for p in present), "checks": present}
+    return merged
 
 
 # ── Provenance holdout (tested-family ≠ constructor-family) ──────────────────
@@ -233,7 +392,10 @@ def _bootstrap_ci_interaction(
 
 
 def a13_analysis(tidy, *, domains: List[str] = None,
-                 manip_verdict: Any = "__load__") -> Dict[str, Any]:
+                 manip_verdict: Any = "__load__",
+                 grid_completeness: Optional[Dict[str, Any]] = None,
+                 expected_tasks: Optional[List[Any]] = None,
+                 expected_seeds: Optional[List[int]] = None) -> Dict[str, Any]:
     """Per-domain cd_primary(H1) − cd_primary(H2) + regime×domain INTERACTION read.
 
     Implements the pre-registered Amendment 13 H-A13 analysis (MAJOR 5) AND the
@@ -259,6 +421,11 @@ def a13_analysis(tidy, *, domains: List[str] = None,
     if manip_verdict == "__load__":
         manip_verdict = load_manip_verdict()
     gate_pass = _gate_passed(manip_verdict)
+    if grid_completeness is None:
+        grid_completeness = tidy_grid_completeness(
+            tidy, "amd13", tasks=expected_tasks, seeds=expected_seeds,
+        )
+    grid_complete = bool(grid_completeness.get("complete"))
 
     held, n_dropped = apply_provenance_holdout(tidy)
 
@@ -277,7 +444,8 @@ def a13_analysis(tidy, *, domains: List[str] = None,
         ci_lo, ci_hi = rr._bootstrap_ci_diff(h1_vals, h2_vals) if (
             len(h1_vals) >= A13_MIN_ITEMS_PER_CELL and len(h2_vals) >= A13_MIN_ITEMS_PER_CELL
         ) else (float("-inf"), float("inf"))
-        sufficient = (
+        sufficient = bool(
+            grid_complete and
             len(h1_vals) >= A13_MIN_ITEMS_PER_CELL and len(h2_vals) >= A13_MIN_ITEMS_PER_CELL
         )
         holds = bool(sufficient and contrast > 0 and ci_lo > 0)
@@ -305,7 +473,7 @@ def a13_analysis(tidy, *, domains: List[str] = None,
         len(pooled_h1) >= A13_MIN_ITEMS_PER_CELL and len(pooled_h2) >= A13_MIN_ITEMS_PER_CELL
     ) else (float("-inf"), float("inf"))
     main_effect_significant = bool(
-        pooled_h1 and pooled_h2 and main_contrast > 0 and main_ci_lo > 0
+        grid_complete and pooled_h1 and pooled_h2 and main_contrast > 0 and main_ci_lo > 0
     )
 
     # ── require BOTH named domains sufficiently powered (MAJOR 5) ────────────
@@ -343,6 +511,7 @@ def a13_analysis(tidy, *, domains: List[str] = None,
     no_explanatory_interaction = both_domains_sufficient and interaction_significant is False
     crossing_supported = bool(
         gate_pass
+        and grid_complete
         and both_domains_sufficient
         and main_effect_significant
         and holds_within_both
@@ -351,6 +520,8 @@ def a13_analysis(tidy, *, domains: List[str] = None,
 
     return {
         "gate_pass": gate_pass,
+        "grid_complete": grid_complete,
+        "grid_completeness": grid_completeness,
         "manip_verdict_present": manip_verdict is not None,
         "manip_verdict": manip_verdict,
         "per_domain": per_domain,
@@ -383,18 +554,37 @@ def a13_analysis(tidy, *, domains: List[str] = None,
 
 # ── Amendment 14: unconditioned pooled rate + delta vs screened ──────────────
 
-def a14_analysis(tidy) -> Dict[str, Any]:
+def a14_analysis(tidy, *,
+                 grid_completeness: Optional[Dict[str, Any]] = None,
+                 expected_tasks: Optional[List[Any]] = None,
+                 expected_seeds: Optional[List[int]] = None) -> Dict[str, Any]:
     """Pooled UNCONDITIONED cd_primary on the unfiltered k1 items + delta vs 0.53."""
     rr = _load("registered_run", "registered_run.py")
+    if grid_completeness is None:
+        grid_completeness = tidy_grid_completeness(
+            tidy, "amd14", tasks=expected_tasks, seeds=expected_seeds,
+        )
+    grid_complete = bool(grid_completeness.get("complete"))
     held, n_dropped = apply_provenance_holdout(tidy)
 
     per_item = _per_item_cd(held, regime="H1_external", k_min=1)
     vals = list(per_item.values())
-    pooled = sum(vals) / len(vals) if vals else float("nan")
-    ci_lo, ci_hi = rr._bootstrap_ci(vals) if len(vals) >= 2 else (float("-inf"), float("inf"))
-    delta = pooled - SCREENED_CONFIRMATORY_RATE if vals else float("nan")
-    frac_convergent = (sum(1 for v in vals if v > 0) / len(vals)) if vals else float("nan")
+    if grid_complete and vals:
+        pooled = sum(vals) / len(vals)
+        ci_lo, ci_hi = rr._bootstrap_ci(vals) if len(vals) >= 2 else (float("-inf"), float("inf"))
+        delta = pooled - SCREENED_CONFIRMATORY_RATE
+        frac_convergent = sum(1 for v in vals if v > 0) / len(vals)
+        status = "COMPLETE"
+    else:
+        pooled = float("nan")
+        ci_lo, ci_hi = float("-inf"), float("inf")
+        delta = float("nan")
+        frac_convergent = float("nan")
+        status = "INCOMPLETE"
     return {
+        "status": status,
+        "grid_complete": grid_complete,
+        "grid_completeness": grid_completeness,
         "n_items": len(vals),
         "pooled_cd_primary": pooled,
         "ci_lo": ci_lo,
@@ -425,6 +615,22 @@ def render_amd13(result: Dict[str, Any]) -> str:
              "domains AND NO significant regime×domain interaction that would explain it "
              "away as a domain artifact.")
     L.append("")
+
+    if not result.get("grid_complete", False):
+        comp = result.get("grid_completeness") or {}
+        L.append("## Outcome: INCOMPLETE / VALIDITY NOT MET — no inferential crossing claim")
+        L.append("")
+        L.append("The sidecar checkpoint does NOT cover the exact pre-registered "
+                 "task × condition × model/pool × seed grid. Missing data are "
+                 "not treated as powered evidence, so no per-domain sufficiency, "
+                 "main-effect, interaction, or crossing claim is rendered.")
+        L.append("")
+        L.append(f"- expected jobs: {comp.get('n_expected_jobs', 'unknown')}")
+        L.append(f"- observed complete jobs: {comp.get('n_observed_jobs', comp.get('n_done_jobs', 'unknown'))}")
+        L.append(f"- missing jobs: {comp.get('n_missing_jobs', comp.get('n_missing_done_jobs', 'unknown'))}")
+        L.append(f"- underfilled jobs: {comp.get('n_underfilled_jobs', 0)}")
+        L.append("")
+        return "\n".join(L)
 
     # ── VALIDITY GATE (MAJOR 4): no crossing claim unless the manipulation ──
     #    check PASSED. Render ONLY the validity outcome otherwise.
@@ -513,6 +719,23 @@ def render_amd14(result: Dict[str, Any]) -> str:
              "Integrity clause (§0): reported HONESTLY regardless of outcome (high, "
              "attenuated, or null) — prominence, not suppression.")
     L.append("")
+    if not result.get("grid_complete", False):
+        comp = result.get("grid_completeness") or {}
+        L.append("## Outcome: INCOMPLETE / VALIDITY NOT MET")
+        L.append("")
+        L.append("The checkpoint does NOT cover the exact pre-registered "
+                 "24 unfiltered items × condition × model/pool × seed grid. "
+                 "Therefore this is NOT rendered as the unfiltered-sample result, "
+                 "and no pooled unconditioned `cd_primary` claim is reported.")
+        L.append("")
+        L.append(f"- expected jobs: {comp.get('n_expected_jobs', 'unknown')}")
+        L.append(f"- observed complete jobs: {comp.get('n_observed_jobs', comp.get('n_done_jobs', 'unknown'))}")
+        L.append(f"- missing jobs: {comp.get('n_missing_jobs', comp.get('n_missing_done_jobs', 'unknown'))}")
+        L.append(f"- underfilled jobs: {comp.get('n_underfilled_jobs', 0)}")
+        L.append(f"- observed k1 items with any labels: {result.get('n_items')}")
+        L.append("")
+        return "\n".join(L)
+
     L.append(f"- Unfiltered items (k1): **{result['n_items']}**")
     L.append(f"- **Pooled UNCONDITIONED cd_primary = {_f(result['pooled_cd_primary'])}** "
              f"(95% CI [{_f(result['ci_lo'])}, {_f(result['ci_hi'])}])")
@@ -550,12 +773,15 @@ def load_tidy_for(which: str, checkpoint_path: str):
 
     include_anchors = which == "amd13"
     tasks = amd_run.load_amd_tasks(which, include_h1_anchors=include_anchors)
+    done_complete = checkpoint_done_completeness(checkpoint_path, which, tasks=tasks)
     # endpoint None is fine when the checkpoint has a single namespace; if it has
     # several, load_runs_tidy raises and the caller must pass expected_endpoint.
     tidy = load_runs_tidy(
         checkpoint_path, tasks, model_class_map=FRONTIER_MODEL_CLASS_MAP,
     )
     tidy = attach_domain_column(tidy, tasks)
+    tidy_complete = tidy_grid_completeness(tidy, which, tasks=tasks)
+    tidy.attrs["grid_completeness"] = _merge_completeness(done_complete, tidy_complete)
     return tidy
 
 
@@ -603,10 +829,10 @@ def main(argv=None) -> None:
               "writing a placeholder report (run the driver live first).", file=sys.stderr)
 
     if args.which == "amd13":
-        result = a13_analysis(tidy)
+        result = a13_analysis(tidy, grid_completeness=tidy.attrs.get("grid_completeness"))
         md = render_amd13(result)
     else:
-        result = a14_analysis(tidy)
+        result = a14_analysis(tidy, grid_completeness=tidy.attrs.get("grid_completeness"))
         md = render_amd14(result)
 
     path = write_report(args.which, md, out_dir=args.out_dir)
