@@ -192,7 +192,7 @@ def manipulation_verdict(
     cond_high = bool(h2_recoveries and mean_h2 >= high_thr)
     cond_low = bool(h1_recoveries and mean_h1 <= low_thr)
     cond_sep = bool(h2_recoveries and h1_recoveries and separation >= margin)
-    grid_complete = bool((completeness or {}).get("complete", True))
+    grid_complete = bool((completeness or {}).get("complete", False))
     gate_pass = bool(grid_complete and cond_high and cond_low and cond_sep)
     status = "PASS" if gate_pass else ("FAIL" if grid_complete else "INCOMPLETE")
 
@@ -200,7 +200,7 @@ def manipulation_verdict(
         "gate_pass": gate_pass,
         "verdict_status": status,
         "grid_complete": grid_complete,
-        "completeness": completeness or {"complete": True},
+        "completeness": completeness or {"complete": False, "reason": "no completeness validation supplied"},
         "mean_h2_recovery": mean_h2,
         "mean_h1_recovery": mean_h1,
         "separation": separation,

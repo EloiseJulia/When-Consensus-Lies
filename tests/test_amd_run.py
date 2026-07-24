@@ -79,12 +79,12 @@ def _model_class_for(config: str, model: str) -> str:
     return "reasoning" if any(s in model for s in ("gpt-5.6", "claude-opus", "gemini-3.1")) else "weak"
 
 
-def _complete_tidy(which: str, label_for) -> pd.DataFrame:
+def _complete_tidy(which: str, label_for, *, seeds=None) -> pd.DataFrame:
     """Build a complete synthetic preregistered grid for amd13/amd14."""
     tasks = amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
     by_id = {t.id: t for t in tasks}
     rows = []
-    for task_id, config, model, seed in sorted(report.expected_run_jobs(which, tasks=tasks)):
+    for task_id, config, model, seed in sorted(report.expected_run_jobs(which, tasks=tasks, seeds=seeds)):
         task = by_id[task_id]
         n_agents = 4 if config == "heterogeneous-MAD" else 1
         labels = label_for(task, config, model, seed)
@@ -115,7 +115,11 @@ def _complete_a13_tidy() -> pd.DataFrame:
     return _complete_tidy("amd13", _label)
 
 
-def _complete_a14_tidy(k1_labels) -> pd.DataFrame:
+def _passing_gate() -> Dict[str, Any]:
+    return {"gate_pass": True, "grid_complete": True, "verdict_status": "PASS"}
+
+
+def _complete_a14_tidy(k1_labels, *, seeds=None) -> pd.DataFrame:
     def _label(task, config, *_):
         if task.ambiguity_level >= 1:
             if isinstance(k1_labels, dict):
@@ -125,7 +129,7 @@ def _complete_a14_tidy(k1_labels) -> pd.DataFrame:
                 return [k1_labels[i % len(k1_labels)] for i in range(n)]
             return k1_labels
         return "I0"
-    return _complete_tidy("amd14", _label)
+    return _complete_tidy("amd14", _label, seeds=seeds)
 
 
 # ═══════════════════════════ 1. DRIVER ═══════════════════════════
@@ -225,7 +229,7 @@ def test_default_namespaces_are_isolated():
 def test_manip_verdict_pass_high_h2_low_h1():
     h2 = {"h2_a": 0.9, "h2_b": 0.8, "h2_c": 1.0}
     h1 = {"h1_a": 0.1, "h1_b": 0.0, "h1_c": 0.2}
-    v = manip.manipulation_verdict(h2, h1)
+    v = manip.manipulation_verdict(h2, h1, completeness={"complete": True})
     assert v["gate_pass"] is True
     assert v["cond_h2_high"] and v["cond_h1_low"] and v["cond_separation"]
     assert all(d["pass"] for d in v["h2_items"].values())
@@ -235,7 +239,7 @@ def test_manip_verdict_fail_low_h2_honest():
     # H2 items do NOT recover (low) → construction failed; verdict FAIL, no tuning.
     h2 = {"h2_a": 0.1, "h2_b": 0.0, "h2_c": 0.2}
     h1 = {"h1_a": 0.1, "h1_b": 0.0, "h1_c": 0.2}
-    v = manip.manipulation_verdict(h2, h1)
+    v = manip.manipulation_verdict(h2, h1, completeness={"complete": True})
     assert v["gate_pass"] is False
     assert not v["cond_h2_high"]
     assert not any(d["pass"] for d in v["h2_items"].values())
@@ -245,7 +249,7 @@ def test_manip_verdict_fail_no_separation():
     # H2 high but H1 also high → not separated → FAIL (domain/base-rate confound).
     h2 = {"h2_a": 0.9, "h2_b": 0.8}
     h1 = {"h1_a": 0.9, "h1_b": 0.85}
-    v = manip.manipulation_verdict(h2, h1)
+    v = manip.manipulation_verdict(h2, h1, completeness={"complete": True})
     assert v["gate_pass"] is False
     assert not v["cond_separation"]
 
@@ -321,7 +325,7 @@ def _a13_synthetic_tidy() -> pd.DataFrame:
 
 def test_a13_per_domain_contrast_and_regime_domain_read():
     tidy = _a13_synthetic_tidy()
-    result = report.a13_analysis(tidy, manip_verdict={"gate_pass": True})
+    result = report.a13_analysis(tidy, manip_verdict=_passing_gate())
     for dom in ("code_spec", "policy_qa"):
         r = result["per_domain"][dom]
         assert r["cd_h1"] == pytest.approx(1.0)
@@ -346,7 +350,7 @@ def test_a13_requires_both_named_domains(monkeypatch):
                       "labels": ["I1", "I1", "I1"]})
         specs.append({"item": f"cs_h2_{i}", "regime": "H2_derivable", "domain": "code_spec",
                       "labels": ["I0", "I0", "I0"]})
-    result = report.a13_analysis(_tidy_rows(specs), manip_verdict={"gate_pass": True})
+    result = report.a13_analysis(_tidy_rows(specs), manip_verdict=_passing_gate())
     assert result["both_domains_sufficient"] is False
     assert "policy_qa" in result["missing_or_underpowered_domains"]
     assert result["regime_effect_holds_within_domain"] is False
@@ -371,14 +375,74 @@ def test_a13_gate_fail_renders_no_crossing_claim():
     assert "crossing supported" not in md_fail.lower()
 
 
+def test_manip_verdict_without_completeness_is_incomplete_and_gate_closed():
+    h2 = {"h2_a": 1.0}
+    h1 = {"h1_a": 0.0}
+    v = manip.manipulation_verdict(h2, h1)
+    assert v["grid_complete"] is False
+    assert v["verdict_status"] == "INCOMPLETE"
+    assert v["gate_pass"] is False
+    assert report._gate_passed(v) is False
+
+
+@pytest.mark.parametrize("verdict", [
+    {"gate_pass": True, "grid_complete": False, "verdict_status": "PASS"},
+    {"gate_pass": True, "grid_complete": True},
+])
+def test_report_gate_rejects_stale_or_hand_edited_verdict(verdict):
+    assert report._gate_passed(verdict) is False
+    res = report.a13_analysis(_a13_synthetic_tidy(), manip_verdict=verdict)
+    assert res["gate_pass"] is False
+    assert res["crossing_supported"] is False
+    assert "VALIDITY FAILURE" in report.render_amd13(res)
+
+
 def test_a13_gate_pass_renders_crossing_and_interaction():
     """Gate PASS → full render includes the interaction read + crossing verdict."""
     tidy = _a13_synthetic_tidy()
-    res = report.a13_analysis(tidy, manip_verdict={"gate_pass": True})
+    res = report.a13_analysis(tidy, manip_verdict=_passing_gate())
     md = report.render_amd13(res)
     assert "GATE PASSED: True" in md
     assert "INTERACTION" in md
     assert "H-A13 crossing supported: True" in md
+
+
+def test_nondefault_authoritative_seeds_complete_pass_and_analyze_exactly_them():
+    seeds = [10101, 20202, 30303]
+    tidy = _complete_a14_tidy("I1", seeds=seeds)
+    comp = report.tidy_grid_completeness(tidy, "amd14", seeds=seeds)
+    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=seeds)
+    assert comp["complete"] is True
+    assert comp["expected_seeds"] == seeds
+    assert result["status"] == "COMPLETE"
+    assert result["grid_complete"] is True
+    assert result["n_items"] == 24
+    assert result["pooled_cd_primary"] == pytest.approx(1.0)
+
+
+def test_partial_fourth_requested_seed_is_incomplete_and_not_reported():
+    default_seeds = report._expected_seeds()
+    requested_seeds = default_seeds + [909090]
+    tidy = _complete_a14_tidy("I0", seeds=default_seeds)
+    task = [t for t in amd_run.load_amd_tasks("amd14") if t.ambiguity_level >= 1][0]
+    partial_fourth = _tidy_rows([{
+        "item": task.id,
+        "regime": task.regime,
+        "domain": task.domain,
+        "labels": ["I1"],
+        "method": "single",
+        "model": "gpt-5.6-sol",
+        "seed": 909090,
+    }])
+    tidy = pd.concat([tidy, partial_fourth], ignore_index=True)
+    comp = report.tidy_grid_completeness(tidy, "amd14", seeds=requested_seeds)
+    result = report.a14_analysis(tidy, grid_completeness=comp, expected_seeds=requested_seeds)
+    assert comp["complete"] is False
+    assert comp["expected_seeds"] == sorted(requested_seeds)
+    assert comp["n_missing_jobs"] > 0
+    assert result["status"] == "INCOMPLETE"
+    assert result["pooled_cd_primary"] != result["pooled_cd_primary"]  # NaN: no partial-seed analysis
+    assert "Pooled UNCONDITIONED cd_primary" not in report.render_amd14(result)
 
 
 def test_a13_null_contrast_reported_honestly():
@@ -393,7 +457,7 @@ def test_a13_null_contrast_reported_honestly():
                       "labels": ["I1", "I1", "I1"]})
         specs.append({"item": f"pq_h2_{i}", "regime": "H2_derivable", "domain": "policy_qa",
                       "labels": ["I1", "I1", "I1"]})
-    result = report.a13_analysis(_tidy_rows(specs), manip_verdict={"gate_pass": True})
+    result = report.a13_analysis(_tidy_rows(specs), manip_verdict=_passing_gate())
     r = result["per_domain"]["code_spec"]
     assert r["contrast"] == pytest.approx(0.0)
     assert r["direction_holds"] is False
@@ -437,7 +501,7 @@ def test_a13_partial_grid_not_powered_or_crossing_supported():
                           "labels": ["I1"], "model": "gpt-5.6-sol", "seed": 1})
             specs.append({"item": f"{prefix}_h2_{i}", "regime": "H2_derivable", "domain": dom,
                           "labels": ["I0"], "model": "gpt-5.6-sol", "seed": 1})
-    result = report.a13_analysis(_tidy_rows(specs), manip_verdict={"gate_pass": True})
+    result = report.a13_analysis(_tidy_rows(specs), manip_verdict=_passing_gate())
     assert result["grid_complete"] is False
     assert result["both_domains_sufficient"] is False
     assert result["main_effect"]["significant"] is False
@@ -499,7 +563,7 @@ def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled)
 
 def test_report_writes_markdown(tmp_path):
     tidy = _a13_synthetic_tidy()
-    md = report.render_amd13(report.a13_analysis(tidy, manip_verdict={"gate_pass": True}))
+    md = report.render_amd13(report.a13_analysis(tidy, manip_verdict=_passing_gate()))
     path = report.write_report("amd13", md, out_dir=str(tmp_path))
     assert Path(path).exists()
     assert "Amendment 13" in Path(path).read_text(encoding="utf-8")
@@ -671,3 +735,18 @@ def test_write_and_load_manip_verdict(tmp_path):
     assert loaded["gate_pass"] is True
     # absent file → None (treated as NOT passed)
     assert report.load_manip_verdict(str(tmp_path / "missing.json")) is None
+
+
+def test_run_manifest_records_and_reports_authoritative_requested_seeds(tmp_path):
+    cp = tmp_path / "cp_amd_run__amd14.jsonl"
+    tasks = amd_run.load_amd_tasks("amd14")
+    seeds = [404, 505, 606]
+    amd_run.write_run_manifest(
+        str(cp), which="amd14", seeds=seeds, configs=amd_run.AMD_CONFIGS,
+        tasks=tasks, include_h1_anchors=False,
+    )
+    loaded = amd_run.load_run_manifest(str(cp))
+    assert loaded["requested_seeds"] == seeds
+    report_seeds, comp = report.requested_seeds_from_manifest(str(cp), "amd14")
+    assert comp["complete"] is True
+    assert report_seeds == seeds

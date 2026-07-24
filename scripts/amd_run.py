@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -144,6 +145,52 @@ def _which_defaults(which: str) -> Tuple[str, str, List[str]]:
             _AMD14_ITEM_FILES,
         )
     raise ValueError(f"unknown --which {which!r}; expected one of {WHICH_CHOICES}")
+
+
+def run_manifest_path(checkpoint_path: str) -> str:
+    """Sidecar manifest recording the authoritative requested run grid."""
+    return str(Path(f"{checkpoint_path}.manifest.json"))
+
+
+def write_run_manifest(
+    checkpoint_path: str,
+    *,
+    which: str,
+    seeds: List[int],
+    configs: List[str],
+    tasks: List[Any],
+    include_h1_anchors: bool,
+) -> str:
+    """Persist the requested seed/config/task set next to the checkpoint.
+
+    Reports consume this manifest as the run-authoritative seed set; they never
+    infer "requested" seeds from whatever rows happened to finish.
+    """
+    p = Path(run_manifest_path(checkpoint_path))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "which": which,
+        "requested_seeds": list(dict.fromkeys(int(s) for s in seeds)),
+        "configs": list(configs),
+        "include_h1_anchors": bool(include_h1_anchors),
+        "task_ids": [t.id for t in tasks],
+        "n_tasks": len(tasks),
+    }
+    p.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return str(p)
+
+
+def load_run_manifest(checkpoint_path: str) -> Optional[Dict[str, Any]]:
+    """Load the run-authoritative sidecar manifest, if present and valid JSON."""
+    p = Path(run_manifest_path(checkpoint_path))
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 # ── Path guard (isolation) ───────────────────────────────────────────────────
@@ -462,6 +509,17 @@ def main(argv=None) -> None:
         rpm=args.rpm,
         offline=args.dry_run,
     )
+
+    if not args.dry_run:
+        manifest = write_run_manifest(
+            checkpoint,
+            which=args.which,
+            seeds=seeds,
+            configs=configs,
+            tasks=tasks,
+            include_h1_anchors=include_anchors,
+        )
+        print(f"  manifest={manifest}")
 
     result = runner.run(dry_run=args.dry_run)
 
