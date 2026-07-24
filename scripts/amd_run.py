@@ -75,7 +75,13 @@ PROVIDER = "copilot_proxy"
 
 # Pre-registered HEADLINE conditions (the cross-family conditions that show fake
 # redundancy). NOT the full SC/verifier grid (Amendment 13 §6 / Amendment 14 §4).
-AMD_CONFIGS: List[str] = ["single", "heterogeneous-MAD"]
+#
+# STRICTLY ALLOWED — no other config may run. In particular ``interpretation-diverse``
+# (harness.run.run_diverse) injects ``interp.gold_check`` into the tested-agent prompt
+# (harness/run.py run_diverse), which would LEAK the executable-gold id — an anti-
+# leakage violation. Only these two pre-registered conditions are permitted here.
+ALLOWED_CONFIGS: Tuple[str, ...] = ("single", "heterogeneous-MAD")
+AMD_CONFIGS: List[str] = list(ALLOWED_CONFIGS)
 # heterogeneous-MAD uses the config.yaml heterogeneous pool; n_agents=4 (default),
 # stated explicitly for auditability (mirrors registered_run).
 AMD_CONFIG_KWARGS: Dict[str, Dict[str, Any]] = {"heterogeneous-MAD": {"n_agents": 4}}
@@ -181,6 +187,29 @@ def validate_output_paths(checkpoint_path: str, cache_dir: str) -> None:
         )
     _scan_protected(cp, "checkpoint")
     _scan_protected(cache, "cache dir")
+
+
+def validate_configs(configs: List[str]) -> None:
+    """Reject any config outside the pre-registered {single, heterogeneous-MAD}.
+
+    ``interpretation-diverse`` (and any other config) is REFUSED because its harness
+    path can inject gold-bearing text (``interp.gold_check``) into the tested-agent
+    prompt — an anti-leakage violation. Only the two pre-registered headline
+    conditions are permitted.
+    """
+    bad = [c for c in configs if c not in ALLOWED_CONFIGS]
+    if bad:
+        raise ValueError(
+            f"Refusing configs {bad!r}: amd_run permits ONLY {list(ALLOWED_CONFIGS)} "
+            "(the pre-registered headline conditions). Other configs (e.g. "
+            "'interpretation-diverse') can leak the executable-gold id into the "
+            "tested-agent prompt — an anti-leakage violation."
+        )
+
+
+def scan_protected_path(path: Path, label: str) -> None:
+    """Public wrapper around the protected-token scan (reused by report/manip)."""
+    _scan_protected(path, label)
 
 
 # ── Task loading (sidecar + matched frozen H1 anchors, read-only) ────────────
@@ -314,6 +343,7 @@ def build_amd_runner(
     rr = _load_registered_run()
     if configs is None:
         configs = AMD_CONFIGS
+    validate_configs(configs)
     return rr.build_runner(
         cfg,
         tasks,
@@ -382,6 +412,11 @@ def main(argv=None) -> None:
     checkpoint = args.checkpoint or def_cp
     cache_dir = args.cache_dir or def_cache
     configs = args.configs or AMD_CONFIGS
+    try:
+        validate_configs(configs)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
     seeds = args.seeds or _default_seeds(cfg)
 
     # Enforce ≥3 distinct seeds (pre-registered) for a LIVE run (dry-run is exempt).

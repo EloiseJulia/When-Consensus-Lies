@@ -260,7 +260,7 @@ def _a13_synthetic_tidy() -> pd.DataFrame:
 
 def test_a13_per_domain_contrast_and_regime_domain_read():
     tidy = _a13_synthetic_tidy()
-    result = report.a13_analysis(tidy)
+    result = report.a13_analysis(tidy, manip_verdict={"gate_pass": True})
     for dom in ("code_spec", "policy_qa"):
         r = result["per_domain"][dom]
         assert r["cd_h1"] == pytest.approx(1.0)
@@ -268,8 +268,56 @@ def test_a13_per_domain_contrast_and_regime_domain_read():
         assert r["contrast"] == pytest.approx(1.0)
         assert r["ci_lo"] > 0  # CI excludes 0
         assert r["direction_holds"] is True
+    assert result["both_domains_sufficient"] is True
+    assert result["main_effect"]["significant"] is True
+    assert result["interaction"]["significant"] is False
     assert result["regime_effect_holds_within_domain"] is True
+    assert result["crossing_supported"] is True
     assert result["provenance_dropped_cells"] == 0
+
+
+def test_a13_requires_both_named_domains(monkeypatch):
+    """MAJOR 5: one strong domain must NOT pass when the other is missing."""
+    # Only code_spec present (policy_qa absent) → cannot claim the crossing.
+    specs = []
+    for i in range(3):
+        specs.append({"item": f"cs_h1_{i}", "regime": "H1_external", "domain": "code_spec",
+                      "labels": ["I1", "I1", "I1"]})
+        specs.append({"item": f"cs_h2_{i}", "regime": "H2_derivable", "domain": "code_spec",
+                      "labels": ["I0", "I0", "I0"]})
+    result = report.a13_analysis(_tidy_rows(specs), manip_verdict={"gate_pass": True})
+    assert result["both_domains_sufficient"] is False
+    assert "policy_qa" in result["missing_or_underpowered_domains"]
+    assert result["regime_effect_holds_within_domain"] is False
+    assert result["crossing_supported"] is False
+
+
+def test_a13_gate_fail_renders_no_crossing_claim():
+    """MAJOR 4: a missing/failed manipulation verdict → validity-failure render only."""
+    tidy = _a13_synthetic_tidy()
+    # (a) verdict absent
+    res_absent = report.a13_analysis(tidy, manip_verdict=None)
+    assert res_absent["gate_pass"] is False
+    assert res_absent["crossing_supported"] is False
+    md_absent = report.render_amd13(res_absent)
+    assert "VALIDITY FAILURE" in md_absent
+    assert "no regime×domain crossing is asserted" in md_absent
+    assert "H-A13 crossing supported: True" not in md_absent
+    # (b) verdict present but FAILED
+    res_fail = report.a13_analysis(tidy, manip_verdict={"gate_pass": False})
+    md_fail = report.render_amd13(res_fail)
+    assert "VALIDITY FAILURE" in md_fail
+    assert "crossing supported" not in md_fail.lower()
+
+
+def test_a13_gate_pass_renders_crossing_and_interaction():
+    """Gate PASS → full render includes the interaction read + crossing verdict."""
+    tidy = _a13_synthetic_tidy()
+    res = report.a13_analysis(tidy, manip_verdict={"gate_pass": True})
+    md = report.render_amd13(res)
+    assert "GATE PASSED: True" in md
+    assert "INTERACTION" in md
+    assert "H-A13 crossing supported: True" in md
 
 
 def test_a13_null_contrast_reported_honestly():
@@ -280,11 +328,16 @@ def test_a13_null_contrast_reported_honestly():
                       "labels": ["I1", "I1", "I1"]})
         specs.append({"item": f"cs_h2_{i}", "regime": "H2_derivable", "domain": "code_spec",
                       "labels": ["I1", "I1", "I1"]})
-    result = report.a13_analysis(_tidy_rows(specs), domains=["code_spec"])
+        specs.append({"item": f"pq_h1_{i}", "regime": "H1_external", "domain": "policy_qa",
+                      "labels": ["I1", "I1", "I1"]})
+        specs.append({"item": f"pq_h2_{i}", "regime": "H2_derivable", "domain": "policy_qa",
+                      "labels": ["I1", "I1", "I1"]})
+    result = report.a13_analysis(_tidy_rows(specs), manip_verdict={"gate_pass": True})
     r = result["per_domain"]["code_spec"]
     assert r["contrast"] == pytest.approx(0.0)
     assert r["direction_holds"] is False
     assert result["regime_effect_holds_within_domain"] is False
+    assert result["crossing_supported"] is False
 
 
 def test_a13_provenance_holdout_drops_constructor_cells():
@@ -315,22 +368,210 @@ def test_a14_unconditioned_rate_and_delta():
     assert result["fraction_convergent"] == pytest.approx(0.5)
 
 
-def test_a14_report_renders_regardless_of_outcome():
-    # Integrity: even an attenuated (low) rate renders a full honest report.
+@pytest.mark.parametrize("labels,expected_pooled", [
+    (["I1", "I1"], 1.0),   # HIGH: unfiltered rate stays high
+    (["I1", "I0"], 0.5),   # ATTENUATED: partly enrichment-driven
+    (["I0", "I0"], 0.0),   # NULL: effect vanishes on the unfiltered sample
+])
+def test_a14_report_structure_identical_across_outcomes(labels, expected_pooled):
+    """Integrity: report STRUCTURE + mandatory fields identical across all three
+    outcomes (high / attenuated / null); only the numbers differ."""
     specs = [
-        {"item": "u0", "regime": "H1_external", "domain": "code_spec", "labels": ["I0", "I0"]},
-        {"item": "u1", "regime": "H1_external", "domain": "policy_qa", "labels": ["I0", "I0"]},
+        {"item": "u0", "regime": "H1_external", "domain": "code_spec", "labels": list(labels)},
+        {"item": "u1", "regime": "H1_external", "domain": "policy_qa", "labels": list(labels)},
     ]
     result = report.a14_analysis(_tidy_rows(specs))
+    assert result["pooled_cd_primary"] == pytest.approx(expected_pooled)
     md = report.render_amd14(result)
-    assert "UNCONDITIONED" in md
-    assert "HONESTLY regardless of outcome" in md
-    assert result["pooled_cd_primary"] == pytest.approx(0.0)
+    # Mandatory structural anchors — MUST be present for every outcome.
+    for anchor in (
+        "# Amendment 14 — unfiltered-sample replication",
+        "UNCONDITIONED",
+        "HONESTLY regardless of outcome",
+        "Pooled UNCONDITIONED cd_primary",
+        "Delta vs screened",
+        "Screened confirmatory rate",
+        "Fraction of unfiltered items",
+    ):
+        assert anchor in md, f"missing structural field {anchor!r} for outcome {labels}"
+    # Mandatory result keys are identical across outcomes.
+    assert set(result.keys()) == {
+        "n_items", "pooled_cd_primary", "ci_lo", "ci_hi", "screened_rate",
+        "delta_vs_screened", "fraction_convergent", "per_item", "provenance_dropped_cells",
+    }
 
 
 def test_report_writes_markdown(tmp_path):
     tidy = _a13_synthetic_tidy()
-    md = report.render_amd13(report.a13_analysis(tidy))
+    md = report.render_amd13(report.a13_analysis(tidy, manip_verdict={"gate_pass": True}))
     path = report.write_report("amd13", md, out_dir=str(tmp_path))
     assert Path(path).exists()
     assert "Amendment 13" in Path(path).read_text(encoding="utf-8")
+
+
+# ═══════════ 4. BLOCKER 1: strict config allowlist + generated-prompt leakage ═══════════
+
+def test_strict_config_rejection():
+    """Only single + heterogeneous-MAD are permitted; everything else is refused."""
+    with pytest.raises(ValueError):
+        amd_run.validate_configs(["interpretation-diverse"])
+    with pytest.raises(ValueError):
+        amd_run.validate_configs(["single", "sc"])
+    with pytest.raises(ValueError):
+        amd_run.validate_configs(["homogeneous-MAD"])
+    amd_run.validate_configs(["single", "heterogeneous-MAD"])  # OK
+
+
+def test_cli_rejects_bad_config(monkeypatch):
+    monkeypatch.delenv("RUNNER_LIVE", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        amd_run.main(["--which", "amd13", "--dry-run", "--configs", "interpretation-diverse"])
+    assert exc.value.code == 2
+
+
+class _RecordingClient:
+    """A stub LLMClient that records every generated prompt (no network)."""
+
+    def __init__(self, cfg):
+        self.config = cfg
+        self.provider = "recording"
+        self.base_url = "recording://stub"
+        self.prompts: List[str] = []
+
+    def complete(self, role, prompt, seed, temperature=None, family=None, model=None, **kw):
+        self.prompts.append(prompt)
+
+        class _C:
+            pass
+        c = _C()
+        c.model = model or "gpt-5.6-sol"
+        c.text = "Answer: 42. Confidence: 60%."
+        c.logit_conf = 0.6
+        return c
+
+
+def _forbidden_tokens_for(task) -> List[str]:
+    toks: List[str] = []
+    if getattr(task, "latent_spec", None):
+        toks.append(task.latent_spec)
+    for kq in getattr(task, "key_questions", None) or []:
+        toks.append(kq)
+    for interp in task.interpretations:
+        if interp.gold_check:
+            toks.append(interp.gold_check)
+    return toks
+
+
+def test_generated_prompts_no_gold_leakage():
+    """BLOCKER 1: capture the ACTUAL generated prompts sent to tested agents for
+    BOTH amd13 AND amd14 under BOTH conditions; assert the harness ADDS no
+    gold/target/foil/key_questions/latent_spec/gold_check text beyond what the
+    item legitimately presents in ``task.prompt`` (k0 controls legitimately show
+    the full spec; k1 underdetermined items must hide the resolution)."""
+    from harness.run import run_task
+    from common.config import load_config
+    cfg = load_config()
+
+    for which in ("amd13", "amd14"):
+        tasks = amd_run.load_amd_tasks(which, include_h1_anchors=(which == "amd13"))
+        assert tasks
+        for task in tasks:
+            base = task.prompt  # the ONLY task-derived content single/MAD may embed
+            forbidden = _forbidden_tokens_for(task)
+            for config in ("single", "heterogeneous-MAD"):
+                client = _RecordingClient(cfg)
+                run_task(task, config, client)
+                assert client.prompts, f"{which}/{config} produced no prompt"
+                for prompt in client.prompts:
+                    low = prompt.lower()
+                    # harness scaffolding tokens must never appear
+                    assert "latent_spec" not in low
+                    assert "gold_check" not in low
+                    assert "key_questions" not in low
+                    for tok in forbidden:
+                        if not tok:
+                            continue
+                        # a forbidden token may appear ONLY if the item itself
+                        # already contains it (k0 control); the harness must add none.
+                        if tok in prompt:
+                            assert tok in base, (
+                                f"harness LEAKED {tok!r} into {which}/{config} prompt "
+                                f"(not present in task.prompt)"
+                            )
+
+
+# ═══════════ 5. BLOCKER 2: report path guard (input + output) ═══════════
+
+def test_report_input_guard_rejects_confirmatory():
+    with pytest.raises(ValueError):
+        report.validate_report_input(
+            str(_REPO_ROOT / ".run_partitions" / "cp_lps_confirm.jsonl"))
+    with pytest.raises(ValueError):
+        report.validate_report_input(
+            str(_REPO_ROOT / ".run_partitions" / "cp_lps_intervention.jsonl"))
+    # wrong namespace basename refused even without a protected token
+    with pytest.raises(ValueError):
+        report.validate_report_input(
+            str(_REPO_ROOT / ".run_partitions" / "some_other.jsonl"))
+    # own namespace accepted
+    report.validate_report_input(
+        str(_REPO_ROOT / ".run_partitions" / "cp_amd_run__amd13.jsonl"))
+
+
+def test_report_output_guard():
+    with pytest.raises(ValueError):
+        report.validate_report_output(str(_REPO_ROOT / "files" / "confirm_results.md"))
+    with pytest.raises(ValueError):
+        report.validate_report_output(str(_REPO_ROOT / "files" / "arbitrary.md"))
+    report.validate_report_output(str(_REPO_ROOT / "files" / "amd13_results.md"))
+    report.validate_report_output(str(_REPO_ROOT / "files" / "amd14_results.md"))
+
+
+def test_report_write_rejects_protected_out_dir(tmp_path):
+    md = "# x"
+    bad_dir = tmp_path / "cp_lps_confirm"
+    bad_dir.mkdir()
+    with pytest.raises(ValueError):
+        report.write_report("amd13", md, out_dir=str(bad_dir))
+
+
+# ═══════════ 6. MAJOR 3: oracle-hint recovery probe supplies the hint ═══════════
+
+def test_probe_task_supplies_oracle_hint():
+    """The probe augments the tested prompt with the deleted-axis question(s)
+    (the oracle hint) — the ONLY permitted gold-bearing input for the recovery
+    probe — while k0 controls (no key_questions) are left unchanged."""
+    h2, h1 = manip.select_manip_tasks()
+    for task in h2 + h1:
+        probe = manip.build_probe_task(task)
+        assert probe.id == task.id  # identity preserved for labeling/tidy join
+        assert len(probe.prompt) > len(task.prompt)
+        assert "recovery probe" in probe.prompt.lower()
+        # every deleted-axis question is surfaced as the controlled clarification
+        for kq in task.key_questions:
+            assert kq in probe.prompt
+        # but the target/foil gold-check ids are NOT injected
+        for interp in task.interpretations:
+            if interp.gold_check:
+                assert interp.gold_check not in probe.prompt
+
+
+def test_probe_task_noop_without_key_questions():
+    from common.schema import Task, Interpretation
+    t = Task(
+        id="ctrl_k0", domain="code_spec", prompt="Do the thing.",
+        latent_spec="spec", interpretations=[Interpretation("I0", True, "chk")],
+        ambiguity_level=0, key_questions=[], regime="H2_derivable",
+    )
+    assert manip.build_probe_task(t) is t
+
+
+def test_write_and_load_manip_verdict(tmp_path):
+    verdict = {"gate_pass": True, "mean_h2_recovery": 0.9, "mean_h1_recovery": 0.1,
+               "separation": 0.8}
+    path = tmp_path / "amd13_manipulation_verdict.json"
+    manip.write_verdict(verdict, path=str(path))
+    loaded = report.load_manip_verdict(str(path))
+    assert loaded["gate_pass"] is True
+    # absent file → None (treated as NOT passed)
+    assert report.load_manip_verdict(str(tmp_path / "missing.json")) is None

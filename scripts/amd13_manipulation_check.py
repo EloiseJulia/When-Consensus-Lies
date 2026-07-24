@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -74,6 +76,46 @@ RPM_DEFAULT = 30
 
 _CHECKPOINT = str(_REPO_ROOT / ".run_partitions" / "cp_amd_run__amd13_manip.jsonl")
 _CACHE_DIR = str(_REPO_ROOT / ".llm_cache_amd_run_amd13_manip")
+
+# The verdict artifact the A13 report READS to enforce the validity gate (MAJOR 4).
+# Non-protected filename; lives in files/ next to the reports.
+MANIP_VERDICT_PATH = str(_REPO_ROOT / "files" / "amd13_manipulation_verdict.json")
+
+# ── The FROZEN oracle-hint recovery probe (Amendment 13 §4 / construction §2) ─
+# For each retained k1 item we SUPPLY the deleted-axis ORACLE HINT — the item's
+# ``key_questions`` (which name the implicit axis + its candidate resolutions, but
+# NEVER which one is the target I0) — as a controlled clarification, and instruct
+# the solver to RESOLVE it using ONLY the retained in-prompt information/artifacts
+# (no external default). Recovery = fraction of answers the EXECUTABLE labeler puts
+# at I0. This is the ONLY permitted gold-bearing input (a controlled recovery
+# probe); the target/foil/gold_check/latent_spec are NEVER revealed. Pre-committed:
+# recovery HIGH on genuinely in-prompt-derivable H2 items, LOW on H1 anchors whose
+# disambiguator is external and was deleted.
+_RECOVERY_HINT_TEMPLATE = (
+    "\n\n---\n"
+    "Clarification (recovery probe). One aspect of the required behaviour was left "
+    "implicit above. To answer correctly you MUST resolve the following question "
+    "using ONLY the information, worked examples, type signatures, and artifacts "
+    "already present in the prompt above — do NOT fall back on any external or "
+    "conventional default, and do NOT guess:\n"
+    "{questions}\n"
+    "Resolve it strictly from the retained information, then give your final answer."
+)
+
+
+def build_probe_task(task: Any) -> Any:
+    """Return a copy of *task* whose prompt appends the oracle-hint recovery block.
+
+    The copy keeps the SAME ``id`` and ``interpretations`` (so executable-gold
+    labeling and the tidy join are unchanged); only the tested PROMPT is augmented
+    with the deleted-axis question (the oracle hint). Items with no
+    ``key_questions`` (k0 controls) are returned unchanged and are not probed.
+    """
+    if not getattr(task, "key_questions", None):
+        return task
+    questions = "\n".join(f"- {q}" for q in task.key_questions)
+    hint = _RECOVERY_HINT_TEMPLATE.format(questions=questions)
+    return replace(task, prompt=task.prompt + hint)
 
 
 # ── Task selection: amd13 H2 k1 items + matched frozen H1 k1 anchors ─────────
@@ -227,7 +269,11 @@ def run_recovery_probe(
     amd_run.validate_output_paths(checkpoint_path, cache_dir)
 
     h2_tasks, h1_tasks = select_manip_tasks()
-    tasks = h2_tasks + h1_tasks
+    # FROZEN oracle-hint recovery probe: run the AUGMENTED probe prompts (retained
+    # prompt + surfaced deleted-axis question), NOT the ordinary task prompt.
+    probe_h2 = [build_probe_task(t) for t in h2_tasks]
+    probe_h1 = [build_probe_task(t) for t in h1_tasks]
+    tasks = probe_h2 + probe_h1
 
     if seeds is None:
         stride = getattr(rr, "_SEED_STRIDE", 1000)
@@ -243,7 +289,7 @@ def run_recovery_probe(
             cfg, tasks,
             checkpoint_path=checkpoint_path,
             models=reasoner_models,
-            configs=["single"],
+            configs=["single"],   # recovery probe is single-agent (capability test)
             seeds=seeds,
             budget_usd=budget_usd,
             rpm=rpm,
@@ -257,7 +303,6 @@ def run_recovery_probe(
     runner.run(dry_run=False)
 
     from analysis.io import load_runs_tidy, FRONTIER_MODEL_CLASS_MAP
-    from analysis.contrasts import COLS
     from harness.runner import endpoint_identity
 
     ep = endpoint_identity(client.provider, client.base_url)
@@ -265,7 +310,17 @@ def run_recovery_probe(
         checkpoint_path, tasks,
         model_class_map=FRONTIER_MODEL_CLASS_MAP, expected_endpoint=ep,
     )
-    return build_verdict_from_tidy(tidy, h2_tasks, h1_tasks)
+    verdict = build_verdict_from_tidy(tidy, h2_tasks, h1_tasks)
+    write_verdict(verdict)
+    return verdict
+
+
+def write_verdict(verdict: Dict[str, Any], path: str = MANIP_VERDICT_PATH) -> str:
+    """Persist the manipulation verdict as JSON (read by the A13 report gate)."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(verdict, indent=2, sort_keys=True), encoding="utf-8")
+    return str(p)
 
 
 def build_verdict_from_tidy(tidy, h2_tasks: List[Any], h1_tasks: List[Any]) -> Dict[str, Any]:
