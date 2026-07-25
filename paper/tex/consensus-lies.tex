@@ -66,7 +66,9 @@ switches this monoculture on and off on executable-gold tasks. Building on this 
 detector (Study~2) that flags precisely this condition at inference time---without ground truth---by testing
 whether a model's answer is stable when a \emph{self-surfaced} latent premise is counterfactually pinned; on
 executable gold-ambiguity it separates ambiguous from unambiguous prompts at pooled AUROC $0.895$, exactly
-where the same-prompt semantic-entropy baseline (AUROC $0.581$) is blind. We derive implications for multi-model interfaces: they should surface
+where the same-prompt semantic-entropy baseline (AUROC $0.581$) is blind. In the completed detect-and-fix
+loop, selective clarification achieves net $0.321$ (danger-zone coverage $0.730$ versus $0.149$ for
+semantic entropy), and oracle resolution reduces convergent delusion from \cd{} $0.604$ to $0.014$. We derive implications for multi-model interfaces: they should surface
 \emph{evidential dependence}---whether answers rest on the same, possibly incomplete, input---rather than
 displaying agent count.
 \end{abstract}
@@ -213,7 +215,9 @@ wavers under fixed-input sampling. On an executable gold-ambiguity label, this b
 inference-only LPP detector separates ambiguous from unambiguous prompts at pooled AUROC $0.895$ versus
 $0.581$ for the semantic-entropy baseline, a $+0.314$ gap versus same-input semantic entropy, by
 self-surfacing latent premises and counterfactually pinning them in executable tests; the pinning step also
-enables the detect-and-fix loop. The honest ablation is that premise-surfacing broadly works
+enables the detect-and-fix loop. In that completed loop, selective clarification reaches net $0.321$
+(danger-zone coverage $0.730$ versus $0.149$ for semantic entropy), and an oracle that supplies the deleted
+convention reduces convergent delusion from \cd{} $0.604$ to $0.014$. The honest ablation is that premise-surfacing broadly works
 (requirements-probing AUROC $0.810$, corroborating the axis), pinning adds a real but modest $+0.085$ and
 enables resolution, and localization of the responsible premise remains weak.
 \end{itemize}
@@ -460,7 +464,7 @@ pre-registered secondary robustness extension, directly bounds that concern with
 $\cd=0.685$ with 95\% CI $[0.521,0.839]$, and 79.2\% of unfiltered items still exhibit convergent delusion.
 The point-estimate delta relative to the screened confirmatory rate is $+0.155$, but the screened rate
 (0.53) lies within the unfiltered CI; the correct conclusion is therefore that the result does
-\emph{not} attenuate, not that it is significantly higher. Accordingly, we find no evidence that screening
+\emph{not} attenuate, not that it is significantly higher, supporting H-A14 (no attenuation). Accordingly, we find no evidence that screening
 inflated the effect, and the effect
 replicates on the unfiltered sample. Two further features mitigate the screening concern: provenance
 separation (the constructor family is outside the tested pool, so the screen is not run by an evaluated
@@ -480,7 +484,9 @@ conversational influence. Table~\ref{tab:roster} lists the roster.
 \begin{table}[t]
 \centering
 \small
-\caption{Frontier roster by model class and family (Copilot-proxy slugs, Amendment~06). Per-item family
+\caption{Frontier roster by model class and family (Copilot-proxy slugs, Amendment~06). The Google slug is
+\texttt{gemini-3.1-pro-preview}; detection logs originally listed \texttt{gemini-3.1-pro} before the proxy
+renamed the slug. Per-item family
 separation is enforced at run time. The primary benchmark constructor (Microsoft \texttt{mai-code-1-flash})
 sits \emph{outside} the tested pool. The Amendment~10 R2 held-out subset is built by a \emph{second} family
 (Anthropic) that is itself among the tested families; R2 is computed only on cells whose tested family
@@ -496,11 +502,11 @@ Homogeneous single & OpenAI & \texttt{gpt-5.4} \\
 \addlinespace
 Heterogeneous pool  & OpenAI    & \texttt{gpt-5.4} \\
                     & Anthropic & \texttt{claude-sonnet-4.6} \\
-                    & Google    & \texttt{gemini-3.1-pro} \\
+                    & Google    & \texttt{gemini-3.1-pro-preview} \\
 \addlinespace
 Reasoning tier      & OpenAI    & \texttt{gpt-5.6-sol} \\
                     & Anthropic & \texttt{claude-opus-4.8} \\
-                    & Google    & \texttt{gemini-3.1-pro} \\
+                    & Google    & \texttt{gemini-3.1-pro-preview} \\
 \addlinespace
 Weak tier           & OpenAI    & \texttt{gpt-4o-mini} \\
                     & Anthropic & \texttt{claude-haiku-4.5} \\
@@ -565,8 +571,10 @@ convergent evidence from ICC, pairwise agreement, and $\neff$ together with the 
 Hypotheses, the primary metric, the regime criterion, decision rules, and robustness nulls were
 git-committed and frozen before the confirmatory run; every subsequent change is a timestamped, signed
 amendment reported in Appendix~\ref{app:deviations}. Provenance was separated by construction: analysis
-artifacts were implemented and \emph{independently, adversarially audited by different model families}, and
-all labels derive from deterministic executable gold. The pre-registration and its signed amendments are
+artifacts were implemented and \emph{independently, adversarially audited by a different model family}
+(report-only, implementer/auditor family separation), all labels derive from deterministic executable gold,
+and the A13/A14 completeness gate fails closed by reporting incomplete data as incomplete, never as a result.
+The pre-registration and its signed amendments are
 enumerated in Appendix~\ref{app:deviations}, and the benchmark, evaluators, and analysis code will be
 released (\S\ref{sec:limitations}).
 
@@ -699,11 +707,10 @@ rule-based (non-LLM) detector, agents almost never issued an explicit clarificat
 instead committed to an answer, so consensus carries no internal warning
 (Figure~\ref{fig:silent}). We use ``confident'' descriptively for this commit-without-flagging behavior; we
 log verbalized/logit confidence but do not over-interpret it, and the detector itself awaits human
-validation (below).
+validation (below), so we treat the abstention-silence claim as rule-based rather than human-validated.
 Wrong-consensus also rises with the number of omitted clauses $k$ (\textbf{H1b} supported; $k$-coefficient
 $0.31$, 95\% CI $[0.18,0.45]$). The constructive boundary condition is that \emph{presence} of the
 disambiguator (H2) removes the failure entirely.
-\todo{finalize abstention once the rule-based detector's human-validation sample is checked.}
 
 \begin{figure}[t]
 \centering
@@ -738,7 +745,7 @@ honestly.
 
 \subsection{Robustness and honestly reported nulls}
 \label{sec:robust}
-Table~\ref{tab:outcomes} summarizes every pre-registered outcome. The within-design $k{=}0$ control (R1a) is
+Table~\ref{tab:outcomes} summarizes every Study~1 pre-registered outcome. The within-design $k{=}0$ control (R1a) is
 strongly supported (above). An interpretation-uniform null (R1b)
 is inconclusive on the primary metric---binary items give a high random baseline---but supported among
 parseable answers; the excess-convergence claim rests on R1a and the independence-calibrated counterfactual,
@@ -750,7 +757,9 @@ capable models reach an unenumerated interpretation ($\rightarrow\iperp$); these
 pre-registered drop-\iperp{} sensitivity (Appendix~\ref{app:deviations}), under which the effect is
 unchanged.
 
-Amendment~13, a ratified pre-registered secondary robustness check, crosses regime with domain. A
+Amendment~13, a ratified pre-registered secondary robustness check, crosses regime with domain. It ran the
+single-agent and heterogeneous-MAD pools over the frontier roster across three seeds, gated by a fail-closed
+completeness check, the oracle-hint manipulation gate, and the provenance holdout. A
 manipulation check first validated the oracle-hint recovery probe, with mean H2 recovery $1.000$ versus mean
 H1 recovery $0.125$ (separation $0.875$), so the crossing is interpretable. Within both domains, the
 $H1\_external \rightarrow H2\_derivable$ regime contrast holds under the frozen \cd{} metric:
@@ -764,7 +773,7 @@ confirmatory finding is unchanged.
 
 \begin{table}[t]
 \centering
-\caption{Pre-registered outcomes. We report all outcomes, including those not supported; the
+\caption{Study~1 pre-registered outcomes. We report all Study~1 outcomes, including those not supported; the
 capability/family nulls are what make the failure a property of the information boundary rather than of any
 model.}
 \label{tab:outcomes}
@@ -836,8 +845,9 @@ where a model is \emph{internally} uncertain, but it is systematically blind whe
 self-consistent yet its answer secretly depends on an unstated assumption. Thus the relevant axis is not
 fixed-input sampling variability but premise/context sensitivity: fake redundancy can have low output
 uncertainty because models stably commit to the same unstated premise. Everything reported here is the
-\emph{confirmatory} detection read, pre-registered and frozen before the run; the intervention and the
-white-box contrast are still running and appear below only as pre-registered \emph{design}, with no numbers.
+\emph{confirmatory} detection read, pre-registered and frozen before the run. The closed-loop intervention
+is reported below; the Phase~2c AU-Probe white-box contrast was pre-registered but is \emph{not run} in this
+paper and remains an optional secondary future-work contrast.
 
 \subsection{Concept: a seed/context uncertainty decomposition and the danger quadrant}
 \label{sec:study2-concept}
@@ -982,7 +992,7 @@ Model & \Hctx{} (detector) & \Hseed{} (sem.\ entropy) & Self-consist. & Req.-pro
 \midrule
 claude-haiku-4.5 & $0.869$\,$[0.787,0.941]$ & $0.567$\,$[0.483,0.648]$ & $0.566$ & $0.802$ \\
 claude-opus-4.8  & $0.887$\,$[0.808,0.956]$ & $0.591$\,$[0.529,0.662]$ & $0.591$ & $0.832$ \\
-gemini-3.1-pro   & $0.857$\,$[0.771,0.934]$ & $0.606$\,$[0.534,0.682]$ & $0.606$ & $0.794$ \\
+gemini-3.1-pro-preview & $0.857$\,$[0.771,0.934]$ & $0.606$\,$[0.534,0.682]$ & $0.606$ & $0.794$ \\
 gemini-3.5-flash & $0.880$\,$[0.797,0.955]$ & $0.580$\,$[0.493,0.667]$ & $0.580$ & $0.802$ \\
 gpt-4o-mini      & $0.856$\,$[0.768,0.933]$ & $0.551$\,$[0.472,0.629]$ & $0.553$ & $0.807$ \\
 gpt-5.6-sol      & $0.857$\,$[0.774,0.932]$ & $0.563$\,$[0.467,0.657]$ & $0.563$ & $0.802$ \\
@@ -1007,7 +1017,7 @@ Model & Prec. & Recall & $k0$ FP & Danger mass & Localiz. \\
 \midrule
 claude-haiku-4.5 & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.364$ \\
 claude-opus-4.8  & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.273$ \\
-gemini-3.1-pro   & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.364$ \\
+gemini-3.1-pro-preview & $0.958$ & $0.697$ & $0.048$ & $0.697$ (23/33) & $0.364$ \\
 gemini-3.5-flash & $0.960$ & $0.727$ & $0.048$ & $0.727$ (24/33) & $0.273$ \\
 gpt-4o-mini      & $0.957$ & $0.667$ & $0.048$ & $0.667$ (22/33) & $0.333$ \\
 gpt-5.6-sol      & $0.957$ & $0.667$ & $0.048$ & $0.667$ (22/33) & $0.364$ \\
@@ -1034,8 +1044,8 @@ undercuts the primary, pre-committed detection result; we state them so the cont
 \subsection{Intervention: selective clarification and oracle resolution (pre-registered)}
 \label{sec:study2-intervention}
 Two pre-registered follow-ups extend the detector from diagnosis to action. We report the closed-loop
-intervention (Phase~2b, H-B1$'$/H-B2$'$) here; the white-box contrast (Phase~2c) is still running and we
-describe only its frozen design. Every intervention metric is scored by \emph{executable gold} (the frozen
+intervention (Phase~2b, H-B1$'$/H-B2$'$) here. The Phase~2c AU-Probe white-box contrast was pre-registered
+but is \emph{not run} in this paper; it remains an optional secondary future-work contrast. Every intervention metric is scored by \emph{executable gold} (the frozen
 \cd{} labeler against target $I_0$), never an LLM judge, at the pre-registered operating point
 ($\tau{=}0.0$, $\tau_s{=}0.5$~bits). We pool $809$ run cells over six models into $54$ pre-registered items;
 $163$ cells that could not be computed (a pathological proxy generation-hang and slow-tail truncation on the
@@ -1053,7 +1063,8 @@ good); \emph{Over} $=$ clarify-rate on $\mathrm{AMB}{-}$/$k{=}0$ (low is good); 
 appropriate $-$ over (pre-committed $>0$ and $\ge$ each baseline); \emph{Danger} $=$ $\mathrm{AMB}{+}$
 coverage on the low-\Hseed{} ($\le\!\tau_s$) subset, where semantic entropy is blind. LPP wins on net; in the
 danger zone it far exceeds the uncertainty baselines (semantic entropy and self-consistency) that are blind there,
-without the trivial over-clarification of always-clarify or requirements-probing.}
+without the trivial over-clarification of always-clarify or requirements-probing. Note: the six-model roster
+has partial Gemini shards; $163$ N/A cells are excluded, leaving $809$ real cells for aggregation.}
 \label{tab:study2-intervention}
 \footnotesize
 \setlength{\tabcolsep}{4pt}
@@ -1100,10 +1111,10 @@ The single-model pilot on gpt-5.6-sol is cleaner still (H-B1$'$ net $0.667$ with
 H-B2$'$ baseline \cd{} $0.626\!\to\!0.000$, oracle $I_0$-hit $1.000$), consistent with the capability
 dependence above.
 
-\todo{Phase 2c AU-Probe white-box contrast forthcoming.} \emph{White-box contrast.} A small open white-box
-model probed on CPU positions LPP as the black-box, cross-vendor-deployable method against a
-representation-level alternative; the pre-registered plan permits a reduced item subset if the full run is
-too slow.
+\emph{Future white-box contrast.} The pre-registered Phase~2c AU-Probe contrast would probe a small open
+white-box model on CPU to position LPP as the black-box, cross-vendor-deployable method against a
+representation-level alternative. It was not run for this paper; the pre-registered plan remains available
+as future work and permits a reduced item subset if the full run is too slow.
 
 %% =====================================================================
 \section{Discussion}
@@ -1183,7 +1194,7 @@ do not estimate the real-world \emph{prevalence} of such situations---we charact
 $H2\_derivable$ boundary condition rule out a \emph{generic} hard-item or pipeline artifact, but did not by
 themselves remove possible screen-induced inflation of the observed rate. Amendment~14's completed
 pre-registered unfiltered-sample replication did not attenuate relative to the screened confirmatory rate
-(see Construct validity), so we find no evidence of screen-induced inflation. The abstention detector is
+(see Construct validity), supporting H-A14 (no attenuation), so we find no evidence of screen-induced inflation. The abstention detector is
 rule-based and pending human validation. Generalization beyond the three domains and the tested roster is
 future work.
 \paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
@@ -1204,16 +1215,19 @@ executable gold evaluator, so no human annotation labor was required. All model 
 institution-hosted API proxy under its provider terms; we therefore do not infer environmental impact from
 marginal billing (the run cost \$0 on the proxy, which is not a proxy for resource use). Instead we report the
 run \emph{scale}: the confirmatory run comprised 5{,}832 aggregation jobs (16{,}461 agent executions) over 54
-items and three seeds, plus the smaller exploratory Phase~B pass ($\approx$1.5k additional calls); no model
+items and three seeds, plus the smaller exploratory Phase~B pass ($\approx$1.5k additional calls). Additional
+Study~2 detection and intervention runs and the A13/A14 confirmatory robustness runs were also conducted, all
+at \$0 through the same local institution-hosted proxy as detailed in the artifact logs; no model
 was trained or fine-tuned. Use is governed by the provider terms of the hosted proxy. The one salient
 release risk is dual-use: publishing a benchmark of ``traps'' could in principle be used to make models
 \emph{appear} robust by overfitting to our items. We mitigate this by releasing the executable construction
 procedure (target/foil axes and default-check protocol) rather than a static leaderboard, so the failure mode
 can be re-instantiated on fresh items, and by framing the contribution as a diagnostic of aggregation
 dependence rather than a model ranking.
-\paragraph{Open science.} We pre-registered the study and will release the benchmark, executable evaluators,
-prompts, model/version records, analysis code, and the full amendment ledger (Appendix~\ref{app:deviations}).
-A permanent archival link will be provided on acceptance.
+\paragraph{Data and code availability.} For anonymous review, we will release an anonymized artifact
+containing the benchmark items, executable gold-checkers, the adversarial-foil validator, analysis and run
+code, prompts, model/version records, the pre-registration, and the full signed amendment/deviation ledger
+(Appendix~\ref{app:deviations}). A permanent archival link will be provided on acceptance.
 
 %% =====================================================================
 \section{Conclusion}
@@ -1229,7 +1243,7 @@ trustworthy human--AI judgment means measuring \emph{independence}, preserving \
 consensus as a hypothesis to be checked---not as proof.
 
 \begin{acks}
-\todo{Anonymized for review.}
+Acknowledgements omitted for anonymous review.
 \end{acks}
 
 \bibliographystyle{ACM-Reference-Format}
