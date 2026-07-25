@@ -1,4 +1,4 @@
-# constructed by: Claude (Anthropic) family
+# item semantics constructed by Microsoft mai-code-1-flash (out-of-pool constructor); executable gold-checkers implemented by Claude (Anthropic), cross-family audited
 """Code specification domain — REVERSED-TARGET benchmark tasks.
 
 This domain features coding problems where deleting a requirement class creates

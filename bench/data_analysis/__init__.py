@@ -1,4 +1,4 @@
-# constructed by: Claude (Anthropic) family
+# item semantics constructed by Microsoft mai-code-1-flash (out-of-pool constructor); executable gold-checkers implemented by Claude (Anthropic), cross-family audited
 """Data analysis domain for ambiguous data-processing problems.
 
 This domain features data analysis tasks that compute statistics/aggregations
