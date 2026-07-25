@@ -1,4 +1,4 @@
-# item semantics constructed by Microsoft mai-code-1-flash (out-of-pool constructor); executable gold-checkers + module implemented by Claude (Anthropic), cross-family audited
+# item semantics constructed by Microsoft mai-code-1-flash (out-of-pool constructor); executable gold-checkers implemented by Claude (Anthropic), cross-family audited
 """Policy question-answering domain for ambiguous policy interpretation.
 
 This domain features numeric policy calculations where deleting a requirement CLASS
