@@ -25,7 +25,7 @@ class GoldChecker(ABC):
     Examples:
     - Code spec: run pytest on candidate implementation
     - Data analysis: assert exact numeric result or DataFrame equality
-    - Policy QA: (weakened) keyword/structure rubric match
+    - Policy QA: structured exact-cent numeric equality on {"amount": float}
     """
     
     @abstractmethod

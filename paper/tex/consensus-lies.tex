@@ -373,7 +373,11 @@ consistent with the retained input. Each task fixes a target interpretation $I_0
 alternatives (foils) $I_1,\dots$; an answer is labeled deterministically by \emph{which} interpretation it
 realizes---via an executable \texttt{check()}---or \iperp{} if it is off-axis or unparseable. Critically,
 correctness and the interpretation label are established \emph{independently of model agreement}: no LLM
-judges any output.
+judges any output. The gold checkers are deterministic and domain-specific: \texttt{code\_spec} executes the
+candidate implementation against tests; \texttt{data\_analysis} compares computed results; and
+\texttt{policy\_qa} uses structured exact-cent numeric matching on answers of the form
+\texttt{\{"amount": float\}}. These are finite behavioral checks, not proofs of correctness for all possible
+inputs, and \texttt{policy\_qa} verifies only the final numeric amount rather than the reasoning path.
 
 We reconstruct 54 task variants across three domains (code specification, data analysis, policy
 question-answering). Items are \emph{reversed} so the natural default an unaware solver would produce is a
@@ -422,6 +426,20 @@ resolved. Across all 54 items the check passed: unaware capable models produced 
 $H1\_external$ items, and resolved $H2\_derivable$ items to $I_0$; the four newly added $H2$ families
 (geometric/harmonic-mean, cumulative, tie-ranking) were confirmed by a dedicated cross-family default check
 before the confirmatory run.
+
+\emph{Gold-construction safeguards.} Because the main item semantics were machine-constructed by Microsoft
+\texttt{mai-code-1-flash}, we guard against the possibility that the gold itself is a confident AI error. The
+gold is executable, deterministic, and LLM-free: all 54 frozen pre-registered items are certified 100\% mutually
+distinguishable, as are the R2 subset (12) and Amendment~13/14 sidecars (64), for 130/130 total with 163 passing tests. The
+adversarial-foil validator fails closed: each interpretation's reference candidate must pass only its own
+checker, adversarial foils must match at most one checker, certification requires a non-empty foil set, and any
+candidate matching more than one checker raises \texttt{AmbiguousLabelError} rather than being silently labeled.
+Every ambiguous item (71/71 across $k{=}1,2,3$) has a matched fully specified $k{=}0$ control; empirically those
+$k{=}0$ controls yield $\cd\approx0$, validating that the $I_0$ checker recognizes correct implementations.
+This does not prove all-input correctness, but it makes labeling deterministic rather than an AI opinion. The
+constructor is outside the tested OpenAI/Anthropic/Google pool, tested-model convergence across all three vendor
+families is cross-family on the same foil $I_1$, R2 replicates the effect under an independent Anthropic constructor tested only on
+non-Anthropic models, and the authors reviewed and spot-checked the construction.
 
 \emph{Default-check disclosure and construct-validity caveat.} Because inclusion required that unaware
 capable models produce the intended foil, item selection is \emph{partly conditioned on the default
@@ -1181,7 +1199,7 @@ dependence-aware multi-model interface is a concept and remains to be \emph{buil
 claim that any of these were carried out.
 \paragraph{Ethics.} The study involves \emph{no human subjects}: all data are model-generated responses to
 synthetic benchmark tasks, and the ``simulated users'' are scripted, not people. The benchmark contains no
-personal, sensitive, or copyrighted material; each item is an author-constructed underspecified task with an
+personal, sensitive, or copyrighted material; each item is a machine-constructed underspecified task with an
 executable gold evaluator, so no human annotation labor was required. All model calls were served by a local,
 institution-hosted API proxy under its provider terms; we therefore do not infer environmental impact from
 marginal billing (the run cost \$0 on the proxy, which is not a proxy for resource use). Instead we report the
