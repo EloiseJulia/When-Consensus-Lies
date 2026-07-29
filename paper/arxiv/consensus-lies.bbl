@@ -1,0 +1,681 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{47}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Bansal et~al\mbox{.}(2021)]%
+        {bansal2021whole}
+\bibfield{author}{\bibinfo{person}{Gagan Bansal}, \bibinfo{person}{Tongshuang
+  Wu}, \bibinfo{person}{Joyce Zhou}, \bibinfo{person}{Raymond Fok},
+  \bibinfo{person}{Besmira Nushi}, \bibinfo{person}{Ece Kamar},
+  \bibinfo{person}{Marco~Tulio Ribeiro}, {and} \bibinfo{person}{Daniel~S.
+  Weld}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Does the Whole Exceed its Parts? The Effect of {AI}
+  Explanations on Complementary Team Performance}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2021 CHI Conference on Human
+  Factors in Computing Systems}}.
+\newblock
+\href{https://doi.org/10.1145/3411764.3445717}{doi:\nolinkurl{10.1145/3411764.3445717}}
+
+
+\bibitem[Bo et~al\mbox{.}(2025)]%
+        {bo2025rely}
+\bibfield{author}{\bibinfo{person}{Jessica~Y. Bo}, \bibinfo{person}{Sophia
+  Wan}, {and} \bibinfo{person}{Ashton Anderson}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{To Rely or Not to Rely? Evaluating Interventions
+  for Appropriate Reliance on Large Language Models}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2025 CHI Conference on Human
+  Factors in Computing Systems}}.
+\newblock
+\href{https://doi.org/10.1145/3706598.3714097}{doi:\nolinkurl{10.1145/3706598.3714097}}
+
+
+\bibitem[Bommasani et~al\mbox{.}(2021)]%
+        {bommasani2021foundation}
+\bibfield{author}{\bibinfo{person}{Rishi Bommasani}, \bibinfo{person}{Drew~A.
+  Hudson}, \bibinfo{person}{Ehsan Adeli}, \bibinfo{person}{Russ Altman},
+  \bibinfo{person}{Simran Arora}, \bibinfo{person}{Sydney von Arx},
+  \bibinfo{person}{Michael~S. Bernstein}, {et~al\mbox{.}}}
+  \bibinfo{year}{2021}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{On the Opportunities and Risks of
+  Foundation Models}}.
+\newblock \bibinfo{type}{{T}echnical {R}eport}. \bibinfo{institution}{Stanford
+  Center for Research on Foundation Models}.
+\newblock
+\showeprint[arxiv]{2108.07258}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2108.07258}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Breiman(2001)]%
+        {breiman2001}
+\bibfield{author}{\bibinfo{person}{Leo Breiman}.}
+  \bibinfo{year}{2001}\natexlab{}.
+\newblock \showarticletitle{Random Forests}.
+\newblock \bibinfo{journal}{\emph{Machine Learning}}  \bibinfo{volume}{45}
+  (\bibinfo{year}{2001}), \bibinfo{pages}{5--32}.
+\newblock
+
+
+\bibitem[Bu{\c{c}}inca et~al\mbox{.}(2021)]%
+        {buccinca2021trust}
+\bibfield{author}{\bibinfo{person}{Zana Bu{\c{c}}inca},
+  \bibinfo{person}{Maja~Barbara Malaya}, {and} \bibinfo{person}{Krzysztof~Z.
+  Gajos}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{To Trust or to Think: Cognitive Forcing Functions
+  Can Reduce Overreliance on {AI} in {AI}-assisted Decision-making}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the ACM on Human-Computer
+  Interaction}} \bibinfo{volume}{5}, \bibinfo{number}{CSCW1}, Article
+  \bibinfo{articleno}{188} (\bibinfo{year}{2021}).
+\newblock
+\href{https://doi.org/10.1145/3449287}{doi:\nolinkurl{10.1145/3449287}}
+
+
+\bibitem[{ChatHub}(2026)]%
+        {chathub2026}
+\bibfield{author}{\bibinfo{person}{{ChatHub}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{{ChatHub} --- {GPT}, {Claude}, and {Gemini} Side by
+  Side}.
+\newblock \bibinfo{howpublished}{\url{https://chathub.gg}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Choi et~al\mbox{.}(2025)]%
+        {choi2025conformity}
+\bibfield{author}{\bibinfo{person}{Min Choi}, \bibinfo{person}{Keonwoo Kim},
+  \bibinfo{person}{Sungwon Chae}, {and} \bibinfo{person}{Sangyeop Baek}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{An Empirical Study of Group Conformity in
+  Multi-Agent Systems}. In \bibinfo{booktitle}{\emph{Findings of the
+  Association for Computational Linguistics (ACL Findings)}}.
+  \bibinfo{pages}{5123--5139}.
+\newblock
+\shownote{arXiv:2506.01332}.
+\newblock
+\href{https://doi.org/10.18653/v1/2025.findings-acl.265}{doi:\nolinkurl{10.18653/v1/2025.findings-acl.265}}
+
+
+\bibitem[Clark and Brennan(1991)]%
+        {clark1991grounding}
+\bibfield{author}{\bibinfo{person}{Herbert~H. Clark} {and}
+  \bibinfo{person}{Susan~E. Brennan}.} \bibinfo{year}{1991}\natexlab{}.
+\newblock \showarticletitle{Grounding in communication}.
+\newblock In \bibinfo{booktitle}{\emph{Perspectives on Socially Shared
+  Cognition}}, \bibfield{editor}{\bibinfo{person}{L.~B. Resnick},
+  \bibinfo{person}{J.~M. Levine}, {and} \bibinfo{person}{S.~D. Teasley}}
+  (Eds.). \bibinfo{publisher}{American Psychological Association},
+  \bibinfo{pages}{127--149}.
+\newblock
+\shownote{DOI:10.1037/10096-006}.
+\newblock
+
+
+\bibitem[de~Condorcet(1785)]%
+        {condorcet}
+\bibfield{author}{\bibinfo{person}{Marquis de Condorcet}.}
+  \bibinfo{year}{1785}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Essai sur l'application de l'analyse \`a la
+  probabilit\'e des d\'ecisions rendues \`a la pluralit\'e des voix}}.
+\newblock \bibinfo{publisher}{Imprimerie Royale, Paris}.
+\newblock
+
+
+\bibitem[Dietrich and Spiekermann(2013)]%
+        {dietrich2013}
+\bibfield{author}{\bibinfo{person}{Franz Dietrich} {and} \bibinfo{person}{Kai
+  Spiekermann}.} \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{Independent Opinions? On the Causal Foundations of
+  Belief Formation and Jury Theorems}.
+\newblock \bibinfo{journal}{\emph{Mind}} \bibinfo{volume}{122},
+  \bibinfo{number}{487} (\bibinfo{year}{2013}), \bibinfo{pages}{655--685}.
+\newblock
+\href{https://doi.org/10.1093/mind/fzt074}{doi:\nolinkurl{10.1093/mind/fzt074}}
+
+
+\bibitem[Du et~al\mbox{.}(2024)]%
+        {du2023debate}
+\bibfield{author}{\bibinfo{person}{Yilun Du}, \bibinfo{person}{Shuang Li},
+  \bibinfo{person}{Antonio Torralba}, \bibinfo{person}{Joshua~B. Tenenbaum},
+  {and} \bibinfo{person}{Igor Mordatch}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Improving Factuality and Reasoning in Language
+  Models through Multiagent Debate}. In \bibinfo{booktitle}{\emph{International
+  Conference on Machine Learning (ICML)}} \emph{(\bibinfo{series}{PMLR},
+  Vol.~\bibinfo{volume}{235})}. \bibinfo{pages}{11733--11763}.
+\newblock
+\shownote{arXiv:2305.14325}.
+\newblock
+\urldef\tempurl%
+\url{https://proceedings.mlr.press/v235/du24e.html}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Estornell and Liu(2024)]%
+        {estornell2024}
+\bibfield{author}{\bibinfo{person}{Andrew Estornell} {and}
+  \bibinfo{person}{Yang Liu}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Multi-LLM Debate: Framework, Principals, and
+  Interventions}. In \bibinfo{booktitle}{\emph{Advances in Neural Information
+  Processing Systems (NeurIPS)}}.
+\newblock
+\urldef\tempurl%
+\url{https://openreview.net/forum?id=sy7eSEXdPC}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Farquhar et~al\mbox{.}(2024)]%
+        {farquhar2024semantic}
+\bibfield{author}{\bibinfo{person}{Sebastian Farquhar}, \bibinfo{person}{Jannik
+  Kossen}, \bibinfo{person}{Lorenz Kuhn}, {and} \bibinfo{person}{Yarin Gal}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Detecting hallucinations in large language models
+  using semantic entropy}.
+\newblock \bibinfo{journal}{\emph{Nature}} \bibinfo{volume}{630},
+  \bibinfo{number}{8017} (\bibinfo{year}{2024}), \bibinfo{pages}{625--630}.
+\newblock
+\href{https://doi.org/10.1038/s41586-024-07421-0}{doi:\nolinkurl{10.1038/s41586-024-07421-0}}
+
+
+\bibitem[Gigone and Hastie(1993)]%
+        {gigone1993common}
+\bibfield{author}{\bibinfo{person}{Daniel Gigone} {and} \bibinfo{person}{Reid
+  Hastie}.} \bibinfo{year}{1993}\natexlab{}.
+\newblock \showarticletitle{The Common Knowledge Effect: Information Sharing
+  and Group Judgment}.
+\newblock \bibinfo{journal}{\emph{Journal of Personality and Social
+  Psychology}} \bibinfo{volume}{65}, \bibinfo{number}{5}
+  (\bibinfo{year}{1993}), \bibinfo{pages}{959--974}.
+\newblock
+
+
+\bibitem[{Google}(2024)]%
+        {googleaistudio2024compare}
+\bibfield{author}{\bibinfo{person}{{Google}}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Compare Mode in {Google AI Studio}: Your Companion
+  for Choosing the Right {Gemini} Model}.
+\newblock
+  \bibinfo{howpublished}{\url{https://developers.googleblog.com/compare-mode-in-google-ai-studio/}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Guo et~al\mbox{.}(2025)]%
+        {guo2025diversity}
+\bibfield{author}{\bibinfo{person}{Yanzhu Guo}, \bibinfo{person}{Guokan Shang},
+  {and} \bibinfo{person}{Chlo{\'e} Clavel}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Benchmarking Linguistic Diversity of Large Language
+  Models}.
+\newblock \bibinfo{journal}{\emph{Transactions of the Association for
+  Computational Linguistics}}  \bibinfo{volume}{13} (\bibinfo{year}{2025}),
+  \bibinfo{pages}{1507--1526}.
+\newblock
+\href{https://doi.org/10.1162/tacl.a.47}{doi:\nolinkurl{10.1162/tacl.a.47}}
+
+
+\bibitem[Hong and Page(2004)]%
+        {hongpage2004}
+\bibfield{author}{\bibinfo{person}{Lu Hong} {and} \bibinfo{person}{Scott~E.
+  Page}.} \bibinfo{year}{2004}\natexlab{}.
+\newblock \showarticletitle{Groups of Diverse Problem Solvers Can Outperform
+  Groups of High-Ability Problem Solvers}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the National Academy of
+  Sciences}} \bibinfo{volume}{101}, \bibinfo{number}{46}
+  (\bibinfo{year}{2004}), \bibinfo{pages}{16385--16389}.
+\newblock
+\href{https://doi.org/10.1073/pnas.0403723101}{doi:\nolinkurl{10.1073/pnas.0403723101}}
+
+
+\bibitem[Hou et~al\mbox{.}(2024)]%
+        {hou2024decomposing}
+\bibfield{author}{\bibinfo{person}{Bairu Hou}, \bibinfo{person}{Yujian Liu},
+  \bibinfo{person}{Kaizhi Qian}, \bibinfo{person}{Jacob Andreas},
+  \bibinfo{person}{Shiyu Chang}, {and} \bibinfo{person}{Yang Zhang}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Decomposing Uncertainty for Large Language Models
+  through Input Clarification Ensembling}. In
+  \bibinfo{booktitle}{\emph{International Conference on Machine Learning
+  (ICML)}} \emph{(\bibinfo{series}{PMLR}, Vol.~\bibinfo{volume}{235})}.
+  \bibinfo{pages}{19023--19042}.
+\newblock
+\shownote{arXiv:2311.08718; ICML 2024 Oral}.
+\newblock
+\urldef\tempurl%
+\url{https://proceedings.mlr.press/v235/hou24b.html}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Janis(1972)]%
+        {janis1972}
+\bibfield{author}{\bibinfo{person}{Irving~L. Janis}.}
+  \bibinfo{year}{1972}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Victims of Groupthink: A Psychological
+  Study of Foreign-Policy Decisions and Fiascoes}}.
+\newblock \bibinfo{publisher}{Houghton Mifflin, Boston}.
+\newblock
+
+
+\bibitem[Kim et~al\mbox{.}(2025)]%
+        {kim2025correlated}
+\bibfield{author}{\bibinfo{person}{Elliot Kim}, \bibinfo{person}{Avi Garg},
+  \bibinfo{person}{Kenny Peng}, {and} \bibinfo{person}{Nikhil Garg}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Correlated Errors in Large Language Models}. In
+  \bibinfo{booktitle}{\emph{International Conference on Machine Learning
+  (ICML)}} \emph{(\bibinfo{series}{PMLR}, Vol.~\bibinfo{volume}{267})}.
+  \bibinfo{pages}{30038--30066}.
+\newblock
+\shownote{arXiv:2506.07962}.
+\newblock
+\urldef\tempurl%
+\url{https://proceedings.mlr.press/v267/kim25e.html}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Kleinberg and Raghavan(2021)]%
+        {kleinberg2021monoculture}
+\bibfield{author}{\bibinfo{person}{Jon Kleinberg} {and} \bibinfo{person}{Manish
+  Raghavan}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Algorithmic Monoculture and Social Welfare}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the National Academy of
+  Sciences (PNAS)}} \bibinfo{volume}{118}, \bibinfo{number}{22}
+  (\bibinfo{year}{2021}).
+\newblock
+\shownote{DOI:10.1073/pnas.2018340118}.
+\newblock
+
+
+\bibitem[Krogh and Vedelsby(1994)]%
+        {krogh1994}
+\bibfield{author}{\bibinfo{person}{Anders Krogh} {and} \bibinfo{person}{Jesper
+  Vedelsby}.} \bibinfo{year}{1994}\natexlab{}.
+\newblock \showarticletitle{Neural Network Ensembles, Cross Validation, and
+  Active Learning}.
+\newblock \bibinfo{journal}{\emph{Advances in Neural Information Processing
+  Systems (NeurIPS)}} (\bibinfo{year}{1994}).
+\newblock
+
+
+\bibitem[Ladha(1992)]%
+        {ladha1992}
+\bibfield{author}{\bibinfo{person}{Krishna~K. Ladha}.}
+  \bibinfo{year}{1992}\natexlab{}.
+\newblock \showarticletitle{The Condorcet Jury Theorem, Free Speech, and
+  Correlated Votes}.
+\newblock \bibinfo{journal}{\emph{American Journal of Political Science}}
+  \bibinfo{volume}{36}, \bibinfo{number}{3} (\bibinfo{year}{1992}),
+  \bibinfo{pages}{617--634}.
+\newblock
+
+
+\bibitem[Liang et~al\mbox{.}(2024)]%
+        {liang2024}
+\bibfield{author}{\bibinfo{person}{Tian Liang}, \bibinfo{person}{Zhiwei He},
+  \bibinfo{person}{Wenxiang Jiao}, \bibinfo{person}{Xing Wang},
+  \bibinfo{person}{Yan Wang}, \bibinfo{person}{Rui Wang},
+  \bibinfo{person}{Yujiu Yang}, \bibinfo{person}{Zhaopeng Tu}, {and}
+  \bibinfo{person}{Shuming Shi}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Encouraging Divergent Thinking in Large Language
+  Models through Multi-Agent Debate}. In \bibinfo{booktitle}{\emph{Empirical
+  Methods in Natural Language Processing (EMNLP)}}.
+  \bibinfo{pages}{17889--17904}.
+\newblock
+\shownote{arXiv:2305.19118}.
+\newblock
+\urldef\tempurl%
+\url{https://aclanthology.org/2024.emnlp-main.992/}
+\showURL{%
+\tempurl}
+
+
+\bibitem[{LMArena}(2026)]%
+        {lmarena2026}
+\bibfield{author}{\bibinfo{person}{{LMArena}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{{LMArena} --- {AI} Ranking and {LLM} Leaderboard}.
+\newblock \bibinfo{howpublished}{\url{https://arena.ai}}.
+\newblock
+\shownote{Formerly lmarena.ai; Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Lorenz et~al\mbox{.}(2011)]%
+        {lorenz2011}
+\bibfield{author}{\bibinfo{person}{Jan Lorenz}, \bibinfo{person}{Heiko Rauhut},
+  \bibinfo{person}{Frank Schweitzer}, {and} \bibinfo{person}{Dirk Helbing}.}
+  \bibinfo{year}{2011}\natexlab{}.
+\newblock \showarticletitle{How social influence can undermine the wisdom of
+  crowd effect}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the National Academy of
+  Sciences (PNAS)}} \bibinfo{volume}{108}, \bibinfo{number}{22}
+  (\bibinfo{year}{2011}), \bibinfo{pages}{9020--9025}.
+\newblock
+\shownote{DOI:10.1073/pnas.1008636108}.
+\newblock
+
+
+\bibitem[{MultipleChat}(2026)]%
+        {multiplechat2026}
+\bibfield{author}{\bibinfo{person}{{MultipleChat}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{{MultipleChat} --- Access {ChatGPT}, {Claude},
+  {Gemini} and {Grok} Together}.
+\newblock \bibinfo{howpublished}{\url{https://multiple.chat}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Murthy et~al\mbox{.}(2025)]%
+        {murthy2025alignment}
+\bibfield{author}{\bibinfo{person}{Sonia~K. Murthy}, \bibinfo{person}{Tomer
+  Ullman}, {and} \bibinfo{person}{Jennifer Hu}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{One Fish, Two Fish, but Not the Whole Sea:
+  Alignment Reduces Language Models' Conceptual Diversity}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2025 Conference of the North
+  American Chapter of the Association for Computational Linguistics: Human
+  Language Technologies}}.
+\newblock
+\showeprint[arxiv]{2411.04427}
+\urldef\tempurl%
+\url{https://aclanthology.org/2025.naacl-long.561/}
+\showURL{%
+\tempurl}
+
+
+\bibitem[{Open WebUI}(2026)]%
+        {openwebui2026multimodel}
+\bibfield{author}{\bibinfo{person}{{Open WebUI}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{Multi-Model Chats --- {Open WebUI} Documentation}.
+\newblock
+  \bibinfo{howpublished}{\url{https://docs.openwebui.com/features/chat-conversations/chat-features/multi-model-chats/}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Padmakumar and He(2024)]%
+        {padmakumar2024writing}
+\bibfield{author}{\bibinfo{person}{Vishakh Padmakumar} {and}
+  \bibinfo{person}{He He}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Does Writing with Language Models Reduce Content
+  Diversity?}. In \bibinfo{booktitle}{\emph{International Conference on
+  Learning Representations}}.
+\newblock
+\showeprint[arxiv]{2309.05196}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2309.05196}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Parasuraman and Riley(1997)]%
+        {parasuraman1997}
+\bibfield{author}{\bibinfo{person}{Raja Parasuraman} {and}
+  \bibinfo{person}{Victor Riley}.} \bibinfo{year}{1997}\natexlab{}.
+\newblock \showarticletitle{Humans and Automation: Use, Misuse, Disuse, Abuse}.
+\newblock \bibinfo{journal}{\emph{Human Factors}} \bibinfo{volume}{39},
+  \bibinfo{number}{2} (\bibinfo{year}{1997}), \bibinfo{pages}{230--253}.
+\newblock
+\shownote{DOI:10.1518/001872097778543886}.
+\newblock
+
+
+\bibitem[Perez et~al\mbox{.}(2023)]%
+        {perez2022}
+\bibfield{author}{\bibinfo{person}{Ethan Perez}, \bibinfo{person}{Sam Ringer},
+  \bibinfo{person}{Kamil{\.{e}} Luko{\v{s}}i{\={u}}t{\.{e}}},
+  \bibinfo{person}{Karina Nguyen}, \bibinfo{person}{Edwin Chen},
+  \bibinfo{person}{Scott Heiner}, \bibinfo{person}{Craig Pettit},
+  \bibinfo{person}{Catherine Olsson}, \bibinfo{person}{Sandipan Kundu},
+  \bibinfo{person}{Saurav Kadavath}, \bibinfo{person}{Andy Jones},
+  \bibinfo{person}{Anna Chen}, \bibinfo{person}{Benjamin Mann},
+  \bibinfo{person}{Brian Israel}, \bibinfo{person}{Bryan Seethor},
+  \bibinfo{person}{Cameron McKinnon}, \bibinfo{person}{Christopher Olah},
+  \bibinfo{person}{Da Yan}, \bibinfo{person}{Daniela Amodei},
+  \bibinfo{person}{Dario Amodei}, {et~al\mbox{.}}}
+  \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Discovering Language Model Behaviors with
+  Model-Written Evaluations}. In \bibinfo{booktitle}{\emph{Findings of the
+  Association for Computational Linguistics: ACL 2023}}.
+  \bibinfo{pages}{13387--13434}.
+\newblock
+\href{https://doi.org/10.18653/v1/2023.findings-acl.847}{doi:\nolinkurl{10.18653/v1/2023.findings-acl.847}}
+
+
+\bibitem[{PromptQuorum}(2026a)]%
+        {promptquorum2026home}
+\bibfield{author}{\bibinfo{person}{{PromptQuorum}}.}
+  \bibinfo{year}{2026}\natexlab{a}.
+\newblock \bibinfo{title}{{PromptQuorum} --- Send One Prompt to Many {AI}
+  Models}.
+\newblock \bibinfo{howpublished}{\url{https://www.promptquorum.com}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[{PromptQuorum}(2026b)]%
+        {promptquorum2026blog}
+\bibfield{author}{\bibinfo{person}{{PromptQuorum}}.}
+  \bibinfo{year}{2026}\natexlab{b}.
+\newblock \bibinfo{title}{What Is {AI} Consensus Scoring? How {PromptQuorum}
+  Detects Agreement Across Models}.
+\newblock
+  \bibinfo{howpublished}{\url{https://www.promptquorum.com/blog/what-is-ai-consensus-scoring}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[{Quora, Inc.}(2024)]%
+        {poe2024multibot}
+\bibfield{author}{\bibinfo{person}{{Quora, Inc.}}}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Multi-bot Chat on {Poe}}.
+\newblock
+  \bibinfo{howpublished}{\url{https://poe.com/blog/multi-bot-chat-on-poe}}.
+\newblock
+\shownote{Published: April 15, 2024; Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Sharma et~al\mbox{.}(2024)]%
+        {sharma2024}
+\bibfield{author}{\bibinfo{person}{Mrinank Sharma} {et~al\mbox{.}}}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Towards Understanding Sycophancy in Language
+  Models}. In \bibinfo{booktitle}{\emph{International Conference on Learning
+  Representations (ICLR)}}.
+\newblock
+\shownote{arXiv:2310.13548}.
+\newblock
+
+
+\bibitem[Skitka et~al\mbox{.}(1999)]%
+        {skitka1999}
+\bibfield{author}{\bibinfo{person}{Linda~J. Skitka},
+  \bibinfo{person}{Kathleen~L. Mosier}, {and} \bibinfo{person}{Mark Burdick}.}
+  \bibinfo{year}{1999}\natexlab{}.
+\newblock \showarticletitle{Does Automation Bias Decision-Making?}
+\newblock \bibinfo{journal}{\emph{International Journal of Human-Computer
+  Studies}} \bibinfo{volume}{51}, \bibinfo{number}{5} (\bibinfo{year}{1999}),
+  \bibinfo{pages}{991--1006}.
+\newblock
+\shownote{DOI:10.1006/ijhc.1999.0252}.
+\newblock
+
+
+\bibitem[Spatharioti et~al\mbox{.}(2025)]%
+        {spatharioti2025llmsearch}
+\bibfield{author}{\bibinfo{person}{Sofia~Eleni Spatharioti},
+  \bibinfo{person}{David~M. Rothschild}, \bibinfo{person}{Daniel~G. Goldstein},
+  {and} \bibinfo{person}{Jake~M. Hofman}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Effects of {LLM}-based Search on Decision Making:
+  Speed, Accuracy, and Overreliance}. In \bibinfo{booktitle}{\emph{Proceedings
+  of the 2025 CHI Conference on Human Factors in Computing Systems}}.
+\newblock
+\href{https://doi.org/10.1145/3706598.3714082}{doi:\nolinkurl{10.1145/3706598.3714082}}
+
+
+\bibitem[Stasser and Titus(1985)]%
+        {stasser1985hidden}
+\bibfield{author}{\bibinfo{person}{Garold Stasser} {and}
+  \bibinfo{person}{William Titus}.} \bibinfo{year}{1985}\natexlab{}.
+\newblock \showarticletitle{Pooling of Unshared Information in Group Decision
+  Making: Biased Information Sampling During Discussion}.
+\newblock \bibinfo{journal}{\emph{Journal of Personality and Social
+  Psychology}} \bibinfo{volume}{48}, \bibinfo{number}{6}
+  (\bibinfo{year}{1985}), \bibinfo{pages}{1467--1478}.
+\newblock
+
+
+\bibitem[Surowiecki(2004)]%
+        {surowiecki2004}
+\bibfield{author}{\bibinfo{person}{James Surowiecki}.}
+  \bibinfo{year}{2004}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{The Wisdom of Crowds}}.
+\newblock \bibinfo{publisher}{Doubleday}, \bibinfo{address}{New York}.
+\newblock
+
+
+\bibitem[Tumer and Ghosh(1996)]%
+        {tumer1996}
+\bibfield{author}{\bibinfo{person}{Kagan Tumer} {and} \bibinfo{person}{Joydeep
+  Ghosh}.} \bibinfo{year}{1996}\natexlab{}.
+\newblock \showarticletitle{Error Correlation and Error Reduction in Ensemble
+  Classifiers}.
+\newblock \bibinfo{journal}{\emph{Connection Science}} \bibinfo{volume}{8},
+  \bibinfo{number}{3--4} (\bibinfo{year}{1996}), \bibinfo{pages}{385--404}.
+\newblock
+
+
+\bibitem[{TypingMind}(2026)]%
+        {typingmind2026}
+\bibfield{author}{\bibinfo{person}{{TypingMind}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{Multi-model Responses --- {TypingMind} Docs}.
+\newblock
+  \bibinfo{howpublished}{\url{https://docs.typingmind.com/manage-and-connect-ai-models/activate-multi-model-responses}}.
+\newblock
+\shownote{Accessed: 2026-07-22}.
+\newblock
+
+
+\bibitem[Vaccaro et~al\mbox{.}(2024)]%
+        {vaccaro2024combinations}
+\bibfield{author}{\bibinfo{person}{Michelle Vaccaro}, \bibinfo{person}{Abdullah
+  Almaatouq}, {and} \bibinfo{person}{Thomas Malone}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{When Combinations of Humans and {AI} Are Useful: A
+  Systematic Review and Meta-Analysis}.
+\newblock \bibinfo{journal}{\emph{Nature Human Behaviour}}  \bibinfo{volume}{8}
+  (\bibinfo{year}{2024}), \bibinfo{pages}{2293--2303}.
+\newblock
+\href{https://doi.org/10.1038/s41562-024-02024-1}{doi:\nolinkurl{10.1038/s41562-024-02024-1}}
+
+
+\bibitem[Vasconcelos et~al\mbox{.}(2023)]%
+        {vasconcelos2023explanations}
+\bibfield{author}{\bibinfo{person}{Helena Vasconcelos},
+  \bibinfo{person}{Matthew Jörke}, \bibinfo{person}{Madeleine
+  Grunde-McLaughlin}, \bibinfo{person}{Tobias Gerstenberg},
+  \bibinfo{person}{Michael~S. Bernstein}, {and} \bibinfo{person}{Ranjay
+  Krishna}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Explanations Can Reduce Overreliance on AI Systems
+  During Decision-Making}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the ACM on Human-Computer
+  Interaction (CSCW)}} (\bibinfo{year}{2023}).
+\newblock
+\shownote{DOI:10.1145/3579605; arXiv:2212.06823}.
+\newblock
+
+
+\bibitem[Wang et~al\mbox{.}(2023)]%
+        {wang2023selfconsistency}
+\bibfield{author}{\bibinfo{person}{Xuezhi Wang}, \bibinfo{person}{Jason Wei},
+  \bibinfo{person}{Dale Schuurmans}, \bibinfo{person}{Quoc Le},
+  \bibinfo{person}{Ed Chi}, \bibinfo{person}{Sharan Narang},
+  \bibinfo{person}{Aakanksha Chowdhery}, {and} \bibinfo{person}{Denny Zhou}.}
+  \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Self-Consistency Improves Chain of Thought
+  Reasoning in Language Models}. In \bibinfo{booktitle}{\emph{International
+  Conference on Learning Representations (ICLR)}}.
+\newblock
+\shownote{arXiv:2203.11171}.
+\newblock
+
+
+\bibitem[Wynn et~al\mbox{.}(2025)]%
+        {wynn2025talk}
+\bibfield{author}{\bibinfo{person}{Andrea Wynn}, \bibinfo{person}{Harsh
+  Satija}, {and} \bibinfo{person}{Gillian Hadfield}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Talk Isn't Always Cheap: Understanding Failure
+  Modes in Multi-Agent Debate}.
+\newblock \bibinfo{journal}{\emph{ICML Workshop on Multi-Agent Systems}}
+  (\bibinfo{year}{2025}).
+\newblock
+\shownote{arXiv:2509.05396}.
+\newblock
+
+
+\bibitem[Yang et~al\mbox{.}(2026)]%
+        {yang2025underspecification}
+\bibfield{author}{\bibinfo{person}{Chenyang Yang}, \bibinfo{person}{Yike Shi},
+  \bibinfo{person}{Qianou Ma}, \bibinfo{person}{Michael~Xieyang Liu},
+  \bibinfo{person}{Christian K{\"a}stner}, {and} \bibinfo{person}{Tongshuang
+  Wu}.} \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{What Prompts Don't Say: Understanding and Managing
+  Underspecification in {LLM} Prompts}. In \bibinfo{booktitle}{\emph{Findings
+  of the Association for Computational Linguistics ({ACL} Findings)}}.
+  \bibinfo{pages}{9072--9101}.
+\newblock
+\href{https://doi.org/10.18653/v1/2026.findings-acl.441}{doi:\nolinkurl{10.18653/v1/2026.findings-acl.441}}
+
+
+\end{thebibliography}
