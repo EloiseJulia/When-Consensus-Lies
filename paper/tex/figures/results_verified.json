@@ -1,0 +1,16 @@
+{
+  "_note": "Verified numbers transcribed from the frozen confirmatory results (Study 2 detection = Table lps-auroc; intervention = 972-cell verified report). Do not edit without re-verification.",
+  "detection_auroc": {
+    "models": ["gpt-5.6-sol", "claude-opus-4.8", "gemini-3.1-pro", "gpt-4o-mini", "claude-haiku-4.5", "gemini-3.5-flash"],
+    "lpp_Hctx":  {"gpt-5.6-sol": 0.857, "claude-opus-4.8": 0.887, "gemini-3.1-pro": 0.857, "gpt-4o-mini": 0.856, "claude-haiku-4.5": 0.869, "gemini-3.5-flash": 0.880, "pooled": 0.895},
+    "semantic_entropy_Hseed": {"gpt-5.6-sol": 0.563, "claude-opus-4.8": 0.591, "gemini-3.1-pro": 0.606, "gpt-4o-mini": 0.551, "claude-haiku-4.5": 0.567, "gemini-3.5-flash": 0.580, "pooled": 0.581},
+    "requirements_probing_pooled": 0.810,
+    "chance": 0.5
+  },
+  "intervention": {
+    "_cells": "972 real cells over 6 models",
+    "policies": ["LPP-gated (ours)", "always-clarify", "requirements-probing", "semantic-entropy-gated", "self-consistency-gated"],
+    "net_clarification": {"LPP-gated (ours)": 0.339, "always-clarify": 0.000, "requirements-probing": 0.094, "semantic-entropy-gated": 0.116, "self-consistency-gated": 0.116},
+    "danger_subset_coverage": {"LPP-gated (ours)": 0.741, "semantic-entropy-gated": 0.140, "self-consistency-gated": 0.140}
+  }
+}
