@@ -104,8 +104,8 @@ multi-agent systems, error correlation, underspecification, ambiguity detection,
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig1_consensus_lies.pdf}
-\Description{Schematic contrasting two regimes for the same underspecified prompt and the same k independent agents. When the disambiguating clause lies outside the retained prompt, the agents silently converge on the same wrong interpretation and the ensemble collapses to about one effective independent judgment (fake redundancy); when the clause is inside the prompt, no tier converges on a shared wrong interpretation.}
+\includegraphics[width=\textwidth]{fig1_consensus_lies_v2.pdf}
+\Description{Schematic contrasting two regimes for the same underspecified prompt and the same k independent agents. When the disambiguating clause lies outside the retained prompt, the agents silently converge on the same wrong interpretation and the ensemble collapses to about one effective independent judgment (fake redundancy); when the clause is inside the prompt, no tier converges on a shared wrong interpretation. A bottom detector panel shows that pinning a self-surfaced latent premise makes the answer flip, detecting the ambiguous items at an AUROC of 0.895.}
 \caption{\textbf{Overview.} The same underspecified prompt and the same $k$ independent agents (three model
 families $\times$ capability tiers) fork into two regimes that differ chiefly by where the missing
 disambiguating clause lives. \textbf{H1\_external} (clause outside the retained prompt): agents
@@ -113,7 +113,9 @@ disambiguating clause lives. \textbf{H1\_external} (clause outside the retained 
 wrong, and the $k$-agent ensemble collapses to $\approx\!1$ effective independent judgment (fake redundancy,
 $\rho\!\to\!1$, $\neff\!=\!1.10$; $\cd\!\approx\!0.53$). \textbf{H2\_derivable} (clause inside the prompt):
 no tier converges on a shared wrong interpretation ($\cd\!=\!0$; residual off-axis \iperp{} remains).
-Correctness is set by an executable-gold check, not an LLM judge. In our design the
+Correctness is set by an executable-gold check, not an LLM judge. \textbf{H3} (detector): on the same 54
+tasks, pinning a self-surfaced latent premise and testing whether the answer flips detects the ambiguous
+items at $\mathrm{AUROC}=0.895$ (\S\ref{sec:study2-results}). In our design the
 failure tracks the clause's \emph{location} rather than model capability. All values are from the confirmatory run
 (\S\ref{sec:results}; H1: $\mathrm{ICC}=0.89$, mean pairwise wrong-answer agreement $=0.98$; abstention
 $\approx\!0.03\%$).}
@@ -666,8 +668,7 @@ rather than of task difficulty per se.}
 
 \subsection{F2: Capability and model-family diversity do not restore interpretive independence}
 \label{sec:f2}
-The H1\_external failure shows \emph{no detectable difference} across model classes (Table~\ref{tab:regime},
-Figure~\ref{fig:capability}): frontier
+The H1\_external failure shows \emph{no detectable difference} across model classes (Table~\ref{tab:regime}): frontier
 reasoners are trapped about as reliably as weaker, non-frontier models, and a heterogeneous cross-family pool
 (\emph{cross-vendor comparison/aggregation}) converges about as strongly as a single model sampled repeatedly
 (\emph{repeated sampling}) (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
@@ -683,18 +684,6 @@ overclaim. Vendor and capability diversity did not translate into
 \emph{viewpoint} diversity: the shared prior spans families. The H2 reasoner$\times$capability
 \emph{interaction} rests on only 14 items and is power-limited (\S\ref{sec:robust}); the well-powered regime
 \emph{main} effect carries the claim.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.82\linewidth]{fig_capability_invariance.pdf}
-\Description{Bar chart of convergent delusion by model class (homogeneous, heterogeneous cross-family, reasoning, and weaker non-frontier), split by regime. On external-context items all classes show similarly high convergent delusion; on in-prompt items all classes are near zero.}
-\caption{Convergent delusion by model class, split by regime. On H1\_external the failure shows no detectable
-difference across the homogeneous, heterogeneous (cross-family), reasoning, and non-frontier (weaker)
-classes---frontier reasoners are trapped about as reliably as weaker models---while H2\_derivable is near
-zero for all classes. In our design the failure tracks the disambiguator's \emph{location} rather than model
-capability.}
-\label{fig:capability}
-\end{figure}
 
 \subsection{F3: Adding agents adds little effective redundancy (fake redundancy)}
 Five nominally independent agents supply the evidence of about one. On H1\_external, pairwise wrong-answer
@@ -757,11 +746,14 @@ threshold in clause \emph{presence}, not a dose response; the constructive bound
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.72\linewidth]{fig_silent_failure.pdf}
-\Description{Figure contrasting a high convergent-delusion rate (about 0.53) with a near-zero abstention or clarification rate (about 0.03 percent) on external-context items, showing that the failure is silent: agents rarely flag that decisive information is missing.}
-\caption{The failure is silent. On H1\_external, convergent delusion is high ($\cd\!\approx\!0.53$) yet the
-abstention / clarification-request rate is $\approx\!0.03\%$: per the rule-based detector, agents rarely
-flag that decisive information is missing and instead commit to an answer. Consensus offers no internal warning.}
+\includegraphics[width=0.62\linewidth]{fig_silent_abstention_v2.pdf}
+\Description{Bar chart of the abstention or clarification rate for external-context and in-prompt items, both near zero (0.031 percent and 0.323 percent), with a dashed horizontal reference line at the 0.53 convergent-delusion rate on external-context items. The large gap between the dashed line and the near-zero bars shows that agents almost never flag missing decisive information.}
+\caption{The failure is silent. The abstention / clarification-request rate stays near zero on both regimes
+(H1\_external $0.031\%$, H2\_derivable $0.323\%$), while on H1\_external convergent delusion is high
+($\cd\!\approx\!0.53$, dashed line): per the rule-based (non-LLM) detector, agents almost never flag that
+decisive information is missing and instead commit to an answer. The gap between the dashed
+convergent-delusion rate and the near-zero abstention bars is the silent failure---consensus offers no
+internal warning.}
 \label{fig:silent}
 \end{figure}
 
@@ -911,7 +903,7 @@ precisely where same-prompt semantic entropy, looking only at resampling varianc
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.86\linewidth]{fig_danger_quadrant.pdf}
+\includegraphics[width=0.86\linewidth]{fig_danger_quadrant_v2.pdf}
 \Description{Scatter plot of the 54 items positioned by semantic entropy on the horizontal axis and latent-premise-pinning entropy on the vertical axis, colored by executable gold ambiguity. Twenty-five of thirty-three ambiguous items fall in the low-semantic-entropy, high-pinning-entropy danger quadrant where semantic entropy is blind, while unambiguous controls stay near the origin.}
 \caption{The danger quadrant, on confirmatory benchmark data. Each point is one of the 54
 pre-registered items at its \emph{pooled} per-item mean of $\Hseed{}$ (semantic
@@ -968,6 +960,20 @@ answer-equivalence clusters. \emph{(3) Flag.} An item is flagged when
 $\Hctx{} > \tau \wedge \Hseed{} \le \tau_s$, at the frozen operating point $\tau=0$, $\tau_s=0.5$ bits
 (the low-\Hseed{} ``convergent'' cutoff that defines the danger quadrant).
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_lpp_mechanism_v2.pdf}
+\Description{Three-step flowchart of the latent-premise-pinning detector: (1) self-surface, where a black-box model names decision-relevant unstated premises such as quarter convention, rounding, and date range; (2) counterfactually pin, where each self-surfaced premise is pinned to the model's own candidate values, yielding one answer per pin; and (3) cluster, where the pinned answers are grouped by executable equivalence to compute the context entropy. A scatter plot on the right shows ambiguous items concentrating in the high-pinning-entropy, low-semantic-entropy danger quadrant, where the detector reaches AUROC 0.895 versus 0.581 for same-prompt semantic entropy.}
+\caption{The latent-premise-pinning (LPP) detector: black-box and inference-only. \emph{(1)~Self-surface}---a
+generic prompt asks the model to name the decision-relevant unstated premises (e.g., quarter convention,
+rounding, date range), never mentioning the gold key. \emph{(2)~Counterfactually pin}---each self-surfaced
+premise is pinned to the model's \emph{own} candidate values $v_1,\dots,v_m$, producing one answer per pin.
+\emph{(3)~Cluster (executable)}---the pinned answers are grouped by mutual executable equivalence, and
+$\Hctx{}$ is the entropy over the resulting clusters. High $\Hctx{}$ at low $\Hseed{}$ is the \emph{danger
+quadrant} that same-prompt semantic entropy misses.}
+\label{fig:lpp-mechanism}
+\end{figure}
+
 \subsection{Executable gold-ambiguity and non-circularity}
 \label{sec:study2-gold}
 The detector is evaluated against an \emph{executable, detector-independent} gold-ambiguity label. An item
@@ -1007,7 +1013,7 @@ $k{=}0$ false-positive rate of $0.095$ (Table~\ref{tab:lps-op}).
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.92\linewidth]{fig_auroc_comparison.pdf}
+\includegraphics[width=0.92\linewidth]{fig_auroc_v2.pdf}
 \Description{Bar chart of detection AUROC per model and pooled. The latent-premise-pinning detector reaches about 0.895 pooled while same-prompt semantic entropy sits near chance at about 0.581 and the requirements-probing baseline is also strong at about 0.810; the pattern is consistent across all six models.}
 \caption{Detection AUROC against executable gold-ambiguity, per model and pooled,
 with cluster (\texttt{task\_id}) bootstrap 95\% CIs (values and CIs transcribed from

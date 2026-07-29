@@ -76,15 +76,32 @@ def fig_auroc():
     labels = [short[m] for m in models] + ["Pooled"]
     lpp = [d["lpp_Hctx"][m] for m in models] + [d["lpp_Hctx"]["pooled"]]
     se  = [d["semantic_entropy_Hseed"][m] for m in models] + [d["semantic_entropy_Hseed"]["pooled"]]
+    # 95% CIs (cluster task_id bootstrap), verbatim from files/study2_stage2_results.md sec.2 (frozen).
+    lpp_ci = {"gpt-5.6-sol": (0.774, 0.932), "claude-opus-4.8": (0.808, 0.956),
+              "gemini-3.1-pro": (0.771, 0.934), "gpt-4o-mini": (0.768, 0.933),
+              "claude-haiku-4.5": (0.787, 0.941), "gemini-3.5-flash": (0.797, 0.955),
+              "pooled": (0.815, 0.966)}
+    se_ci  = {"gpt-5.6-sol": (0.467, 0.657), "claude-opus-4.8": (0.529, 0.662),
+              "gemini-3.1-pro": (0.534, 0.682), "gpt-4o-mini": (0.472, 0.629),
+              "claude-haiku-4.5": (0.483, 0.648), "gemini-3.5-flash": (0.493, 0.667),
+              "pooled": (0.484, 0.675)}
+    keys = list(models) + ["pooled"]
+    def yerr(vals, ci):
+        lo = [v - ci[k][0] for v, k in zip(vals, keys)]
+        hi = [ci[k][1] - v for v, k in zip(vals, keys)]
+        return np.array([lo, hi])
+    err_kw = dict(ecolor=CB["ink"], elinewidth=0.9, capsize=2.4, capthick=0.9)
     x = np.arange(len(labels)); w = 0.38
     fig, ax = plt.subplots(figsize=(6.4, 3.4))
-    b1 = ax.bar(x - w/2, lpp, w, color=CB["orange"], label=r"LPP  $H_{\mathrm{ctx}}$ (ours)")
-    b2 = ax.bar(x + w/2, se,  w, color=CB["blue"],   label=r"semantic entropy  $H_{\mathrm{seed}}$")
+    b1 = ax.bar(x - w/2, lpp, w, color=CB["orange"], label=r"LPP  $H_{\mathrm{ctx}}$ (ours)",
+                yerr=yerr(lpp, lpp_ci), error_kw=err_kw)
+    b2 = ax.bar(x + w/2, se,  w, color=CB["blue"],   label=r"semantic entropy  $H_{\mathrm{seed}}$",
+                yerr=yerr(se, se_ci), error_kw=err_kw)
     ax.axhline(d["requirements_probing_pooled"], color=CB["green"], lw=1.2, ls="--",
                label=f"requirements-probing (pooled {d['requirements_probing_pooled']:.3f})")
     ax.axhline(d["chance"], color=CB["gray"], lw=1.0, ls=":", label="chance")
-    for b in (b1[-1], b2[-1]):  # value labels on pooled group only (avoid clutter)
-        ax.text(b.get_x()+b.get_width()/2, b.get_height()+0.012, f"{b.get_height():.3f}",
+    for b, hi in ((b1[-1], lpp_ci["pooled"][1]), (b2[-1], se_ci["pooled"][1])):  # pooled value labels, above CI cap
+        ax.text(b.get_x()+b.get_width()/2, hi+0.015, f"{b.get_height():.3f}",
                 ha="center", va="bottom", fontsize=8, weight="bold")
     ax.set_ylabel("AUROC (executable gold-ambiguity)")
     ax.set_xticks(x); ax.set_xticklabels(labels, rotation=0)
@@ -123,9 +140,39 @@ def fig_intervention():
     save_fig(fig, "fig_intervention_v2")
     plt.close(fig)
 
+# ---------------------------------------------------------------------
+# FIG D — Silent failure: abstention is ~0 even though H1 CD = 0.53
+# ---------------------------------------------------------------------
+def fig_silent_abstention():
+    # Frozen confirmatory values: abstention/clarification rate per regime; H1 CD.
+    labels = ["H1 external", "H2 derivable"]
+    abst   = [0.00031, 0.00323]   # 0.031% , 0.323%
+    cd_h1  = 0.532
+    cols   = [CB["orange"], CB["sky"]]
+    from matplotlib.ticker import PercentFormatter
+    x = np.arange(len(labels))
+    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+    bars = ax.bar(x, abst, width=0.5, color=cols, edgecolor="white", zorder=3)
+    # reference: the convergent-delusion rate a calibrated system *should* have flagged
+    ax.axhline(cd_h1, color=CB["ink"], lw=1.1, ls="--", zorder=2)
+    ax.text(len(labels) - 0.5, cd_h1 + 0.008,
+            f"H1 convergent-delusion rate $=$ {cd_h1:.2f}\n(what a calibrated system should flag)",
+            ha="right", va="bottom", fontsize=7.5, color=CB["ink"])
+    for b, v in zip(bars, abst):
+        ax.text(b.get_x() + b.get_width() / 2, v + 0.013, f"{v*100:.3f}%",
+                ha="center", va="bottom", fontsize=8)
+    ax.set_ylabel("Abstention / clarification rate")
+    ax.set_xticks(x); ax.set_xticklabels(labels)
+    ax.set_ylim(0, 0.6)
+    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    save_fig(fig, "fig_silent_abstention_v2")
+    plt.close(fig)
+    print(f"   abstention H1={abst[0]*100:.3f}% H2={abst[1]*100:.3f}%; CD ref={cd_h1}")
+
 if __name__ == "__main__":
     os.chdir(HERE)
     fig_danger_quadrant()
     fig_auroc()
+    fig_silent_abstention()
     fig_intervention()
     print("done.")
