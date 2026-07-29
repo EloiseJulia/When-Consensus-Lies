@@ -144,30 +144,47 @@ def fig_intervention():
 # FIG D — Silent failure: abstention is ~0 even though H1 CD = 0.53
 # ---------------------------------------------------------------------
 def fig_silent_abstention():
-    # Frozen confirmatory values: abstention/clarification rate per regime; H1 CD.
-    labels = ["H1 external", "H2 derivable"]
-    abst   = [0.00031, 0.00323]   # 0.031% , 0.323%
-    cd_h1  = 0.532
-    cols   = [CB["orange"], CB["sky"]]
-    from matplotlib.ticker import PercentFormatter
-    x = np.arange(len(labels))
-    fig, ax = plt.subplots(figsize=(4.6, 3.4))
-    bars = ax.bar(x, abst, width=0.5, color=cols, edgecolor="white", zorder=3)
-    # reference: the convergent-delusion rate a calibrated system *should* have flagged
-    ax.axhline(cd_h1, color=CB["ink"], lw=1.1, ls="--", zorder=2)
-    ax.text(len(labels) - 0.5, cd_h1 + 0.008,
-            f"H1 convergent-delusion rate $=$ {cd_h1:.2f}\n(what a calibrated system should flag)",
-            ha="right", va="bottom", fontsize=7.5, color=CB["ink"])
-    for b, v in zip(bars, abst):
-        ax.text(b.get_x() + b.get_width() / 2, v + 0.013, f"{v*100:.3f}%",
-                ha="center", va="bottom", fontsize=8)
-    ax.set_ylabel("Abstention / clarification rate")
-    ax.set_xticks(x); ax.set_xticklabels(labels)
-    ax.set_ylim(0, 0.6)
-    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    from matplotlib.ticker import FixedLocator, FixedFormatter
+
+    values = [0.532, 0.00323, 0.00031]
+    labels = [
+        "H1 convergent-delusion\n(should trigger clarification)",
+        "H2 clarification\n(observed)",
+        "H1 clarification\n(observed)",
+    ]
+    exact = ["53.2%", "0.323%", "0.031%"]
+    colors = [CB["orange"], CB["sky"], CB["blue"]]
+    y = np.array([2.0, 1.0, 0.0])
+    xmin = 8e-5
+    ticks = [1e-4, 1e-3, 1e-2, 1e-1, 1.0]
+    tick_labels = ["0.01%", "0.1%", "1%", "10%", "100%"]
+
+    fig, ax = plt.subplots(figsize=(5.5, 2.9))
+    ax.set_xscale("log")
+    ax.set_xlim(xmin, 1.0)
+
+    for yi, value, label, text, color in zip(y, values, labels, exact, colors):
+        ax.hlines(yi, xmin, value, color=color, lw=2.2, zorder=2)
+        ax.plot([value], [yi], linestyle="None", marker="o", markersize=7.8,
+            markerfacecolor=color, markeredgecolor="white", markeredgewidth=0.7, zorder=3)
+        ax.text(value * 1.12, yi, text, ha="left", va="center", fontsize=8.8,
+            color=color, weight="bold")
+        ax.text(xmin * 1.02, yi + 0.2, label, ha="left", va="center", fontsize=8.2,
+            color=CB["ink"])
+
+    ax.set_ylim(-0.5, 2.55)
+    ax.xaxis.set_major_locator(FixedLocator(ticks))
+    ax.xaxis.set_major_formatter(FixedFormatter(tick_labels))
+    ax.minorticks_off()
+    ax.set_yticks([])
+    ax.set_xlabel("Rate (percent, logarithmic scale)")
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color="#DDDDDD", lw=0.6)
+    ax.text(xmin * 1.02, 2.45, "Failure vs. observed clarification", fontsize=8.2,
+        color=CB["gray"], ha="left", va="bottom")
     save_fig(fig, "fig_silent_abstention_v2")
     plt.close(fig)
-    print(f"   abstention H1={abst[0]*100:.3f}% H2={abst[1]*100:.3f}%; CD ref={cd_h1}")
+    print("   silent comparison: H1 CD=53.2%; H2 clarification=0.323%; H1 clarification=0.031%")
 
 if __name__ == "__main__":
     os.chdir(HERE)
