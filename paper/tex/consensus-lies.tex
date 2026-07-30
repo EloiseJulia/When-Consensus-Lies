@@ -44,24 +44,22 @@
 }
 
 \begin{abstract}
-A multi-model interface can return a reassuring verdict---``$4/4$ models agree''---yet those four answers may
-all rest on one incomplete prompt. Same-prompt interfaces such as ChatHub~\cite{chathub2026} broadcast one
-prompt to several language models (GPT, Claude, Gemini, \dots) and present the resulting plurality as added
-confidence; collaborative and decision-support systems increasingly aggregate AI judgments this way, reading
-agreement as independent corroboration. This rests on a tacit inference---more models $\Rightarrow$ more perspectives $\Rightarrow$ independent
-corroboration $\Rightarrow$ more trust---but when does cross-model agreement actually supply independent
-evidence, and when is it the same blind spot seen several times? The chain can fail \emph{silently}:
-\emph{model diversity is not necessarily evidence diversity}, because models that share one incomplete input
-can share one reading of it.
+``$4/4$ models agree'' reads as reassurance. Same-prompt interfaces such as ChatHub~\cite{chathub2026} send
+one prompt to several language models (GPT, Claude, Gemini, \dots) and present the agreement as added
+confidence, and collaborative and decision-support systems increasingly aggregate AI judgments the same way.
+The reassurance rests on a tacit inference: more models mean more perspectives, and more perspectives mean
+independent corroboration. We show that the middle link can break. When several models share one incomplete
+prompt, they can share one reading of it, so \emph{model diversity is not necessarily evidence diversity} and
+the agreement can fail \emph{silently}.
 In a pre-registered study on a reconstructed, executable-gold benchmark of \emph{underspecified} tasks, we
-vary a single factor---whether the decisive disambiguating clause lies \emph{outside} or \emph{inside} the
-retained prompt---and measure the \emph{correlation} of errors, not just accuracy. When the clause is
+vary a single factor: whether the decisive disambiguating clause lies \emph{outside} or \emph{inside} the
+retained prompt. We measure the \emph{correlation} of errors, not just accuracy. When the clause is
 outside, independent agents across capability tiers and three model families (OpenAI, Anthropic, Google)
 converge on the \emph{same wrong} interpretation (convergent-delusion rate $\approx\!0.53$ on our
 constructed, default-screened items), almost never
 signaling anything is missing (abstention $\approx\!0.03\%$); a nominal $k$-agent ensemble then supplies
-close to one \emph{effective} independent judgment ($\neff\!=\!1.10$). When it is inside, no tier---including
-weaker, non-frontier models---converges on a shared wrong reading ($=\!0.00$), and a benchmark built by a
+close to one \emph{effective} independent judgment ($\neff\!=\!1.10$). When it is inside, no tier converges
+on a shared wrong reading ($=\!0.00$), not even weaker, non-frontier models, and a benchmark built by a
 \emph{different} model family argues against a shared-prior-with-the-constructor artifact. We name this
 failure \emph{fake redundancy}: under a shared information boundary, nominally diverse agents form an
 \emph{interpretive monoculture}. Building on this diagnosis, we contribute a black-box, cross-vendor detector
@@ -70,8 +68,8 @@ works mainly by \emph{self-surfacing} the premises an answer depends on, with a 
 adding a smaller refinement; it separates ambiguous from unambiguous prompts at pooled AUROC $0.895$
 (95\% CI $[0.815,0.966]$; semantic entropy $0.581$), though it over-clarifies unambiguous prompts at a
 model-dependent rate (pooled $0.402$). Used as a clarification gate with a simulated-user oracle
-that supplies the missing convention, it cuts convergent delusion from \cd{} $0.626$ to $0.010$---an upper
-bound, since the detector localizes the missing premise only weakly ($0.36$) and cannot supply the fix itself. We argue that systems aggregating AI judgments should surface \emph{evidential dependence}
+that supplies the missing convention, it cuts convergent delusion from \cd{} $0.626$ to $0.010$. This is an
+upper bound: the detector localizes the missing premise only weakly ($0.36$) and cannot supply the fix itself. We argue that systems aggregating AI judgments should surface \emph{evidential dependence}
 (whether answers rest on the same, possibly incomplete, input) rather than an agent count.
 \end{abstract}
 
@@ -153,11 +151,14 @@ break: \emph{different models do not guarantee independent interpretations or ev
 independence is unknown, especially when inputs may lack a decisive disambiguating condition, consensus alone
 is not sufficient evidence of correctness. Same-prompt pluralism can multiply answers without multiplying evidence.
 
-We identify \emph{when} it does, and when it does not, for a class of underspecified tasks. Consider a function asked for the quarter that contains a given month: every model may adopt the familiar
-calendar convention---January--March is Q1---while a fiscal-year start lost at an upstream handoff makes a
-different answer correct. We study such \emph{underspecified} inputs: tasks from which a decisive
-disambiguating clause has been omitted, so more than one interpretation is consistent with what remains---an
-everyday condition when context is lost across a handoff between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
+We identify \emph{when} it does, and when it does not, for a class of underspecified tasks. Consider a
+function asked for the quarter that contains a given month. Every model may adopt the familiar calendar
+convention (January--March is Q1), while a fiscal-year start lost at an upstream handoff makes a different
+answer correct. Every agent returns the same quarter, the pipeline ships a mis-bucketed value into a
+downstream budget or scheduling decision, and the ``all models agree'' display never flags that a
+fiscal-year start was ever in question. We study such \emph{underspecified} inputs: tasks from which a decisive
+disambiguating clause has been omitted, so more than one interpretation is consistent with what remains. This
+is an everyday condition when context is lost across a handoff between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
 how capable the models are but by \emph{where the missing information lives}. When the disambiguator lies
 \emph{outside} the retained prompt, independent agents converge on the \emph{same wrong} interpretation---and
 the failure runs deeper than a naive account would predict---and not for any of the reasons that account
@@ -170,7 +171,7 @@ previews the setup and result). We call the wrong-consensus failure
 \emph{convergent delusion} (a descriptive label for a shared, confident, wrong reading, not a psychological
 claim), and the structural condition that produces it \emph{fake redundancy}: apparent
 redundancy that, under the shared information boundary we test, is not sufficient as independent corroboration
-because all agents inherit the same lossy representation of the task. We stress that an agent's default is often a \emph{locally reasonable} inference from the
+because all agents inherit the same lossy representation of the task. An agent's default is often a \emph{locally reasonable} inference from the
 underspecified prompt, not model irrationality; the harm is the \emph{silent}, correlated convergence of
 many agents on one such reading \emph{without} flagging that the task admits others.
 Our goal is to \emph{characterize} and \emph{detect} this failure \emph{mode}---and to isolate the mechanism
@@ -311,9 +312,8 @@ Grounding is the process by which collaborators establish mutual understanding s
 purposes~\cite{clark1991grounding}. We treat the retained prompt as the agents' shared information
 environment and the deleted disambiguator as a \emph{grounding-resource boundary}: information available
 in-prompt enters the interpretive process, information lost at the handoff does not, and downstream
-agreement cannot repair an upstream grounding failure. We do not claim that non-interacting agents establish
-common ground with one another; we claim that their \emph{common information environment} determines whether
-convergence is warranted. \emph{Unresolved premise:} whether corroboration across agents can substitute for
+agreement cannot repair an upstream grounding failure. Their \emph{common information environment}, not
+mutual grounding between agents, determines whether convergence is warranted. \emph{Unresolved premise:} whether corroboration across agents can substitute for
 the grounding lost at a context handoff.
 
 \subsection{Reliance on aggregated AI advice}
@@ -402,7 +402,7 @@ quarter; floor vs.\ truncating integer division). The set contains 40 \textbf{H1
 disambiguator requires outside knowledge) and 14 \textbf{H2\_derivable} items (the disambiguator is present
 in the retained prompt), each at ambiguity level $k\in\{0,1,2,3\}$, where $k{=}0$ is fully specified.
 Table~\ref{tab:examples} illustrates the two regimes: in both, an unaware solver produces a natural default;
-they differ in whether the retained prompt \emph{contains} what is needed to override it. We note that the 40
+they differ in whether the retained prompt \emph{contains} what is needed to override it. The 40
 \textbf{H1\_external} and 14 \textbf{H2\_derivable} items are \emph{different item families}, not paired
 minimal variants of identical tasks, so the H1-versus-H2 contrast is a broad regime comparison. The sharpest
 \emph{causal} evidence that the disambiguator's \emph{presence} drives the failure comes instead from the
@@ -583,8 +583,8 @@ regime$\times$class$\times$item grouping) as the random grouping factor; the obs
 agent execution within that cell. $\bar\rho$ is the between-cell variance component divided by the total
 (between $+$ within) variance, and the effective ensemble size $\neff=n/(1+(n-1)\bar\rho)$ (Eq.~\ref{eq:neff})
 follows under the exchangeability assumption that within-cell agent errors share a common pairwise
-correlation. We flag that heterogeneous-agent exchangeability is an idealization (distinct families need not
-be exactly exchangeable) and read $\neff$ alongside the model-free pairwise wrong-answer agreement and
+correlation. Heterogeneous-agent exchangeability is an idealization (distinct families need not
+be exactly exchangeable), so we read $\neff$ alongside the model-free pairwise wrong-answer agreement and
 Fleiss' $\kappa$ rather than in isolation; the analysis code is released (\S\ref{sec:limitations}). The
 independence-calibrated counterfactual resamples each agent independently from its own \emph{item-marginal}
 accuracy, so a legitimate alternative account of the observed excess is shared item \emph{difficulty} rather
@@ -726,9 +726,9 @@ On H1\_external the abstention / clarification-request rate is $\approx0.03\%$ w
 rule-based (non-LLM) detector, agents almost never issued an explicit clarification request or abstention and
 instead committed to an answer. The ``$N/N$ agree'' a user sees is then $N$ agents committing to the
 \emph{same} wrong reading of the \emph{same} incomplete prompt, with nothing in the display to distinguish it
-from genuine corroboration (Figure~\ref{fig:silent}). We use ``confident'' descriptively for this commit-without-flagging behavior; we
-log verbalized/logit confidence but do not over-interpret it, and the detector itself awaits human
-validation (below), so we treat the abstention-silence claim as rule-based rather than human-validated.
+from genuine corroboration (Figure~\ref{fig:silent}). We use ``confident'' descriptively for this
+commit-without-flagging behavior; the abstention-silence claim rests on a rule-based (non-LLM) detector
+whose human validation is future work.
 Wrong-consensus does \emph{not} rise monotonically with the number of omitted clauses $k$ (\textbf{H1b} not
 supported as specified): a linear fit gives a positive $k$-coefficient ($0.31$, 95\% CI $[0.18,0.45]$), but
 that slope is driven by the $k{=}0\!\to\!1$ step, and \emph{within} $k{\ge}1$ \cd{} declines as the growing
@@ -1203,12 +1203,15 @@ is absent even when the aggregated systems are nominally diverse. The failure is
 equivalent convergence; \S\ref{sec:f2}), but that
 they share the \emph{same lossy representation of the task}. Consensus then measures the concentration of a
 shared prior, not the corroboration of independent evidence.
-Consensus is untrustworthy in exactly the case where its two preconditions fail together---when the input's
-completeness is unknown \emph{and} the agents are far from independent ($\neff\!\ll\!k$). It keeps its
-evidential value only when the decisive information is present and the errors are genuinely independent, and
-loses it when many agents instead share one default reading of an incomplete prompt. Our study shows consensus losing that value specifically when the
-disambiguator is external, and characterizes and detects that regime without
-estimating how often it occurs in the wild.
+Consensus earns its evidential value under two conditions: the decisive information is present, and the
+agents' errors are genuinely independent. It is untrustworthy exactly when both fail: the input's
+completeness is unknown and the agents are far from independent ($\neff\!\ll\!k$). That is what happens when
+many agents share one default reading of an incomplete prompt, and our study shows it specifically when the
+disambiguator is external. We both characterize and detect that regime.
+Our target is \emph{silent, unflagged} convergence on a wrong reading. When the omitted convention has a
+single correct default, agreement on it is correct behavior rather than a failure, and our metric does not
+penalize it: convergent delusion counts only convergence on a shared \emph{wrong} reading, so genuine
+agreement on a uniquely-determined answer is never scored against the models.
 
 \subsection{Shared-input failure, not groupthink}
 The outcome resembles groupthink---unanimous, confident error~\cite{janis1972}---but the mechanism differs.
@@ -1231,9 +1234,8 @@ which motivates the interface moves below.
 %% =====================================================================
 \section{Design Implications for Multi-Model Interfaces}
 \label{sec:implications}
-We frame these as design \emph{implications} and \emph{hypotheses}, not validated interventions: we ran no
-UI or human-subjects study, so each remains to be evaluated. The findings point to six concrete interface
-moves.
+The findings point to six concrete interface moves; each is a design \emph{implication} to be evaluated, not
+a validated intervention (we ran no UI study).
 \begin{enumerate}
 \item \emph{Show a dependence-aware consensus display, not an agreement count.} Replace ``$4/4$ models
 agree'' with a panel that reports whether the answers can be trusted as independent evidence:
@@ -1273,15 +1275,11 @@ future work (\S\ref{sec:limitations}).
 involve iteration and human participation, which we do not test. Claims about human trust, teams, and
 high-stakes domains are \emph{implications}, not tested deployments. Construct validity rests on the
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
-pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, we
-do not estimate the real-world \emph{prevalence} of such situations. We characterize and detect a failure
-\emph{mode}. The within-item $k{=}0$-vs-$k{\ge}1$ control (same base task; \S\ref{sec:results}, R1a) and the
-$H2\_derivable$ boundary condition rule out a \emph{generic} hard-item or pipeline artifact, but did not by
-themselves remove possible screen-induced inflation of the observed rate. The completed
-pre-registered unfiltered-sample replication did not attenuate relative to the screened confirmatory rate
-(see Construct validity), supporting H-A14 (no attenuation), so we find no evidence of screen-induced inflation. The abstention detector is
-rule-based and pending human validation. Generalization beyond the three domains and the tested roster is
-future work.
+pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, we characterize a failure \emph{mode} rather
+than estimate its prevalence; the pre-registered unfiltered-sample replication does not attenuate relative
+to the screened rate (Construct validity, H-A14), so screening does not account for the effect. The
+abstention-silence claim rests on a rule-based (non-LLM) detector whose human validation is future work.
+Generalization beyond the three tested domains and the roster is future work.
 \paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
 work. First, a \emph{human-subjects study} (a within-subjects design of roughly 50 participants) would test
 whether cross-model agreement raises adoption, whether that causes over-reliance when models share a wrong
@@ -1291,8 +1289,7 @@ computational conditions post hoc: cross-vendor \emph{synthesis} (one extra mode
 generic \emph{role-diversified} evidence workflow (\S\ref{sec:phaseB}); both left convergent
 delusion unchanged, but a \emph{confirmatory}, pre-registered test of input/evidence-diversifying
 interventions (retrieval-diverse or context-diverse conditions) remains future work. Third, the proposed
-dependence-aware multi-model interface is a concept and remains to be \emph{built and evaluated}. We make no
-claim that any of these were carried out.
+dependence-aware multi-model interface is a concept and remains to be \emph{built and evaluated}.
 \paragraph{Ethics.} The study involves \emph{no human subjects}: all data are model-generated responses to
 synthetic benchmark tasks, and the ``simulated users'' are scripted, not people. The benchmark contains no
 personal, sensitive, or copyrighted material; each item is a machine-constructed underspecified task with an
