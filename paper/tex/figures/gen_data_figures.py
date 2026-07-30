@@ -145,29 +145,29 @@ def fig_intervention():
 # ---------------------------------------------------------------------
 def fig_silent_abstention():
     # Frozen confirmatory values: abstention/clarification rate per regime; H1 CD.
-    labels = ["H1 external", "H2 derivable"]
-    abst   = [0.00031, 0.00323]   # 0.031% , 0.323%
-    cd_h1  = 0.532
-    cols   = [CB["orange"], CB["sky"]]
-    from matplotlib.ticker import PercentFormatter
+    labels = ["H1\nabstention", "H2\nabstention", "H1 convergent\ndelusion"]
+    vals   = [0.00031, 0.00323, 0.532]   # 0.031% , 0.323% , 53.2%
+    cols   = [CB["sky"], CB["sky"], CB["orange"]]
     x = np.arange(len(labels))
-    fig, ax = plt.subplots(figsize=(4.6, 3.4))
-    bars = ax.bar(x, abst, width=0.5, color=cols, edgecolor="white", zorder=3)
-    # reference: the convergent-delusion rate a calibrated system *should* have flagged
-    ax.axhline(cd_h1, color=CB["ink"], lw=1.1, ls="--", zorder=2)
-    ax.text(len(labels) - 0.5, cd_h1 + 0.008,
-            f"H1 convergent-delusion rate $=$ {cd_h1:.2f}\n(what a calibrated system should flag)",
-            ha="right", va="bottom", fontsize=7.5, color=CB["ink"])
-    for b, v in zip(bars, abst):
-        ax.text(b.get_x() + b.get_width() / 2, v + 0.013, f"{v*100:.3f}%",
+    fig, ax = plt.subplots(figsize=(5.0, 3.4))
+    ax.set_yscale("log")
+    bars = ax.bar(x, vals, width=0.62, color=cols, edgecolor="white", zorder=3)
+    ax.set_ylim(1e-4, 1.2)
+    for b, v in zip(bars, vals):
+        lab = f"{v*100:.3f}%" if v < 0.01 else f"{v*100:.1f}%"
+        ax.text(b.get_x() + b.get_width() / 2, v * 1.4, lab,
                 ha="center", va="bottom", fontsize=8)
-    ax.set_ylabel("Abstention / clarification rate")
-    ax.set_xticks(x); ax.set_xticklabels(labels)
-    ax.set_ylim(0, 0.6)
-    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    # gap between near-zero abstention and the convergent-delusion rate (~3 orders of magnitude)
+    ax.annotate("", xy=(2, 0.42), xytext=(2, 0.0016),
+                arrowprops=dict(arrowstyle="<->", color=CB["ink"], lw=0.9))
+    ax.text(1.62, 0.03, r"$\approx\!10^{3}\times$ gap" + "\n(silent)", fontsize=7.5,
+            color=CB["ink"], ha="right", va="center")
+    ax.set_ylabel("rate (log scale)")
+    ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=8.5)
+    ax.grid(True, axis="y", which="both", alpha=0.18, ls="--")
     save_fig(fig, "fig_silent_abstention_v2")
     plt.close(fig)
-    print(f"   abstention H1={abst[0]*100:.3f}% H2={abst[1]*100:.3f}%; CD ref={cd_h1}")
+    print(f"   abstention H1={vals[0]*100:.3f}% H2={vals[1]*100:.3f}% vs CD {vals[2]*100:.1f}% (log)")
 
 if __name__ == "__main__":
     os.chdir(HERE)

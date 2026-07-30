@@ -742,13 +742,12 @@ threshold in clause \emph{presence}, not a dose response; the constructive bound
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.62\linewidth]{fig_silent_abstention_v2.pdf}
-\Description{Bar chart of the abstention or clarification rate for external-context and in-prompt items, both near zero (0.031 percent and 0.323 percent), with a dashed horizontal reference line at the 0.53 convergent-delusion rate on external-context items. The large gap between the dashed line and the near-zero bars shows that agents almost never flag missing decisive information.}
-\caption{The failure is silent. The abstention / clarification-request rate stays near zero on both regimes
-(H1\_external $0.031\%$, H2\_derivable $0.323\%$), while on H1\_external convergent delusion is high
-($\cd\!\approx\!0.53$, dashed line): per the rule-based (non-LLM) detector, agents almost never flag that
-decisive information is missing and instead commit to an answer. The gap between the dashed
-convergent-delusion rate and the near-zero abstention bars is the silent failure---consensus offers no
-internal warning.}
+\Description{Log-scale bar chart comparing the near-zero abstention or clarification rate on external-context items (0.031 percent) and in-prompt items (0.323 percent) with the far higher external-context convergent-delusion rate (53.2 percent), about three orders of magnitude greater. Agents almost never flag missing decisive information.}
+\caption{The failure is silent (log scale). The abstention / clarification-request rate stays near zero on
+both regimes (H1\_external $0.031\%$, H2\_derivable $0.323\%$), whereas the H1\_external convergent-delusion
+rate is $\cd\!\approx\!0.53$---about three orders of magnitude higher: per the rule-based (non-LLM) detector,
+agents almost never flag that decisive information is missing and instead commit to an answer. Consensus
+offers no internal warning.}
 \label{fig:silent}
 \end{figure}
 
@@ -803,7 +802,9 @@ confirmatory finding is unchanged.
 
 \begin{table}[t]
 \centering
-\caption{Study~1 pre-registered outcomes. We report all Study~1 outcomes, including those not supported; the
+\caption{Study~1 pre-registered outcomes. We report all Study~1 outcomes, including those not supported.
+\textbf{None of the inconclusive or not-supported rows bears on the primary regime effect (H1 vs.\ H2),
+which is Supported}; they concern secondary amplification and diversity questions. Indeed the
 capability/family nulls are what make the failure a property of the information boundary rather than of any
 model.}
 \label{tab:outcomes}
@@ -821,7 +822,7 @@ R2 (cross-family construction) & non-constructor families converge (single-agent
 \midrule
 H1a (aggregation amplifies) & agg$-$single \cd{} CI crosses 0 & Inconclusive \\
 R1b (uniform null) & obs$-$uniform: high binary baseline & Inconclusive$^\ddagger$ \\
-Heterogeneous $>$ homogeneous & $\Delta\cd=-0.003\,[-0.078,0.058]$ & Not supported \\
+Heterogeneous $>$ homogeneous & $\Delta\cd=-0.003\,[-0.078,0.058]$ & Not supported$^\P$ \\
 H2 reasoner$\times$capability interaction & crossed-RE did not converge & Not estimable$^\S$ \\
 \bottomrule
 \end{tabular}
@@ -829,6 +830,8 @@ H2 reasoner$\times$capability interaction & crossed-RE did not converge & Not es
 \footnotesize $^\dagger$Via direct cross-family single-agent persistence; the pre-registered
 aggregation-amplification metric was inconclusive. $^\ddagger$Supported among parseable
 answers. $^\S$An estimation limitation (model non-convergence on 14 items), not positive evidence for a null.
+$^\P$The heterogeneous-vs-homogeneous equivalence is itself the finding (TOST-equivalent, \S\ref{sec:f2}):
+a shared prior spans model families rather than diversity reducing the failure.
 \end{table}
 
 \subsection{Exploratory: neither synthesis nor generic role diversification breaks the convergence}
@@ -1299,12 +1302,14 @@ consensus as a hypothesis to be checked---not as proof.
 \section{Preregistration Amendments and Deviations}
 \label{app:deviations}
 
+\textbf{The core of the study did not move: the primary metric (\cd), the H1/H2 hypotheses, the regime
+criterion, and the decision rules remained unchanged after preregistration, and every amendment below was
+made \emph{before} the confirmatory run and \emph{tightened} rather than loosened the test.}
 The preregistration was frozen at commit \texttt{c0a0393} (2026-07-15); every amendment below
 was recorded with a timestamp relative to confirmatory data collection.
 Table~\ref{tab:deviations} groups them into four kinds---benchmark and metric specification,
 sampling and roster decisions, preregistered secondary extensions, and post-confirmatory
-exploratory analyses---plus one preregistered analysis we did not run. The primary metric
-(\cd), the H1/H2 hypotheses, the regime criterion, and the decision rules were unchanged; the
+exploratory analyses---plus one preregistered analysis we did not run. The
 two amended clauses (the \iperp{} treatment in \cd, and the replacement of a shuffle null that
 is a mathematical identity for a shared-prior phenomenon) made the test \emph{more} stringent,
 and both predate the confirmatory run. Full commit hashes, signed amendment records, and the
