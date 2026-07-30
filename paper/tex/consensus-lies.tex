@@ -138,9 +138,9 @@ aggregate AI judgments the same way. This paper is about when that reassurance b
 models agree, confidently and in unison, on the \emph{same wrong} answer, because they never held independent
 views to begin with.
 
-The appeal rests on an inference chain that is rarely stated but easy to reconstruct:
-\emph{model plurality} $\Rightarrow$ \emph{perspective plurality} $\Rightarrow$ \emph{independent
-corroboration} $\Rightarrow$ \emph{higher trustworthiness}. The chain borrows the warrant of an old and
+The appeal rests on an inference that is rarely stated but easy to reconstruct: because several
+\emph{different} models concur, their agreement must reflect independent perspectives, and independent
+perspectives must make the verdict more trustworthy. That warrant borrows from an old and
 specific idea. From the Condorcet Jury Theorem to the wisdom of crowds, aggregation improves reliability
 \emph{only when} the judgments being combined are competent and carry \emph{sufficiently independent}
 errors~\cite{condorcet,ladha1992,surowiecki2004}. Cognitive diversity, not sheer group size, is
@@ -160,12 +160,12 @@ disambiguating clause has been omitted, so more than one interpretation is consi
 everyday condition when context is lost across a handoff between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
 how capable the models are but by \emph{where the missing information lives}. When the disambiguator lies
 \emph{outside} the retained prompt, independent agents converge on the \emph{same wrong} interpretation---and
-the failure runs deeper than a naive account would predict. It is not an artifact of weak models: frontier
-reasoners are trapped about as reliably as small ones. It is not one vendor's quirk: models from OpenAI,
-Anthropic, and Google fall into the \emph{same} trap. It is not noise that averages away: the agents make the
-\emph{same} error, in unison and with confidence, so a nominal $k$-agent ensemble supplies the evidence of
-roughly one independent judgment. And it is \emph{silent}---the agents almost never flag that anything is
-missing. Move the disambiguator \emph{inside} the prompt, and the failure vanishes (Figure~\ref{fig:overview}
+the failure runs deeper than a naive account would predict---and not for any of the reasons that account
+would reach for. Weak models are not the culprit: frontier
+reasoners are trapped about as reliably as small ones. Nor is it any single vendor---models from OpenAI,
+Anthropic, and Google fall into the \emph{same} trap, and they do so in such lockstep that a nominal
+$k$-agent ensemble supplies the evidence of roughly one independent judgment ($\neff\!=\!1.10$). And the
+failure is \emph{silent}: the agents almost never flag that anything is missing. Move the disambiguator \emph{inside} the prompt, and the failure vanishes (Figure~\ref{fig:overview}
 previews the setup and result). We call the wrong-consensus failure
 \emph{convergent delusion} (a descriptive label for a shared, confident, wrong reading, not a psychological
 claim), and the structural condition that produces it \emph{fake redundancy}: apparent
@@ -179,8 +179,8 @@ prevalence: our items are deliberately constructed and screened by an empirical 
 (\S\ref{sec:benchmark}), and we claim no generality beyond the tested items and models.
 
 Reading multi-model agreement is not merely
-an accuracy problem; it is a question about whether the interfaces we build preserve the \emph{epistemic
-independence} that makes consensus meaningful. When nominally diverse agents share an information boundary,
+an accuracy problem: consensus is evidence only when the agents are near-independent ($\neff$ close to the
+agent count $k$), and a same-prompt interface gives a user no way to tell whether they are. When nominally diverse agents share an information boundary,
 they can form an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture} whose agreement is an
 artifact of a shared prior rather than corroborating evidence. Because the failure is silent, nothing
 in the interface's ``models agree'' display distinguishes it from genuine agreement.
@@ -196,45 +196,37 @@ Study~1 instead isolates one boundary: whether the decisive disambiguator lies i
 retained prompt. This boundary does not depend on model capability in our data. Study~2 then builds a
 danger-quadrant detector for the confident-latent-premise blind spot that semantic entropy cannot see.
 
-\paragraph{Contributions.} This paper makes five contributions.
+\paragraph{Contributions.} This paper makes three contributions.
 \begin{itemize}
-\item \textbf{Conceptual and interaction-paradigm.} We identify the hidden assumption in same-prompt
-multi-model interfaces, that agreement across models is independent corroboration, and name
-\emph{fake redundancy}: under a shared information boundary, model plurality yields answer multiplicity
-without evidential independence. A landscape audit (\S\ref{sec:interfaces}) shows that a growing class of
-interfaces offers comparison, consensus, and synthesis affordances yet rarely signals that all models
-share the same, possibly incomplete, input.
-\item \textbf{Empirical.} Pre-registered evidence that independently queried LLM agents, spanning
-capability tiers \emph{and} three model families, silently converge on the same incorrect interpretation
-when a decisive disambiguator is omitted from the shared prompt, and that this failure vanishes when the
-disambiguator is present. Described with product-facing condition names (single-model assistance vs.\
-repeated sampling vs.\ cross-vendor comparison/aggregation vs.\ interpretation-first comparison;
-\S\ref{sec:study}), the failure is capability-insensitive and cross-family: model diversity and capability
-do not restore interpretive independence.
-\item \textbf{Methodological.} An \emph{executable-gold} protocol that manipulates whether the
-disambiguator crosses the prompt boundary and measures \emph{correlated error}, not merely individual
-accuracy, so that correctness is established independently of model agreement and no LLM judge scores any
-answer (interpretation sets are constructor-authored and audited, not LLM-scored). Dependence is operationalized through classical estimators (pairwise wrong-answer agreement,
-intraclass correlation, and effective ensemble size), showing when a nominally $k$-agent system supplies
-$\approx\!1$ \emph{effective} independent judgment.
-\item \textbf{Design.} A \emph{dependence-aware multi-model interface} concept plus design implications:
-instead of ``$4/4$ models agree,'' surface shared-input, missing-context, shared-interpretation, and
-alternative-interpretation signals and a request-clarification action. Grounded in the landscape gap, this
-is framed as design implications and a proposed concept; its evaluation is future work.
-\item \textbf{A black-box detector (Study~2).} A constructive counterpart to the diagnosis: Study~2
-identifies the blind spot of same-input resampling and shifts detection to an orthogonal premise-sensitivity
-axis, asking whether an answer depends on an unstated, decision-relevant premise rather than whether it
-wavers under fixed-input sampling. On an executable gold-ambiguity label, this black-box, cross-vendor,
-inference-only detector (LPP) separates ambiguous from unambiguous prompts at pooled AUROC $0.895$, exactly
-where the same-input semantic-entropy baseline is blind, by self-surfacing latent premises and
-counterfactually pinning them in executable tests. The same pinning enables a detector-gated clarification
-step; when a simulated-user oracle supplies the missing convention, the convergent delusion is nearly
-eliminated (an upper bound; \S\ref{sec:study2}). We report the
-ablation: most of the detection signal comes from surfacing premises at all, pinning adds a real but
-modest increment, and premise localization remains weak.
+\item \textbf{Conceptual and empirical.} We identify the hidden assumption in same-prompt multi-model
+interfaces---that agreement across models is independent corroboration---and name \emph{fake redundancy}. A
+pre-registered study shows that independently queried agents, spanning capability tiers and three model
+families (OpenAI, Anthropic, Google), silently converge on the \emph{same} wrong interpretation when a
+decisive disambiguator is omitted from the shared prompt, and stop converging the moment it is restored.
+The failure is capability-insensitive and cross-family: neither stronger reasoners nor a mix of vendors
+restores interpretive independence---which locates it in the shared \emph{information boundary}, not in any
+one model. A landscape audit (\S\ref{sec:interfaces}) finds a growing class of interfaces offering
+comparison, consensus, and synthesis affordances while rarely signaling that all models share the same,
+possibly incomplete, input.
+\item \textbf{Method and measurement.} An \emph{executable-gold} protocol varies whether the disambiguator
+crosses the prompt boundary and measures \emph{correlated error} rather than accuracy: correctness is
+decided by running code, never by an LLM judge, so ``models agree'' and ``models are right'' stay
+definitionally separate (interpretation sets are constructor-authored and audited, not LLM-scored).
+Dependence is quantified with classical estimators---pairwise wrong-answer agreement, intraclass
+correlation, and effective ensemble size---which show a nominal $k$-agent system supplying $\approx\!1$
+\emph{effective} independent judgment.
+\item \textbf{A black-box detector and clarification gate.} Study~2 shifts detection to an orthogonal
+premise-sensitivity axis and builds a black-box, cross-vendor, inference-only detector (LPP) that separates
+ambiguous from unambiguous prompts at pooled AUROC $0.895$---exactly where the same-input semantic-entropy
+baseline is blind---by self-surfacing latent premises and counterfactually pinning them in executable tests.
+Gated as a clarification step with a simulated-user oracle that supplies the missing convention, the same
+mechanism nearly eliminates the convergent delusion (an upper bound; \S\ref{sec:study2}). We report the
+ablation honestly---most of the signal comes from surfacing premises at all, with counterfactual pinning a
+real but modest increment---and these results motivate a \emph{dependence-aware} interface that surfaces
+evidential dependence instead of an agent count (\S\ref{sec:implications}).
 \end{itemize}
-We report every pre-registered hypothesis, including those that were not supported, and treat the
-capability/family nulls as theoretically informative: they are what makes the failure a property of the
+We report every pre-registered hypothesis, including those not supported; the capability and family nulls
+are load-bearing rather than incidental---they are what makes the failure a property of the
 \emph{information boundary} rather than of any model.
 
 %% =====================================================================
@@ -616,7 +608,7 @@ released (\S\ref{sec:limitations}).
 The confirmatory run comprised 5{,}832 aggregation jobs (16{,}461 agent executions) over 54 items, three
 seeds, and the primary conditions. We report answer-first findings.
 
-\subsection{F1: Omitting external context produces accurate-looking but systematically wrong consensus}
+\subsection{F1: Location, not difficulty}
 The cleanest result comes from matched variants of the \emph{same} task. With every disambiguating clause
 retained ($k{=}0$), convergent delusion is $0.00$; delete one or more of those clauses ($k{\ge}1$) and it
 jumps to $0.82$ (difference 95\% CI $[0.73,0.90]$)---same pipeline, labeler, and metric, so the switch is the
@@ -666,7 +658,7 @@ rather than of task difficulty per se.}
 \label{fig:phase}
 \end{figure}
 
-\subsection{F2: Capability and model-family diversity do not restore interpretive independence}
+\subsection{F2: Diversity without independence}
 \label{sec:f2}
 The H1\_external failure shows \emph{no detectable difference} across model classes (Table~\ref{tab:regime}): frontier
 reasoners are trapped about as reliably as weaker, non-frontier models, and a heterogeneous cross-family pool
@@ -685,7 +677,7 @@ overclaim. Vendor and capability diversity did not translate into
 \emph{interaction} rests on only 14 items and is power-limited (\S\ref{sec:robust}); the well-powered regime
 \emph{main} effect carries the claim.
 
-\subsection{F3: Adding agents adds little effective redundancy (fake redundancy)}
+\subsection{F3: Five agents, one effective judgment}
 Five nominally independent agents supply the evidence of about one. On H1\_external, pairwise wrong-answer
 agreement is $0.98$, Fleiss' $\kappa=0.97$, and the intraclass correlation of the wrong-answer indicator is
 $0.89$, giving an effective ensemble size of $\neff=1.10$
@@ -729,7 +721,7 @@ evidence of roughly one. Adding agents does not add independent evidence.}
 \label{fig:fakeredundancy}
 \end{figure}
 
-\subsection{F4: The failure is silent; retaining the disambiguator eliminates it}
+\subsection{F4: Confident, yet silent}
 On H1\_external the abstention / clarification-request rate is $\approx0.03\%$ while \cd{} $=0.53$: per the
 rule-based (non-LLM) detector, agents almost never issued an explicit clarification request or abstention and
 instead committed to an answer. The ``$N/N$ agree'' a user sees is then $N$ agents committing to the
@@ -756,7 +748,7 @@ offers no internal warning.}
 \label{fig:silent}
 \end{figure}
 
-\subsection{F5: The convergence is not an artifact of the benchmark's constructor}
+\subsection{F5: Not an artifact of the constructor}
 A skeptic might argue that convergence reflects a prior shared with whoever \emph{built} the traps. The
 main benchmark is built by a fourth-vendor model outside the tested pool, whereas this
 held-out R2 subset is Anthropic-constructed (Appendix~\ref{app:deviations}), so the study spans two independent constructor
@@ -1173,6 +1165,36 @@ as future work and permits a reduced item subset if the full run is too slow.
 %% =====================================================================
 \section{Discussion}
 \label{sec:discussion}
+\subsection{The strongest objection, addressed head-on}
+A deflationary reading of our result is that the agents converge not because they share an
+\emph{interpretation} but because the items are simply hard, or because H1\_external and H2\_derivable are
+different task families rather than matched variants. We answer this with independent controls rather than
+assertion (Table~\ref{tab:threats}). A \emph{within-item} $k{=}0$-vs-$k{\ge}1$ comparison on the \emph{same}
+base task isolates the disambiguator's presence from item difficulty ($\Delta\cd=0.82$); the H2\_derivable
+boundary shows the same models \emph{stop} converging once the clause is inside the prompt ($\cd=0.00$), so
+the effect is not generic hardness; and a cross-family R2 benchmark built by a \emph{different} vendor,
+together with an unfiltered replication, rules out a shared prior with our constructor and
+screening-induced inflation. We rest the shared-\emph{interpretation} claim on this convergent evidence
+alongside the dependence estimators ($\neff=1.10$, ICC $=0.89$), not on any single test.
+
+\begin{table}[t]
+\centering\small
+\caption{Main threats to our interpretation and the pre-registered controls that address each. All evidence
+is from the confirmatory run; no new experiment is introduced here.}
+\label{tab:threats}
+\begin{tabular}{@{}p{0.30\linewidth}p{0.40\linewidth}p{0.20\linewidth}@{}}
+\toprule
+Objection & Control & Evidence \\
+\midrule
+Just shared item difficulty & within-item $k{=}0$ vs $k{\ge}1$ on the same base task & $\Delta\cd=0.82$ \\
+H1 vs H2 are different item families & H2\_derivable boundary: clause inside $\Rightarrow$ no convergence & $\cd=0.00$ \\
+Shared prior with \emph{our} constructor & R2 built by a different vendor (Anthropic) & non-constructor $\cd=0.72$ \\
+Screening inflates the rate & unfiltered replication (Amdt~14) & no attenuation ($0.685$) \\
+Difficulty, not interpretation & dependence estimators $+$ within-item control & $\neff{=}1.10$; ICC $0.89$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{Consensus without epistemic independence}
 Our results identify a boundary condition for applying collective-intelligence assumptions to AI ensembles.
 Aggregation earns its epistemic warrant from independence; under a shared information boundary, that warrant
@@ -1181,9 +1203,10 @@ is absent even when the aggregated systems are nominally diverse. The failure is
 equivalent convergence; \S\ref{sec:f2}), but that
 they share the \emph{same lossy representation of the task}. Consensus then measures the concentration of a
 shared prior, not the corroboration of independent evidence.
-This does not mean consensus is worthless: its evidential value holds when the input carries the decisive
-information and the agents' errors are genuinely independent, and it collapses when they instead share one
-default reading of an incomplete prompt. Our study shows consensus losing that value specifically when the
+Consensus is untrustworthy in exactly the case where its two preconditions fail together---when the input's
+completeness is unknown \emph{and} the agents are far from independent ($\neff\!\ll\!k$). It keeps its
+evidential value only when the decisive information is present and the errors are genuinely independent, and
+loses it when many agents instead share one default reading of an incomplete prompt. Our study shows consensus losing that value specifically when the
 disambiguator is external, and characterizes and detects that regime without
 estimating how often it occurs in the wild.
 
@@ -1200,7 +1223,10 @@ Because the decisive information is lost at a handoff (a grounding-resource boun
 aggregation cannot recover it. The problem is therefore located in the \emph{pipeline}, not the model: it is
 a property of how collaborative systems preserve (or discard) context and provenance across people, tools,
 and agents. The silence of the failure compounds this: without an internal warning, more agreement reads as
-more confidence.
+more confidence. The upshot for CSCW is specific: the trust a system earns from aggregation is
+\emph{contingent} on external disambiguation and evaporates precisely when the interface cannot vouch for
+that condition---so the design problem is not to recruit more agents but to expose the contingency itself,
+which motivates the interface moves below.
 
 %% =====================================================================
 \section{Design Implications for Multi-Model Interfaces}
@@ -1227,9 +1253,11 @@ underspecified.
 plausibly requires diverse \emph{inputs}, retrieval paths, and representations---not merely different vendors
 behind the same prompt, because swapping providers leaves the shared blind spot intact. Our exploratory
 Phase B conditions (\S\ref{sec:phaseB}) are consistent with this: the two interventions we tested
-(cross-vendor synthesis and one generic role-diversified workflow) did not reduce convergent delusion,
-suggesting---though not establishing---that interventions which keep the same shared input may be
-insufficient.
+(cross-vendor synthesis and one generic role-diversified workflow) did not reduce convergent delusion. We
+frame this as a \emph{falsifiable conjecture}---that no intervention leaving the shared input unchanged can
+break the convergence---rather than an established result: it follows naturally from the
+shared-information-boundary account and yields a sharp prediction for future work (any input-preserving
+intervention should fail to reduce \cd{}).
 \item \emph{Preserve provenance across handoffs}, so that the context needed to disambiguate is not silently
 dropped.
 \item \emph{Audit for interpretive monoculture} across a fleet, not only per-model accuracy.
@@ -1296,9 +1324,10 @@ silently: nominally diverse agents form an interpretive monoculture, a $k$-agent
 effective voice, and confident consensus becomes an artifact of a shared prior rather than a warrant for a
 decision. The fix is not more agents but a different question. That question can be operationalized: our
 detector shows that the latent-premise ambiguity behind this collapse can be flagged at inference time, even
-when same-prompt uncertainty stays low. For multi-model interface design, supporting
-trustworthy human--AI judgment means measuring \emph{independence}, preserving \emph{context}, and treating
-consensus as a hypothesis to be checked---not as proof.
+when same-prompt uncertainty stays low. The concrete implication for multi-model interface design is narrow:
+replace the ``$N/N$ models agree'' badge with a display of \emph{evidential dependence}---whether those $N$
+answers rest on the same, possibly incomplete, input---so a user can tell corroboration from a shared blind
+spot.
 
 \begin{acks}
 Acknowledgements omitted for anonymous review.
