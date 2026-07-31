@@ -805,6 +805,11 @@ within both tested domains rather than being an artifact of one. This is a small
 check ($n=4$ items per cell per domain, with a wide interaction CI), not a primary result, and the frozen
 confirmatory finding is unchanged.
 
+Two \emph{exploratory} post-hoc interventions---cross-vendor answer synthesis and a generic
+role-diversified workflow---also left convergent delusion essentially unchanged on the same items
+(Appendix~\ref{sec:phaseB}), motivating without establishing the hypothesis that effective remedies must
+diversify the \emph{inputs} rather than the vendors or the roles.
+
 \begin{table}[t]
 \centering
 \caption{Study~1 pre-registered outcomes. We report all Study~1 outcomes, including those not supported.
@@ -838,36 +843,6 @@ answers. $^\S$An estimation limitation (model non-convergence on 14 items), not 
 $^\P$The heterogeneous-vs-homogeneous equivalence is itself the finding (TOST-equivalent, \S\ref{sec:f2}):
 a shared prior spans model families rather than diversity reducing the failure.
 \end{table}
-
-\subsection{Exploratory: neither synthesis nor generic role diversification breaks the convergence}
-\label{sec:phaseB}
-Neither intervention we tried moved the failure. Both conditions are \emph{post-hoc exploratory} design
-interventions, added \emph{after} the confirmatory run and pre-registered as a secondary amendment (ratified 2026-07-22; Appendix~\ref{app:deviations}); they are never relabeled
-confirmatory. Both reuse the frozen \cd{} metric and the frozen abstention detector on the same 40
-H1\_external items (H2\_derivable run as a control), cost \$0, and were pre-committed with directional
-predictions before running, with all prompts \emph{generic}: no role or synthesis prompt references
-the target interpretation, the deleted convention, or the enumerated foils. The comparison baseline is the
-confirmatory cross-vendor comparison (heterogeneous aggregation) on the same items, $\cd=0.544$.
-
-\emph{Cross-vendor synthesis} (P-B1: one additional model outside the tested pool merges the cross-family
-pool's independent answers into a single reply) yields $\cd=0.567$ on H1\_external, $\Delta=+0.023$ relative
-to baseline (95\% CI $[-0.033,0.083]$), with abstention $0\%$: synthesis does \emph{not} reduce convergent
-delusion---if anything it launders shared-wrong answers into one confident reply---consistent with the
-pre-registered prediction P-B1. \emph{Generic role-diversified evidence workflow} (P-B2: five agents assigned
-distinct generic epistemic roles: solve, find missing information, propose alternatives, check defaults, and
-integrate without treating agreement as correctness) yields $\cd=0.575$, $\Delta=+0.031$ (95\% CI
-$[-0.052,0.125]$), with the clarification/abstention rate rising only to $2.5\%$; the pre-registered
-prediction that it \emph{would} help (P-B2) is \textbf{not supported}. On the H2\_derivable control both
-interventions leave the already-resolved regime intact ($\cd=0.000$).
-
-This pre-registered \emph{null} is informative: under a shared
-information boundary, neither changing the aggregation \emph{recipe} (synthesis) nor imposing generic
-epistemic \emph{roles} over the same shared prompt reduced convergent delusion in the two interventions we
-tested. On this evidence the failure appears to be driven by the information boundary rather than by how the
-shared answers are aggregated; this motivates, but does not prove, the \emph{hypothesis} that effective
-remedies must diversify the \emph{inputs}/evidence rather than merely the vendors or the roles. We tested
-only these two interventions and do not claim a solution, or that all
-same-input interventions are insufficient.
 
 %% =====================================================================
 \section{Study 2: A Black-Box Detector for Confident Latent-Premise Ambiguity}
@@ -1398,5 +1373,34 @@ single-agent \cd{} (A11).
 \item \textbf{\iperp{} anomaly}: two items with incomplete foil sets, handled by the
 preregistered drop-\iperp{} sensitivity with no post-hoc benchmark edit.
 \end{itemize}
+
+\section{Exploratory Diversification Conditions}
+\label{sec:phaseB}
+Two \emph{post-hoc exploratory} design interventions were added \emph{after} the confirmatory run and
+pre-registered as a secondary amendment (ratified 2026-07-22; Appendix~\ref{app:deviations}); they are never
+relabeled confirmatory. Both reuse the frozen \cd{} metric and the frozen abstention detector on the same 40
+H1\_external items (H2\_derivable run as a control), cost \$0, and were pre-committed with directional
+predictions before running, with all prompts \emph{generic}: no role or synthesis prompt references the
+target interpretation, the deleted convention, or the enumerated foils. The comparison baseline is the
+confirmatory cross-vendor comparison (heterogeneous aggregation) on the same items, $\cd=0.544$.
+
+\emph{Cross-vendor synthesis} (P-B1: one additional model outside the tested pool merges the cross-family
+pool's independent answers into a single reply) yields $\cd=0.567$ on H1\_external, $\Delta=+0.023$ relative
+to baseline (95\% CI $[-0.033,0.083]$), with abstention $0\%$: synthesis does \emph{not} reduce convergent
+delusion---if anything it launders shared-wrong answers into one confident reply---consistent with the
+pre-registered prediction P-B1. \emph{Generic role-diversified evidence workflow} (P-B2: five agents assigned
+distinct generic epistemic roles: solve, find missing information, propose alternatives, check defaults, and
+integrate without treating agreement as correctness) yields $\cd=0.575$, $\Delta=+0.031$ (95\% CI
+$[-0.052,0.125]$), with the clarification/abstention rate rising only to $2.5\%$; the pre-registered
+prediction that it \emph{would} help (P-B2) is \textbf{not supported}. On the H2\_derivable control both
+interventions leave the already-resolved regime intact ($\cd=0.000$).
+
+This pre-registered \emph{null} is informative: under a shared information boundary, neither changing the
+aggregation \emph{recipe} (synthesis) nor imposing generic epistemic \emph{roles} over the same shared prompt
+reduced convergent delusion in the two interventions we tested. On this evidence the failure appears to be
+driven by the information boundary rather than by how the shared answers are aggregated; this motivates, but
+does not prove, the \emph{hypothesis} that effective remedies must diversify the \emph{inputs}/evidence rather
+than merely the vendors or the roles. We tested only these two interventions and do not claim a solution, or
+that all same-input interventions are insufficient.
 
 \end{document}
