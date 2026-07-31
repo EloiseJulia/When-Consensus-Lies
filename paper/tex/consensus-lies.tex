@@ -791,19 +791,11 @@ capable models reach an unenumerated interpretation ($\rightarrow\iperp$); these
 pre-registered drop-\iperp{} sensitivity (Appendix~\ref{app:deviations}), under which the effect is
 unchanged.
 
-A pre-registered secondary robustness check (Appendix~\ref{app:deviations}) crosses regime with domain. It ran the
-single-agent and heterogeneous-aggregation pools over the frontier roster across three seeds, gated by a fail-closed
-completeness check, the oracle-hint manipulation gate, and the provenance holdout. A
-manipulation check first validated the oracle-hint recovery probe, with mean H2 recovery $1.000$ versus mean
-H1 recovery $0.125$ (separation $0.875$), so the crossing is interpretable. Within both domains, the
-$H1\_external \rightarrow H2\_derivable$ regime contrast holds under the frozen \cd{} metric:
-for \texttt{code\_spec}, $\cd(H1)=0.887$ versus $\cd(H2)=0.042$ (contrast $0.846\,[0.740,0.951]$); for
-\texttt{policy\_qa}, $\cd(H1)=0.986$ versus $\cd(H2)=0.042$ (contrast $0.944\,[0.896,0.986]$). The pooled
-regime main effect is $0.895\,[0.823,0.958]$, while the regime$\times$domain interaction is
-$-0.099\,[-0.219,0.014]$ and not significant. Thus the two-regime effect is not domain-confounded: it holds
-within both tested domains rather than being an artifact of one. This is a small-$n$ secondary robustness
-check ($n=4$ items per cell per domain, with a wide interaction CI), not a primary result, and the frozen
-confirmatory finding is unchanged.
+A pre-registered secondary robustness check crosses regime with domain (Appendix~\ref{app:domain}): the
+$H1\_external \rightarrow H2\_derivable$ contrast holds \emph{within} both tested domains, with a
+regime$\times$domain interaction of $-0.099\,[-0.219,0.014]$ that is not significant. The two-regime effect
+is therefore not domain-confounded, not an artifact of one domain. This is a small-$n$ secondary check
+($n=4$ items per cell per domain), not a primary result, and the frozen confirmatory finding is unchanged.
 
 Two \emph{exploratory} post-hoc interventions---cross-vendor answer synthesis and a generic
 role-diversified workflow---also left convergent delusion essentially unchanged on the same items
@@ -1102,17 +1094,13 @@ confident-latent-premise zone where same-prompt resampling is blind: LPP reaches
 against \textbf{$0.140$} for semantic entropy (self-consistency is identical). LPP triggers clarification in
 exactly the quadrant semantic entropy under-fires ($0.140$ coverage), where the failure lives.
 
-\paragraph{Across models: coverage is robust, precision is model-dependent.} The
-\emph{selectivity} of the gate varies with model capability. On the reasoning model gpt-5.6-sol the gate is
-clean---over-clarification $0.032$, net $0.544$---whereas pooling weaker or other models raises
-over-clarification to $0.402$ and lowers the pooled net to $0.339$. (This end-to-end gate rate is distinct
-from, and higher than, the detector's own false-positive rate of $0.095$ on fully-specified $k{=}0$ controls
-at the frozen operating point (Table~\ref{tab:lps-op}): the gate is measured over the full unambiguous
-($\mathrm{AMB}{-}$) set and pooled across the intervention roster, where weaker models dominate the pooled
-rate.) Per-model net ranges from $0.149$
-(claude-haiku-4.5) to $0.544$ (gpt-5.6-sol). So LPP reliably \emph{covers} the danger zone across models,
-but its \emph{precision}, avoiding over-clarification on unambiguous items, depends on the underlying
-model.
+\paragraph{Across models: coverage is robust, precision is model-dependent.} The gate's \emph{selectivity}
+varies with model capability: on the reasoning model gpt-5.6-sol it is clean (over-clarification $0.032$, net
+$0.544$), while pooling weaker models raises over-clarification to $0.402$ and lowers the pooled net to
+$0.339$ (per-model net $0.149$--$0.544$). This end-to-end gate rate is higher than the detector's own $k{=}0$
+false-positive rate of $0.095$ (Table~\ref{tab:lps-op}) because it is pooled over the full unambiguous
+($\mathrm{AMB}{-}$) set and the intervention roster, where weaker models dominate. LPP reliably \emph{covers}
+the danger zone across models; its \emph{precision} on unambiguous items depends on the underlying model.
 
 \paragraph{H-B2$'$: supplying the unstated convention nearly eliminates the delusion.} In a controlled
 oracle that supplies the deleted axis's gold convention on clarification (a simulated-user resolution;
@@ -1391,5 +1379,16 @@ driven by the information boundary rather than by how the shared answers are agg
 does not prove, the \emph{hypothesis} that effective remedies must diversify the \emph{inputs}/evidence rather
 than merely the vendors or the roles. We tested only these two interventions and do not claim a solution, or
 that all same-input interventions are insufficient.
+
+\section{Regime $\times$ Domain Robustness}
+\label{app:domain}
+The pre-registered regime$\times$domain crossing (\S\ref{sec:robust}) ran the single-agent and
+heterogeneous-aggregation pools over the frontier roster across three seeds, gated by a fail-closed
+completeness check, the oracle-hint manipulation gate, and the provenance holdout. A manipulation check first
+validated the oracle-hint recovery probe, with mean H2 recovery $1.000$ versus mean H1 recovery $0.125$
+(separation $0.875$), so the crossing is interpretable. Within both domains the regime contrast holds under
+the frozen \cd{} metric: for \texttt{code\_spec}, $\cd(H1)=0.887$ versus $\cd(H2)=0.042$ (contrast
+$0.846\,[0.740,0.951]$); for \texttt{policy\_qa}, $\cd(H1)=0.986$ versus $\cd(H2)=0.042$ (contrast
+$0.944\,[0.896,0.986]$); the pooled regime main effect is $0.895\,[0.823,0.958]$.
 
 \end{document}
