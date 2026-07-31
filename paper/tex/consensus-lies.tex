@@ -63,10 +63,12 @@ on a shared wrong reading ($=\!0.00$), not even weaker, non-frontier models, and
 \emph{different} model family argues against a shared-prior-with-the-constructor artifact. We name this
 failure \emph{fake redundancy}: under a shared information boundary, nominally diverse agents form an
 \emph{interpretive monoculture}. Building on this diagnosis, we contribute a black-box, cross-vendor detector
-that flags, at inference time and without ground truth, the latent-premise ambiguity behind the failure. It
-works mainly by \emph{self-surfacing} the premises an answer depends on, with a counterfactual-pinning test
-adding a smaller refinement; it separates ambiguous from unambiguous prompts at pooled AUROC $0.895$
-(95\% CI $[0.815,0.966]$; semantic entropy $0.581$), though it over-clarifies unambiguous prompts at a
+that flags, at inference time and without ground truth, the latent-premise ambiguity behind the failure. The signal is \emph{latent-premise sensitivity} (whether an answer depends on an unstated premise), not
+same-prompt variation: state-of-the-art semantic entropy is near-blind here by construction (pooled AUROC
+$0.581$), because the failure is confidently \emph{stable}. Surfacing the premises moves onto the right axis:
+a requirements-probing variant already reaches $0.810$, and our detector, which counterfactually pins each
+self-surfaced premise and clusters by executable equivalence, tops the axis at $0.895$ (95\% CI
+$[0.815,0.966]$). It over-clarifies unambiguous prompts at a
 model-dependent rate (pooled $0.402$). Used as a clarification gate with a simulated-user oracle
 that supplies the missing convention, it cuts convergent delusion from \cd{} $0.626$ to $0.010$. This upper
 bound holds when the missing convention is recoverable by someone in the loop: the detector localizes the
@@ -995,12 +997,14 @@ pilot (full protocol in Appendix~\ref{app:deviations}).
 \label{sec:study2-results}
 AUROC $0.895$ matters because of \emph{where} the baseline fails. Same-prompt resampling---the signal
 behind state-of-the-art semantic entropy---stays near chance on exactly the items whose answers hinge on an
-unstated premise: the models are confidently self-consistent right where they are most ambiguous, so pinning
-the premise exposes what resampling cannot. Pooled, \Hctx{} reaches \textbf{AUROC $0.895$}
-$[0.815, 0.966]$ against \textbf{$0.581$} $[0.484, 0.675]$ for semantic entropy, a
-\textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$); per model \Hctx{} lands in
-$0.856$--$0.887$ while \Hseed{} sits at $0.551$--$0.606$, consistent across all six tested models---three
-families (OpenAI, Anthropic, Google) at two capability tiers (Table~\ref{tab:lps-auroc}).
+unstated premise: the models are confidently self-consistent right where they are most ambiguous, so the
+fix is not a better resampling statistic but a different axis. Surfacing the unstated premises and testing
+whether the answer depends on them moves onto that axis: a requirements-probing variant already reaches
+$0.810$, and \Hctx{}, which adds the executable counterfactual-pinning test, reaches pooled
+\textbf{AUROC $0.895$} $[0.815, 0.966]$. Against semantic entropy's \textbf{$0.581$} $[0.484, 0.675]$ this is
+a $\Delta\mathrm{AUROC} = 0.314$ (pre-committed $\ge 0.15$), the size of the SOTA blind spot; per model
+\Hctx{} lands in $0.856$--$0.887$ while \Hseed{} sits at $0.551$--$0.606$, consistent across all six tested
+models, three families (OpenAI, Anthropic, Google) at two capability tiers (Table~\ref{tab:lps-auroc}).
 
 At the item level, \textbf{$0.758$ (25 of 33) of $\mathrm{AMB}{+}$
 items} fall in the low-\Hseed{} $\wedge$ high-\Hctx{} zone (pre-committed $\ge 0.40$)---confident, yet the
