@@ -160,9 +160,8 @@ fiscal-year start was ever in question. We study such \emph{underspecified} inpu
 disambiguating clause has been omitted, so more than one interpretation is consistent with what remains. This
 is an everyday condition when context is lost across a handoff between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
 how capable the models are but by \emph{where the missing information lives}. When the disambiguator lies
-\emph{outside} the retained prompt, independent agents converge on the \emph{same wrong} interpretation---and
-the failure runs deeper than a naive account would predict---and not for any of the reasons that account
-would reach for. Weak models are not the culprit: frontier
+\emph{outside} the retained prompt, independent agents converge on the \emph{same wrong} interpretation.
+Weak models are not the culprit: frontier
 reasoners are trapped about as reliably as small ones. Nor is it any single vendor---models from OpenAI,
 Anthropic, and Google fall into the \emph{same} trap, and they do so in such lockstep that a nominal
 $k$-agent ensemble supplies the evidence of roughly one independent judgment ($\neff\!=\!1.10$). And the
@@ -183,19 +182,18 @@ Reading multi-model agreement is not merely
 an accuracy problem: consensus is evidence only when the agents are near-independent ($\neff$ close to the
 agent count $k$), and a same-prompt interface gives a user no way to tell whether they are. When nominally diverse agents share an information boundary,
 they can form an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture} whose agreement is an
-artifact of a shared prior rather than corroborating evidence. Because the failure is silent, nothing
-in the interface's ``models agree'' display distinguishes it from genuine agreement.
+artifact of a shared prior rather than corroborating evidence.
 
 We present two linked studies. \emph{Study~1} documents the failure (\S\ref{sec:results}): where and why
 nominally diverse agents silently converge on the same wrong reading---and why adding agents, mixing vendors,
 or letting them debate does not rescue them. That raises a sharper question: if the failure is hard to
 \emph{prevent}, can we at least \emph{see it coming}? \emph{Study~2} answers it (\S\ref{sec:study2}) with a
 black-box, cross-vendor detector that flags the danger at inference time, without ever seeing the correct
-answer. Our aim in neither study is to rediscover that frontier-model errors are
-correlated~\cite{kim2025correlated} or to decompose model uncertainty in general~\cite{hou2024decomposing}.
-Study~1 instead isolates one boundary: whether the decisive disambiguator lies inside or outside the
-retained prompt. This boundary does not depend on model capability in our data. Study~2 then builds a
-danger-quadrant detector for the confident-latent-premise blind spot that semantic entropy cannot see.
+answer. Neither study aims to rediscover that frontier-model errors are
+correlated~\cite{kim2025correlated} or to decompose model uncertainty in general~\cite{hou2024decomposing}:
+Study~1 isolates one boundary---whether the decisive disambiguator lies inside or outside the retained
+prompt, which in our data does not depend on model capability---and Study~2 builds a danger-quadrant
+detector for the confident-latent-premise blind spot that semantic entropy cannot see.
 
 \paragraph{Contributions.} This paper makes three contributions.
 \begin{itemize}
@@ -227,8 +225,7 @@ real but modest increment---and these results motivate a \emph{dependence-aware}
 evidential dependence instead of an agent count (\S\ref{sec:implications}).
 \end{itemize}
 We report every pre-registered hypothesis, including those not supported; the capability and family nulls
-are load-bearing rather than incidental---they are what makes the failure a property of the
-\emph{information boundary} rather than of any model.
+are load-bearing rather than incidental.
 
 %% =====================================================================
 \section{Consensus, Grounding, and AI-Mediated Collective Judgment}
@@ -457,31 +454,27 @@ constructor is outside the tested OpenAI/Anthropic/Google pool, tested-model con
 families is cross-family on the same foil $I_1$, and R2 replicates the effect under an independent Anthropic constructor tested only on
 non-Anthropic models.
 
-\emph{Default-check disclosure and construct-validity caveat.} Because inclusion required that unaware
-capable models produce the intended foil, item selection is \emph{partly conditioned on the default
-behavior} we then measure, a construct-validity limitation that could inflate observed convergence. Two
-controls bound the \emph{generic} artifact explanation. First, a \emph{within-item} pairing: on the
+\emph{Default-check disclosure and construct-validity caveat.} Item selection is \emph{partly conditioned on
+the default behavior} we then measure: inclusion required that unaware capable models produce the intended
+foil. This is a construct-validity limitation of the sampling frame, and the effect is nevertheless neither a
+difficulty artifact nor a screening artifact (threats and controls in Table~\ref{tab:threats}). Within the
 \emph{same} base H1 task, retaining the disambiguating clause ($k{=}0$, fully specified) yields convergent
-delusion $\cd\!\approx\!0$, while deleting that clause ($k{\ge}1$) drives $\cd$ high---same base task,
-pipeline, labeler, and metric, only the disambiguator's presence differs (R1a, \S\ref{sec:results},
-F1/F4). Second, a separate boundary condition on \emph{different} families: $H2\_derivable$ items, where the
+delusion $\cd\!\approx\!0$ while deleting it ($k{\ge}1$) drives $\cd$ high (R1a, \S\ref{sec:results},
+F1/F4), and on \emph{different} families, $H2\_derivable$ items, where the
 ambiguity is present but the deciding fact is retained in the prompt so a competent solver can \emph{derive}
-$I_0$, yield $\cd\!\approx\!0$ even at $k{\ge}1$. Together these rule out a \emph{generic} hard-item
-difficulty or pipeline/labeler artifact: mere item difficulty cannot explain $\cd\!\approx\!0$ when the same
-task is fully specified, so the effect tracks the ambiguity \emph{structure} (the disambiguator's location).
-They do \emph{not}, however, by themselves remove the inflation that screening \emph{specifically} for
-ambiguous items that elicit the foil may add to the observed \emph{rate}. A
-pre-registered secondary robustness extension directly bounds that concern with a fully unfiltered sample
+$I_0$, yield $\cd\!\approx\!0$ even at $k{\ge}1$: item difficulty cannot explain $\cd\!\approx\!0$ when the
+same task is fully specified, so the effect tracks the ambiguity \emph{structure} (the disambiguator's
+location). Screening \emph{specifically} for
+ambiguous items that elicit the foil could still add inflation to the observed \emph{rate}, and a
+pre-registered secondary robustness extension bounds that directly with a fully unfiltered sample
 (no default screen): across 24 unfiltered $k{=}1$ items, pooled unconditioned convergent delusion is
 $\cd=0.685$ with 95\% CI $[0.521,0.839]$, and 79.2\% of unfiltered items still exhibit convergent delusion.
-The point-estimate delta relative to the screened confirmatory rate is $+0.155$, but the screened rate
-(0.53) lies within the unfiltered CI; the correct conclusion is therefore that the result does
-\emph{not} attenuate, not that it is significantly higher, supporting H-A14 (no attenuation). Accordingly, we find no evidence that screening
-inflated the effect, and the effect
-replicates on the unfiltered sample. Two further features mitigate the screening concern: provenance
+The point-estimate delta relative to the screened confirmatory rate is $+0.155$ and the screened rate
+(0.53) lies within the unfiltered CI, so the result does \emph{not} attenuate, rather than being
+significantly higher, supporting H-A14 (no attenuation). Provenance
 separation (the constructor family is outside the tested pool, so the screen is not run by an evaluated
 agent) and the R2 cross-family construction control (\S\ref{sec:results}), where a second constructor
-family builds the traps.
+family builds the traps, close the same gap from a second direction.
 
 %% =====================================================================
 \section{Pre-registered Study}
@@ -587,9 +580,10 @@ correlation. Heterogeneous-agent exchangeability is an idealization (distinct fa
 be exactly exchangeable), so we read $\neff$ alongside the model-free pairwise wrong-answer agreement and
 Fleiss' $\kappa$ rather than in isolation; the analysis code is released (\S\ref{sec:limitations}). The
 independence-calibrated counterfactual resamples each agent independently from its own \emph{item-marginal}
-accuracy, so a legitimate alternative account of the observed excess is shared item \emph{difficulty} rather
-than shared \emph{interpretation}; we do not fully separate these, and rest the convergence claim on the
-convergent evidence from ICC, pairwise agreement, and $\neff$ together with the within-item $k{=}0$ control.
+accuracy, so shared item \emph{difficulty} is an alternative account of the observed excess to shared
+\emph{interpretation}. The convergence claim rests on the joint evidence from ICC, pairwise agreement, and
+$\neff$ together with the within-item $k{=}0$ control, which holds the base task fixed and varies only the
+disambiguator (Table~\ref{tab:threats}).
 
 \subsection{Analysis and open science}
 Hypotheses, the primary metric, the regime criterion, decision rules, and robustness nulls were
@@ -664,10 +658,11 @@ The H1\_external failure shows \emph{no detectable difference} across model clas
 reasoners are trapped about as reliably as weaker, non-frontier models, and a heterogeneous cross-family pool
 (\emph{cross-vendor comparison/aggregation}) converges about as strongly as a single model sampled repeatedly
 (\emph{repeated sampling}) (heterogeneous vs.\ homogeneous $\Delta\cd=-0.003$, 95\% CI
-$[-0.078,+0.058]$; not the ordering we predicted). A non-significant difference is not by itself evidence of
-equivalence. We therefore ran a \emph{post-hoc secondary} two-one-sided-test (TOST) analysis at two pre-stated
-margins---the pre-registered minimum detectable effect $\Delta\cd=0.15$ and a stricter $0.10$---on the
-method-matched paired item-level estimate ($\Delta\cd=-0.020$, 95\% CI $[-0.067,0.027]$), not the frozen
+$[-0.078,+0.058]$; not the ordering we predicted). Because a non-significant difference is not by itself
+evidence of equivalence, we ran a \emph{post-hoc secondary} two-one-sided-test (TOST) analysis at two
+pre-stated margins---the pre-registered minimum detectable effect $\Delta\cd=0.15$ and a stricter
+$0.10$---on the method-matched paired item-level estimate ($\Delta\cd=-0.020$, 95\% CI $[-0.067,0.027]$)
+rather than the frozen
 pooled row-35 reference ($\Delta\cd=-0.003$, which the TOST does not test). Cross-family and homogeneous convergence are
 statistically equivalent at both $\pm0.15$ ($p<0.001$) and $\pm0.10$ ($p=0.0007$), and the reasoning and
 weak tiers are equivalent at both margins ($p=0.006$); the weak-versus-heterogeneous contrast is equivalent
@@ -692,8 +687,7 @@ ICC$=0.91$ on H1\_external (vs.\ $\neff=1.10$, ICC$=0.89$ at $k{=}5$)---doubling
 independence. Indeed, because $\bar\rho\approx0.89$, $\neff$ saturates near $1/\bar\rho\approx1.12$ and is
 almost independent of ensemble size: whether we take the 5-agent heterogeneous pool or the pooled mean
 nominal ensemble ($\approx\!8.1$ agents, as plotted in Figure~\ref{fig:fakeredundancy}), $\neff\approx1.10$.
-Once errors are this correlated, adding agents cannot restore independence---an analytic ceiling, not an
-artifact of one ensemble size.
+This is an analytic ceiling, not an artifact of one ensemble size.
 
 \begin{table}[t]
 \centering
@@ -749,16 +743,18 @@ offers no internal warning.}
 \end{figure}
 
 \subsection{F5: Not an artifact of the constructor}
-A skeptic might argue that convergence reflects a prior shared with whoever \emph{built} the traps. The
+Rebuild the traps with a different vendor and the convergence comes back. We reconstructed a held-out subset
+of H1 items with a \emph{different} constructor family (Anthropic) and re-ran it: models from the
+\emph{other} families (OpenAI, Google) converge on these Anthropic-constructed foils at single-agent \cd{}
+$=0.72$ (0.87 on construct-valid items), so the effect does not reflect a prior shared with whoever
+\emph{built} the traps (Table~\ref{tab:threats}). The
 main benchmark is built by a fourth-vendor model outside the tested pool, whereas this
 held-out R2 subset is Anthropic-constructed (Appendix~\ref{app:deviations}), so the study spans two independent constructor
-families. We reconstructed a held-out subset of H1 items with a \emph{different} constructor family
-(Anthropic) and re-ran it: models from the \emph{other} families (OpenAI, Google) converge on these
-Anthropic-constructed foils at single-agent \cd{} $=0.72$ (0.87 on construct-valid items). To show this is
-genuine cross-\emph{model} convergence and not a within-cell single-agent error rate, we ran a
-\emph{post-hoc secondary} analysis measuring per-item
+families. A
+\emph{post-hoc secondary} analysis measures per-item
 cross-model label \emph{concentration} on the R2 subset, using single-agent labels only from tested models
-whose family differs from the Anthropic constructor. On the ambiguous ($k\ge1$) items, the mean per-item
+whose family differs from the Anthropic constructor, separating genuine cross-\emph{model} convergence from a
+within-cell single-agent error rate. On the ambiguous ($k\ge1$) items, the mean per-item
 concentration is $0.711$ (item-level bootstrap 95\% CI $[0.400,0.978]$), and on $4/6$ of them at least two
 \emph{distinct} non-Anthropic families (OpenAI, Google) land on the \emph{same} specific wrong foil: multiple
 independent models across families concentrate on one incorrect reading per item. The all-item aggregate that
@@ -833,14 +829,13 @@ a shared prior spans model families rather than diversity reducing the failure.
 
 \subsection{Exploratory: neither synthesis nor generic role diversification breaks the convergence}
 \label{sec:phaseB}
-The following two conditions are \emph{post-hoc exploratory} design interventions, added \emph{after} the
-confirmatory run and pre-registered as a secondary amendment (ratified 2026-07-22; Appendix~\ref{app:deviations}); they are never relabeled
+Neither intervention we tried moved the failure. Both conditions are \emph{post-hoc exploratory} design
+interventions, added \emph{after} the confirmatory run and pre-registered as a secondary amendment (ratified 2026-07-22; Appendix~\ref{app:deviations}); they are never relabeled
 confirmatory. Both reuse the frozen \cd{} metric and the frozen abstention detector on the same 40
 H1\_external items (H2\_derivable run as a control), cost \$0, and were pre-committed with directional
-predictions before running. All prompts are \emph{generic}: no role or synthesis prompt references
-the target interpretation, the deleted convention, or the enumerated foils, so this is not a
-``we gave away the answer'' artifact. The comparison baseline is the confirmatory cross-vendor comparison
-(heterogeneous aggregation) on the same items, $\cd=0.544$.
+predictions before running, with all prompts \emph{generic}: no role or synthesis prompt references
+the target interpretation, the deleted convention, or the enumerated foils. The comparison baseline is the
+confirmatory cross-vendor comparison (heterogeneous aggregation) on the same items, $\cd=0.544$.
 
 \emph{Cross-vendor synthesis} (P-B1: one additional model outside the tested pool merges the cross-family
 pool's independent answers into a single reply) yields $\cd=0.567$ on H1\_external, $\Delta=+0.023$ relative
@@ -931,11 +926,11 @@ clarification-generation ensembling. In \emph{setting}, LPP is black-box, multi-
 \emph{without logit access}, evaluated against our executable gold-ambiguity label, so it is deployable on
 the multi-vendor same-prompt interfaces of Study~1, unlike white-box activation probes that require model
 internals. LPP exposes a failure mode that semantic entropy is blind to; it does not
-dominate every baseline. The strength of assumption-surfacing baselines (requirements probing reaches AUROC
-$0.810$, consistent with prior elicitation work) is itself evidence that the premise-sensitivity axis closes
-the semantic-entropy blind spot across method choices; our additions are the pre-registered blind-spot
-formalization, deployable executable-gold operationalization, and counterfactual pinning step that enables the
-detect-and-fix loop, with the $+0.314$ gap defined against same-input semantic entropy rather than against
+dominate every baseline. Assumption-surfacing baselines are also strong here (requirements probing reaches
+AUROC $0.810$, consistent with prior elicitation work), so the premise-sensitivity axis closes the
+semantic-entropy blind spot across method choices; our additions are the pre-registered blind-spot
+formalization, its deployable executable-gold operationalization, and the counterfactual pinning step behind
+the detect-and-fix loop. The $+0.314$ gap is defined against same-input semantic entropy, not against
 requirements probing.
 
 \subsection{The latent-premise-pinning (LPP) detector}
@@ -996,9 +991,9 @@ tiers---\Hctx{} classifies executable gold-ambiguity far above chance and far ab
 baseline (Table~\ref{tab:lps-auroc}). Per model, \Hctx{} lands in $0.856$--$0.887$ while same-prompt
 semantic entropy \Hseed{} sits near chance at $0.551$--$0.606$. Pooled, the detector reaches
 \textbf{AUROC $0.895$} $[0.815, 0.966]$ against \textbf{$0.581$} $[0.484, 0.675]$ for semantic entropy, a
-\textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$). This is the crux of the SOTA-blind
-claim: resampling the same prompt cannot separate ambiguous from unambiguous prompts here, because the models
-are confidently self-consistent on exactly the items whose answers hinge on an unstated premise.
+\textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$). Resampling the same prompt does not
+separate ambiguous from unambiguous prompts here: the models are confidently self-consistent on exactly the
+items whose answers hinge on an unstated premise.
 
 At the item level, \textbf{$0.758$ (25 of 33) of $\mathrm{AMB}{+}$
 items} fall in the low-\Hseed{} $\wedge$ high-\Hctx{} zone (pre-committed $\ge 0.40$)---confident, yet the
@@ -1202,16 +1197,12 @@ is absent even when the aggregated systems are nominally diverse. The failure is
 (reasoners fail with no detectable advantage), nor that they are homogeneous (cross-family pools show
 equivalent convergence; \S\ref{sec:f2}), but that
 they share the \emph{same lossy representation of the task}. Consensus then measures the concentration of a
-shared prior, not the corroboration of independent evidence.
-Consensus earns its evidential value under two conditions: the decisive information is present, and the
-agents' errors are genuinely independent. It is untrustworthy exactly when both fail: the input's
-completeness is unknown and the agents are far from independent ($\neff\!\ll\!k$). That is what happens when
-many agents share one default reading of an incomplete prompt, and our study shows it specifically when the
-disambiguator is external. We both characterize and detect that regime.
+shared prior, not the corroboration of independent evidence, and it carries least evidential value in the
+regime we study: the input's completeness is unknown and the agents are far from independent
+($\neff\!\ll\!k$).
 Our target is \emph{silent, unflagged} convergence on a wrong reading. When the omitted convention has a
 single correct default, agreement on it is correct behavior rather than a failure, and our metric does not
-penalize it: convergent delusion counts only convergence on a shared \emph{wrong} reading, so genuine
-agreement on a uniquely-determined answer is never scored against the models.
+penalize it: convergent delusion counts only convergence on a shared \emph{wrong} reading.
 
 \subsection{Shared-input failure, not groupthink}
 The outcome resembles groupthink---unanimous, confident error~\cite{janis1972}---but the mechanism differs.
@@ -1225,11 +1216,9 @@ structured dissent \emph{among} members) will not address a failure that occurs 
 Because the decisive information is lost at a handoff (a grounding-resource boundary), downstream
 aggregation cannot recover it. The problem is therefore located in the \emph{pipeline}, not the model: it is
 a property of how collaborative systems preserve (or discard) context and provenance across people, tools,
-and agents. The silence of the failure compounds this: without an internal warning, more agreement reads as
-more confidence. The upshot for CSCW is specific: the trust a system earns from aggregation is
-\emph{contingent} on external disambiguation and evaporates precisely when the interface cannot vouch for
-that condition---so the design problem is not to recruit more agents but to expose the contingency itself,
-which motivates the interface moves below.
+and agents. For CSCW, the trust a system earns from aggregation is \emph{contingent} on external
+disambiguation, and it lapses when the interface cannot vouch for that condition. The design problem is then
+not to recruit more agents but to expose the contingency, which motivates the interface moves below.
 
 %% =====================================================================
 \section{Design Implications for Multi-Model Interfaces}
@@ -1256,40 +1245,38 @@ plausibly requires diverse \emph{inputs}, retrieval paths, and representations--
 behind the same prompt, because swapping providers leaves the shared blind spot intact. Our exploratory
 Phase B conditions (\S\ref{sec:phaseB}) are consistent with this: the two interventions we tested
 (cross-vendor synthesis and one generic role-diversified workflow) did not reduce convergent delusion. We
-frame this as a \emph{falsifiable conjecture}---that no intervention leaving the shared input unchanged can
-break the convergence---rather than an established result: it follows naturally from the
-shared-information-boundary account and yields a sharp prediction for future work (any input-preserving
-intervention should fail to reduce \cd{}).
+frame this as a \emph{falsifiable conjecture} rather than an established result: any intervention that
+leaves the shared input unchanged should fail to reduce \cd{}.
 \item \emph{Preserve provenance across handoffs}, so that the context needed to disambiguate is not silently
 dropped.
 \item \emph{Audit for interpretive monoculture} across a fleet, not only per-model accuracy.
 \end{enumerate}
 \noindent The first three follow most directly from our findings; the rest draw additionally on prior work on
-reliance~\cite{vasconcelos2023explanations}. These implications await empirical evaluation, which we leave to
-future work (\S\ref{sec:limitations}).
+reliance~\cite{vasconcelos2023explanations}. All await empirical evaluation (\S\ref{sec:limitations}).
 
 %% =====================================================================
 \section{Limitations, Ethics, and Open Science}
 \label{sec:limitations}
 \paragraph{Limitations.} Our tasks are single-episode and non-interactive; real collaborative pipelines
-involve iteration and human participation, which we do not test. Claims about human trust, teams, and
-high-stakes domains are \emph{implications}, not tested deployments. Construct validity rests on the
+involve iteration and human participation, which we do not test, so claims about human trust, teams, and
+high-stakes domains are \emph{implications} rather than tested deployments. Construct validity rests on the
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
-pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, we characterize a failure \emph{mode} rather
-than estimate its prevalence; the pre-registered unfiltered-sample replication does not attenuate relative
-to the screened rate (Construct validity, H-A14), so screening does not account for the effect. The
-abstention-silence claim rests on a rule-based (non-LLM) detector whose human validation is future work.
-Generalization beyond the three tested domains and the roster is future work.
-\paragraph{Future work.} Several natural next steps are \emph{not} performed here and are stated as future
-work. First, a \emph{human-subjects study} (a within-subjects design of roughly 50 participants) would test
+pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, the
+scope of the estimate is a failure \emph{mode} rather than its prevalence; the pre-registered
+unfiltered-sample replication does not attenuate relative to the screened rate (Construct validity, H-A14),
+so screening does not account for the effect. The abstention-silence claim rests on a rule-based (non-LLM)
+detector whose human validation is future work, as is generalization beyond the three tested domains and the
+roster.
+\paragraph{Future work.} Three directions follow from this study. First, a \emph{human-subjects study} (a
+within-subjects design of roughly 50 participants) would test
 whether cross-model agreement raises adoption, whether that causes over-reliance when models share a wrong
 interpretation, and whether a dependence-aware interface increases clarification-seeking; we have a design
-sketch but have not run it, and it would require IRB review. Second, we ran two \emph{exploratory}
-computational conditions post hoc: cross-vendor \emph{synthesis} (one extra model merges all answers) and a
-generic \emph{role-diversified} evidence workflow (\S\ref{sec:phaseB}); both left convergent
-delusion unchanged, but a \emph{confirmatory}, pre-registered test of input/evidence-diversifying
-interventions (retrieval-diverse or context-diverse conditions) remains future work. Third, the proposed
-dependence-aware multi-model interface is a concept and remains to be \emph{built and evaluated}.
+sketch but have not run the study, which would require IRB review. Second, a \emph{confirmatory},
+pre-registered test of input/evidence-diversifying interventions (retrieval-diverse or context-diverse
+conditions) would extend the two \emph{exploratory} computational conditions we ran post hoc: cross-vendor
+\emph{synthesis} (one extra model merges all answers) and a generic \emph{role-diversified} evidence workflow
+(\S\ref{sec:phaseB}), both of which left convergent delusion unchanged. Third, the proposed
+dependence-aware multi-model interface is a concept that remains to be \emph{built and evaluated}.
 \paragraph{Ethics.} The study involves \emph{no human subjects}: all data are model-generated responses to
 synthetic benchmark tasks, and the ``simulated users'' are scripted, not people. The benchmark contains no
 personal, sensitive, or copyrighted material; each item is a machine-constructed underspecified task with an
