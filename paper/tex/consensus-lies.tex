@@ -109,9 +109,10 @@ multi-agent systems, error correlation, underspecification, ambiguity detection,
 \centering
 \includegraphics[width=\textwidth]{fig1_consensus_lies_v2.pdf}
 \Description{Schematic contrasting two regimes for the same underspecified prompt and the same k independent agents. When the disambiguating clause lies outside the retained prompt, the agents silently converge on the same wrong interpretation and the ensemble collapses to about one effective independent judgment (fake redundancy); when the clause is inside the prompt, no tier converges on a shared wrong interpretation. A bottom detector panel shows that pinning a self-surfaced latent premise makes the answer flip, detecting the ambiguous items at an AUROC of 0.895.}
-\caption{\textbf{Overview.} The same underspecified prompt and the same $k$ independent agents (three model
-families $\times$ capability tiers) fork into two regimes that differ chiefly by where the missing
-disambiguating clause lives. \textbf{H1\_external} (clause outside the retained prompt): agents
+\caption{\textbf{Overview.} Two regimes of the same multi-model setup ($k$ independent agents across three model
+families $\times$ capability tiers), realized over constructed task families that differ in whether the decisive
+disambiguating clause is retained in the prompt; the matched causal contrast is \emph{within-item} (same base
+task, $k{=}0$ vs $k{\ge}1$; \S\ref{sec:results}). \textbf{H1\_external} (clause outside the retained prompt): agents
 \emph{silently} converge on the same wrong interpretation---consensus looks strong (``5/5 agree'') but is
 wrong, and the $k$-agent ensemble collapses to $\approx\!1$ effective independent judgment (fake redundancy,
 $\rho\!\to\!1$, $\neff\!=\!1.10$; $\cd\!\approx\!0.53$). \textbf{H2\_derivable} (clause inside the prompt):
@@ -1119,25 +1120,17 @@ The single-model pilot on gpt-5.6-sol is cleaner still (H-B1$'$ net $0.667$ with
 H-B2$'$ baseline \cd{} $0.626\!\to\!0.000$, oracle $I_0$-hit $1.000$), consistent with the capability
 dependence above.
 
-\emph{Future white-box contrast.} The pre-registered Phase~2c AU-Probe contrast would probe a small open
-white-box model on CPU to position LPP as the black-box, cross-vendor-deployable method against a
-representation-level alternative. It was not run for this paper; the pre-registered plan remains available
-as future work and permits a reduced item subset if the full run is too slow.
-
 %% =====================================================================
 \section{Discussion}
 \label{sec:discussion}
 \subsection{The strongest objection, addressed head-on}
 A deflationary reading of our result is that the agents converge not because they share an
 \emph{interpretation} but because the items are simply hard, or because H1\_external and H2\_derivable are
-different task families rather than matched variants. We answer this with independent controls rather than
-assertion (Table~\ref{tab:threats}). A \emph{within-item} $k{=}0$-vs-$k{\ge}1$ comparison on the \emph{same}
-base task isolates the disambiguator's presence from item difficulty ($\Delta\cd=0.82$); the H2\_derivable
-boundary shows the same models \emph{stop} converging once the clause is inside the prompt ($\cd=0.00$), so
-the effect is not generic hardness; and a cross-family R2 benchmark built by a \emph{different} vendor,
-together with an unfiltered replication, rules out a shared prior with our constructor and
-screening-induced inflation. We rest the shared-\emph{interpretation} claim on this convergent evidence
-alongside the dependence estimators ($\neff=1.10$, ICC $=0.89$), not on any single test.
+different task families rather than matched variants. The strongest causal evidence is the \emph{within-item}
+$k{=}0$-vs-$k{\ge}1$ contrast on the same base task ($\Delta\cd=0.82$); the H2\_derivable boundary
+($\cd=0.00$), the cross-family R2 reconstruction, and the unfiltered replication address complementary
+construct-validity threats (Table~\ref{tab:threats}), and the dependence estimators ($\neff=1.10$,
+ICC $=0.89$) corroborate.
 
 \begin{table}[t]
 \centering\small
