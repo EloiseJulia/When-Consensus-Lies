@@ -70,7 +70,9 @@ adding a smaller refinement; it separates ambiguous from unambiguous prompts at 
 model-dependent rate (pooled $0.402$). Used as a clarification gate with a simulated-user oracle
 that supplies the missing convention, it cuts convergent delusion from \cd{} $0.626$ to $0.010$. This upper
 bound holds when the missing convention is recoverable by someone in the loop: the detector localizes the
-premise only weakly ($0.36$) and cannot supply the fix itself. We argue that systems aggregating AI judgments should surface \emph{evidential dependence}
+premise only weakly ($0.36$) and cannot supply the fix itself. Because people read agreement as confidence
+and rarely register whether their sources are correlated, systems aggregating AI judgments should surface
+\emph{evidential dependence}
 (whether answers rest on the same, possibly incomplete, input) rather than an agent count.
 \end{abstract}
 
@@ -323,8 +325,15 @@ they merely assert confidence~\cite{vasconcelos2023explanations,bansal2021whole}
 generally requires deliberate interventions such as cognitive forcing functions or reliance-targeted
 designs~\cite{buccinca2021trust,bo2025rely}. Nor does simply adding more opinions
 guarantee a better outcome: a meta-analysis of human--AI teams finds that combinations often fail to
-outperform the stronger party alone~\cite{vaccaro2024combinations}. A ``$5/5$ agents agree'' display is
-precisely the kind of cue that can increase reliance while adding little independent evidence.
+outperform the stronger party alone~\cite{vaccaro2024combinations}. People also read \emph{agreement} as a
+proxy for confidence while staying largely insensitive to whether their sources are \emph{correlated}: when
+advisors are dependent, decision-makers do not discount the redundancy, and it is the level of agreement
+rather than the independence behind it that drives their confidence~\cite{budescu2007aggregation}. This
+\emph{correlation neglect} is robust: it reappears once the environment is even mildly complex, even for
+people able to correct it~\cite{enke2019correlation}, and it is exploitable, since a source issuing many
+correlated signals can steer a correlation-neglecting audience at will~\cite{levy2022persuasion}. A
+``$5/5$ agents agree'' display is precisely the kind of cue that exploits this: it foregrounds agreement
+while hiding the shared input behind it, increasing reliance while adding little independent evidence.
 \emph{Unresolved premise:} whether consensus displays convey evidence or only the \emph{appearance} of it.
 
 \subsection{Algorithmic monoculture and shared priors}

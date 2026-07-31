@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{47}
+\begin{thebibliography}{50}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -107,6 +107,19 @@
 \href{https://doi.org/10.1145/3449287}{doi:\nolinkurl{10.1145/3449287}}
 
 
+\bibitem[Budescu and Yu(2007)]%
+        {budescu2007aggregation}
+\bibfield{author}{\bibinfo{person}{David~V. Budescu} {and}
+  \bibinfo{person}{Hsiu-Ting Yu}.} \bibinfo{year}{2007}\natexlab{}.
+\newblock \showarticletitle{Aggregation of Opinions Based on Correlated Cues
+  and Advisors}.
+\newblock \bibinfo{journal}{\emph{Journal of Behavioral Decision Making}}
+  \bibinfo{volume}{20}, \bibinfo{number}{2} (\bibinfo{year}{2007}),
+  \bibinfo{pages}{153--177}.
+\newblock
+\href{https://doi.org/10.1002/bdm.547}{doi:\nolinkurl{10.1002/bdm.547}}
+
+
 \bibitem[{ChatHub}(2026)]%
         {chathub2026}
 \bibfield{author}{\bibinfo{person}{{ChatHub}}.}
@@ -187,6 +200,17 @@
 \url{https://proceedings.mlr.press/v235/du24e.html}
 \showURL{%
 \tempurl}
+
+
+\bibitem[Enke and Zimmermann(2019)]%
+        {enke2019correlation}
+\bibfield{author}{\bibinfo{person}{Benjamin Enke} {and}
+  \bibinfo{person}{Florian Zimmermann}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Correlation Neglect in Belief Formation}.
+\newblock \bibinfo{journal}{\emph{The Review of Economic Studies}}
+  \bibinfo{volume}{86}, \bibinfo{number}{1} (\bibinfo{year}{2019}),
+  \bibinfo{pages}{313--332}.
+\newblock
 
 
 \bibitem[Estornell and Liu(2024)]%
@@ -348,6 +372,20 @@
   \bibinfo{volume}{36}, \bibinfo{number}{3} (\bibinfo{year}{1992}),
   \bibinfo{pages}{617--634}.
 \newblock
+
+
+\bibitem[Levy et~al\mbox{.}(2022)]%
+        {levy2022persuasion}
+\bibfield{author}{\bibinfo{person}{Gilat Levy}, \bibinfo{person}{In{\'e}s
+  Moreno~de Barreda}, {and} \bibinfo{person}{Ronny Razin}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Persuasion with Correlation Neglect: A Full
+  Manipulation Result}.
+\newblock \bibinfo{journal}{\emph{American Economic Review: Insights}}
+  \bibinfo{volume}{4}, \bibinfo{number}{1} (\bibinfo{year}{2022}),
+  \bibinfo{pages}{123--138}.
+\newblock
+\href{https://doi.org/10.1257/aeri.20210007}{doi:\nolinkurl{10.1257/aeri.20210007}}
 
 
 \bibitem[Liang et~al\mbox{.}(2024)]%
