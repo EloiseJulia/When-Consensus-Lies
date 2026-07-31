@@ -960,34 +960,31 @@ quadrant} that same-prompt semantic entropy misses.}
 
 \subsection{Executable gold-ambiguity and non-circularity}
 \label{sec:study2-gold}
-The detector is evaluated against an \emph{executable, detector-independent} gold-ambiguity label. An item
+The detector is scored against an \emph{executable, detector-independent} gold-ambiguity label. An item
 is $\mathrm{AMB}{+}$ iff at least two of its \emph{own} enumerated interpretations produce different
 executable results on its test inputs, and $\mathrm{AMB}{-}$ when no deleted axis exists (a $k{=}0$ control)
-or the interpretations coincide; the gold label is computed by running code, never by an LLM judge, and
+or the interpretations coincide; the label is computed by running code, never by an LLM judge, and
 never enters any prompt. The evaluation is therefore \textbf{not circular}: the gold label clusters the
-\emph{benchmark's} enumerated interpretations, while the detector clusters the \emph{model's} self-generated
-pins, two independent pin-sets, so measuring detector-versus-gold agreement is not tautological. Of the 54
+\emph{benchmark's} enumerated interpretations while the detector clusters the \emph{model's} self-generated
+pins, two independent pin-sets. Of the 54
 pre-registered items, executable gold-ambiguity yields \textbf{33 $\mathrm{AMB}{+}$, 21 $\mathrm{AMB}{-}$,
 and 0 non-discriminating}.
 
-This study was pre-registered and frozen before the confirmatory run, locking the hypotheses, the metric
-definitions, the 54-item set, the model roster (OpenAI, Anthropic, and Google, each at a reasoning and a
-weak tier), $\ge 3$ seeds, the baseline set, and the operating point. The detector was
-implemented by one model family; the method and the validation pilot were audited by an independent
-cross-family model (anti-leakage and non-circularity verified, pilot results reproduced), after which
-the confirmatory run followed the frozen pre-registration under a conditional owner pre-authorization
-(protocol in Appendix~\ref{app:deviations}).
+The study was pre-registered and frozen before the confirmatory run (hypotheses, metric, the 54-item set,
+roster, $\ge 3$ seeds, baselines, and operating point), and the detector, implemented by one model family,
+was audited by an independent cross-family model that verified anti-leakage and reproduced the validation
+pilot (full protocol in Appendix~\ref{app:deviations}).
 
 \subsection{Detection results}
 \label{sec:study2-results}
-Across all six tested models---three families (OpenAI, Anthropic, Google) at two capability
-tiers---\Hctx{} classifies executable gold-ambiguity far above chance and far above the semantic-entropy
-baseline (Table~\ref{tab:lps-auroc}). Per model, \Hctx{} lands in $0.856$--$0.887$ while same-prompt
-semantic entropy \Hseed{} sits near chance at $0.551$--$0.606$. Pooled, the detector reaches
-\textbf{AUROC $0.895$} $[0.815, 0.966]$ against \textbf{$0.581$} $[0.484, 0.675]$ for semantic entropy, a
-\textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$). Resampling the same prompt does not
-separate ambiguous from unambiguous prompts here: the models are confidently self-consistent on exactly the
-items whose answers hinge on an unstated premise.
+AUROC $0.895$ matters because of \emph{where} the baseline fails. Same-prompt resampling---the signal
+behind state-of-the-art semantic entropy---stays near chance on exactly the items whose answers hinge on an
+unstated premise: the models are confidently self-consistent right where they are most ambiguous, so pinning
+the premise exposes what resampling cannot. Pooled, \Hctx{} reaches \textbf{AUROC $0.895$}
+$[0.815, 0.966]$ against \textbf{$0.581$} $[0.484, 0.675]$ for semantic entropy, a
+\textbf{$\Delta\mathrm{AUROC} = 0.314$} (pre-committed $\ge 0.15$); per model \Hctx{} lands in
+$0.856$--$0.887$ while \Hseed{} sits at $0.551$--$0.606$, consistent across all six tested models---three
+families (OpenAI, Anthropic, Google) at two capability tiers (Table~\ref{tab:lps-auroc}).
 
 At the item level, \textbf{$0.758$ (25 of 33) of $\mathrm{AMB}{+}$
 items} fall in the low-\Hseed{} $\wedge$ high-\Hctx{} zone (pre-committed $\ge 0.40$)---confident, yet the
