@@ -898,27 +898,16 @@ $(0,0)$ (annotated); AMB$-$ controls stay near the origin.}
 
 
 \paragraph{Positioning against input-clarification ensembling.} The closest prior method is
-\emph{Input Clarification Ensembling} (ICE)~\cite{hou2024decomposing}, which separates an LLM's
-\emph{aleatoric} (input-ambiguity) uncertainty from its \emph{epistemic} (model-ignorance) uncertainty by
-generating clarifications of the input and ensembling the resulting answers, evaluated against standard
-dataset gold, capturing the same broad aleatoric/epistemic distinction as our \Hseed{}/\Hctx{}
-decomposition. Our detector (LPP) differs in target, mechanism, and setting rather than in being ``better''
-at the same task. In \emph{target}, LPP operationalizes and flags the specific low-\Hseed{} $\wedge$
-high-\Hctx{} \emph{danger quadrant} (the confident-latent-premise regime where same-prompt semantic entropy
-is blind by design) as a deployable detector, whereas ICE performs a general aleatoric/epistemic
-decomposition that is not aimed at that low-semantic-entropy zone. In \emph{mechanism}, LPP uses
-\emph{counterfactual pinning} of \emph{self-surfaced} premises---injecting specific candidate values and
-testing whether the \emph{executable} answer moves, clustering by executable equivalence---rather than ICE's
-clarification-generation ensembling. In \emph{setting}, LPP is black-box, multi-vendor, and inference-only
-\emph{without logit access}, evaluated against our executable gold-ambiguity label, so it is deployable on
-the multi-vendor same-prompt interfaces of Study~1, unlike white-box activation probes that require model
-internals. LPP exposes a failure mode that semantic entropy is blind to; it does not
-dominate every baseline. Assumption-surfacing baselines are also strong here (requirements probing reaches
-AUROC $0.810$, consistent with prior elicitation work), so the premise-sensitivity axis closes the
-semantic-entropy blind spot across method choices; our additions are the pre-registered blind-spot
-formalization, its deployable executable-gold operationalization, and the counterfactual pinning step behind
-the detect-and-fix loop. The $+0.314$ gap is defined against same-input semantic entropy, not against
-requirements probing.
+\emph{Input Clarification Ensembling} (ICE)~\cite{hou2024decomposing}, which separates \emph{aleatoric} from
+\emph{epistemic} uncertainty by generating input clarifications and ensembling the answers against standard
+dataset gold---the same broad distinction as our \Hseed{}/\Hctx{} decomposition. LPP differs in target,
+mechanism, and setting rather than in being ``better'' at the same task: it targets the
+confident-latent-premise \emph{danger quadrant} that same-prompt entropy misses, scores it by
+\emph{counterfactually pinning} self-surfaced premises and clustering by \emph{executable} equivalence, and
+runs black-box and inference-only without logit access---deployable on the multi-vendor same-prompt
+interfaces of Study~1, unlike white-box probes that need model internals. It exposes a blind spot rather than
+dominating every baseline; the detection numbers and the honest requirements-probing comparison are in
+\S\ref{sec:study2-results}.
 
 \subsection{The latent-premise-pinning (LPP) detector}
 \label{sec:study2-method}
