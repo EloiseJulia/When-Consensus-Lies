@@ -1,0 +1,68 @@
+{{ block content }}
+<p style="color:#666;">Task {{ trial_num }} of {{ total }}</p>
+
+<div style="background:#f3f4f6;padding:10px;border-radius:6px;margin-bottom:10px;">
+  <b>Scenario.</b> {{ item.scenario }}<br>
+  <b>Task.</b> {{ item.task }}
+</div>
+
+{{ if cond == 'single' }}
+<div style="border:1px solid #ddd;padding:10px;border-radius:6px;">
+  &#129302; <b>AI assistant answered:</b><br>
+  "{{ item.answer }}"
+</div>
+{{ endif }}
+{{ if cond == 'fake' }}
+<div style="border:1px solid #ddd;padding:10px;border-radius:6px;">
+  &#9989; <b>5 of 5 AI models agree:</b><br>
+  [Model A &#10003;] [Model B &#10003;] [Model C &#10003;] [Model D &#10003;] [Model E &#10003;]<br>
+  "{{ item.answer }}"<br>
+  <small style="color:#555;">&#8505; Five separate AI models were each queried and all five returned this answer.</small>
+</div>
+{{ endif }}
+{{ if cond == 'dep' }}
+<div style="border:1px solid #ddd;padding:10px;border-radius:6px;">
+  &#9989; <b>5 of 5 AI models agree:</b><br>
+  [Model A &#10003;] [Model B &#10003;] [Model C &#10003;] [Model D &#10003;] [Model E &#10003;]<br>
+  "{{ item.answer }}"<br>
+  <small style="color:#a00;">&#9888; These five answers are not independent: all five made the same single
+  unstated assumption, so together they count as about one independent check, not five.</small>
+</div>
+{{ endif }}
+
+<p style="margin-top:14px;"><b>What would you do?</b></p>
+{{ formfield 'accept' }}
+
+<div id="gapbox" style="display:none;margin:8px 0 8px 16px;">
+  <p><b>Which clarifying question is most important?</b></p>
+  {{ for o in options }}
+  <label style="display:block;margin:3px 0;">
+    <input type="radio" name="gap_choice" value="{{ o.i }}"> {{ o.text }}
+  </label>
+  {{ endfor }}
+</div>
+
+<p style="margin-top:14px;"><b>How confident are you this answer is correct as given?</b></p>
+<div>
+  0 <input type="range" name="confidence" min="0" max="100" value="50"
+           style="width:60%;" oninput="document.getElementById('cv').textContent=this.value"> 100
+  &nbsp; <b><span id="cv">50</span></b>
+</div>
+
+<input type="hidden" name="rt_ms" id="rt_ms" value="0">
+
+<script>
+  var _t0 = Date.now();
+  var _form = document.querySelector('form');
+  _form.addEventListener('submit', function () {
+    document.getElementById('rt_ms').value = Date.now() - _t0;
+  });
+  document.querySelectorAll('input[name="accept"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      document.getElementById('gapbox').style.display = (this.value === '0') ? 'block' : 'none';
+    });
+  });
+</script>
+
+{{ next_button }}
+{{ endblock }}

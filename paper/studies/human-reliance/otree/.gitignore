@@ -1,0 +1,8 @@
+# oTree runtime artifacts
+db.sqlite3
+*.sqlite3
+__pycache__/
+*.pyc
+_botdata/
+_export/
+.otree/
