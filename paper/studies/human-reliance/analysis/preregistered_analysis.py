@@ -50,19 +50,17 @@ N_UNDERSPEC = 9        # item indices 0..8 underspecified, 9..13 complete (match
 
 # ----------------------------------------------------------------- exclusions
 def apply_exclusions(df: pd.DataFrame) -> pd.DataFrame:
-    """Pre-specified participant-level exclusions (blanks -> kept). Confidence-straightlining is NOT an
-    exclusion (excluding on a DV biases effects); it is retained as a robustness split."""
+    """Pre-specified exclusions: **attention-check failure and duplicate id only**. There is NO
+    minimum-time exclusion (fast responders are kept). The comprehension check is pre-selected and is
+    NOT an exclusion; confidence-straightlining is NOT an exclusion (excluding on a DV biases effects).
+    total_time_sec and straightline_confidence are recorded for description only. Blanks -> kept."""
     keep = df.copy()
     def num(c):
         return pd.to_numeric(keep[c], errors="coerce")
-    if "passed_comprehension" in keep:
-        keep = keep[num("passed_comprehension") != 0]
     if "passed_attention" in keep:
         keep = keep[num("passed_attention") != 0]
     if "duplicate_id" in keep:
         keep = keep[num("duplicate_id") != 1]
-    if "total_time_sec" in keep:
-        keep = keep[~(num("total_time_sec") < 120)]     # <CONFIRM> pilot-derived min time; NaN kept
     return keep
 
 def _design(df: pd.DataFrame) -> pd.DataFrame:

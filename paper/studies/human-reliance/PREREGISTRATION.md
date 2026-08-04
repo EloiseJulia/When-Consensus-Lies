@@ -120,11 +120,11 @@ Per trial: **Accept-as-is vs Flag-missing-info**; if Flag → pick the most impo
 
 ## 8. Exclusion criteria (pre-specified, applied before analysis)
 
-Exclude a participant if: fails the **attention check**; total time **< 120 s** (‹CONFIRM›, pilot-refined)
-or implausibly fast; **duplicate** id. (The comprehension check is pre-selected and therefore **not** an
-exclusion. **Confidence-straightlining is NOT an exclusion** — excluding on a DV biases effects; it is a
-reported robustness split.) Excluded participants are replaced up to the recruitment cap; report N excluded
-per rule.
+Exclude a participant **only if**: fails the **attention check**; or **duplicate** id. **No minimum-time
+exclusion** — fast responders are kept. The comprehension check is pre-selected and is **not** an
+exclusion; **confidence-straightlining is NOT an exclusion** (excluding on a DV biases effects). Total time
+and straightlining are recorded for description only. Excluded participants are replaced up to the
+recruitment cap; report N excluded.
 
 ## 9. Analysis plan
 
