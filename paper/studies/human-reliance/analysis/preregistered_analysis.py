@@ -27,7 +27,7 @@ Usage:
   python preregistered_analysis.py --data real.csv # runs the frozen analysis on real data
 
 Real-data CSV schema (one row per completed trial, AFTER exclusions):
-  participant_id, item_id, condition{single|fake|dep}, accept{0,1}, confidence{0..100},
+  participant_id, item_id, condition{single|fake|dep}, accept{0,1}, confidence{1..5 stars},
   gap_correct{0,1, or blank if accepted}, rt_sec, order_index
 Plus participant-level columns used ONLY by apply_exclusions(): passed_comprehension{0,1},
   passed_attention{0,1}, total_time_sec, straightline_confidence{0,1}, duplicate_id{0,1}.
@@ -163,9 +163,10 @@ def run_confirmatory(df: pd.DataFrame) -> pd.DataFrame:
 
 # ----------------------------------------------------------------------------- simulator (demo / frozen reference)
 def simulate(N=55, seed=0, p_single=0.55, p_fake=0.72, p_dep=0.56,
-             conf_single=55.0, conf_fake=66.0, conf_dep=56.0,
-             sd_u=0.6, sd_i=0.5, conf_sd_u=10.0, conf_sd_i=6.0, conf_resid=14.0) -> pd.DataFrame:
-    """Synthetic dataset with the real-data schema under specified true effects."""
+             conf_single=3.0, conf_fake=3.8, conf_dep=3.1,
+             sd_u=0.6, sd_i=0.5, conf_sd_u=0.6, conf_sd_i=0.4, conf_resid=0.9) -> pd.DataFrame:
+    """Synthetic dataset with the real-data schema under specified true effects.
+    Confidence is a 1-5 star rating (integer)."""
     rng = np.random.default_rng(seed)
     def logit(p): return np.log(p / (1 - p))
     b0, bf, bd = logit(p_single), logit(p_fake) - logit(p_single), logit(p_dep) - logit(p_single)
@@ -180,10 +181,10 @@ def simulate(N=55, seed=0, p_single=0.55, p_fake=0.72, p_dep=0.56,
             eta = b0 + (bf if c == 1 else 0) + (bd if c == 2 else 0) + u[pid] + it[j]
             accept = int(rng.random() < 1 / (1 + np.exp(-eta)))
             cbase = {"single": conf_single, "fake": conf_fake, "dep": conf_dep}[cond]
-            conf = float(np.clip(rng.normal(cbase + cu[pid] + ci[j], conf_resid), 0, 100))
+            conf = int(np.clip(round(rng.normal(cbase + cu[pid] + ci[j], conf_resid)), 1, 5))
             gap = "" if accept == 1 else int(rng.random() < 0.6)
             rows.append(dict(participant_id=f"P{pid:03d}", item_id=f"{j+1:02d}", condition=cond,
-                             accept=accept, confidence=round(conf, 1), gap_correct=gap,
+                             accept=accept, confidence=conf, gap_correct=gap,
                              rt_sec=round(rng.uniform(8, 40), 1), order_index=j,
                              passed_comprehension=1, passed_attention=1,
                              straightline_confidence=0, duplicate_id=0,
@@ -209,7 +210,7 @@ def main():
            run_confirmatory(simulate(N=55, seed=args.seed)))
     _print("DEMO B - simulated under the NULL (expect: reject ~none)",
            run_confirmatory(simulate(N=55, seed=args.seed, p_fake=0.55, p_dep=0.55,
-                                     conf_fake=55.0, conf_dep=55.0)))
+                                     conf_fake=3.0, conf_dep=3.0)))
 
 if __name__ == "__main__":
     main()

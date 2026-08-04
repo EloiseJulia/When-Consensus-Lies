@@ -54,55 +54,64 @@ effect moderation by AI-literacy / domain.
 
 ## 4. Participants
 
-- Platform: ‹CONFIRM› Prolific (recommended for data quality) ; screening: fluent English,
-  ≥95% approval, desktop.
+- **Bilingual** (English / Simplified Chinese, chosen on the first page). Delivered as a single
+  participant link (oTree room / session-wide link), **team-recruited** (Prolific or a local pool /
+  WeChat / university subject pool).
+- **All ages are eligible** (no 18+ gate): we deliberately want variation across age. **Minors (<18)
+  require guardian consent per IRB — confirm the consent/assent procedure before recruiting minors.**
 - **Target N = 55 analyzable; recruit ≈ 65** (≈15% expected exclusions).
-- Payment ≈ ‹CONFIRM› $2.00 for ~10 min (≈ $12/hr).
+- Payment ≈ ‹CONFIRM› $2 (Prolific) or local-equivalent, for ~10 min.
 - Stopping rule: fixed-N (recruit to the pre-set number); no optional stopping / peeking.
 - Power basis (§10) assumes this N.
 
 ## 5. Materials
 
-**5.1 Items (12).** Realistic underspecified queries drawn from the paper's H1_external family
-across ‹CONFIRM: domains, e.g. data-analysis / policy-QA / spec› — each 2–3 sentences, ~30–45 s to
-read, containing exactly one decision-relevant **unstated convention** (e.g., fiscal-year start,
-rounding rule, inclusive/exclusive date range, dedup rule, 0- vs 1-indexing) whose plausible values
-yield different answers. The displayed AI answer commits to one interpretation (wrong under the
-intended convention). Item text is fixed and identical across the three display conditions.
+**5.1 Items (12).** Lay-readable underspecified workplace queries (general-population sample), each
+anchored to one of the paper's H1_external **convention types** (fiscal-year start, rounding/remainder,
+inclusive/exclusive date range, dedup, top-N tie, timezone, unit/scale, percentage base,
+mean-vs-median, business-vs-calendar days, sort tie-break, null/blank handling) — one type per item.
+Each is 2–3 sentences (~30–45 s), contains exactly one decision-relevant **unstated convention** whose
+plausible values yield different answers, and the displayed AI answer silently commits to one reading.
+Items are **bilingual** and identical across the three display conditions; authored by one model family
+and **audited for construct validity by a different family** (`STIMULI-v2.md`). A verbatim expert
+replication on the benchmark's own items is a possible follow-up.
 
-**5.2 Display conditions (the only manipulation).**
-- **single:** "AI answer: ‹X›." (one model).
-- **fake:** "5 of 5 AI models agree: ‹X›." (unanimity badge; identical answer text).
-- **dep:** identical 5-model answer **plus a dependence disclosure that reveals NON-independence,
-  not the correct value** — e.g.:
-  > "⚠ These 5 answers are **not independent**: all five made the *same single unstated assumption*,
-  > so together they count as **about one** independent check, not five."
-
-  **Design choice (‹CONFIRM›):** *dependence-only* disclosure — it discloses correlation/non-independence
-  **without naming which convention is correct**. Rationale: this operationalizes the paper's claim D
-  ("surface evidential **dependence**"). A "premise-surfaced" variant that names the assumption would
-  conflate D with simply *handing the user the answer* and inflate the effect artifactually.
+**5.2 Display conditions (the only manipulation).** The scenario/task/answer text is identical across
+conditions; only the *evidence framing* differs, shown in a **consistent card** with **real model-name
+chips** (ChatGPT, Gemini, Claude, Copilot, DeepSeek). The "agreement" displays are **curated
+illustrations**, disclosed at debrief.
+- **single:** one AI model's answer (1 model chip).
+- **fake:** 5 AI models were asked and all 5 agree (5 chips) + a length-matched neutral note.
+- **dep:** the same 5-model agreement **plus a dependence disclosure that reveals NON-independence,
+  not the correct value**: "⚠ these five answers are not independent — all five made the same single
+  unstated assumption, so together they count as about **one** independent check, not five."
+- **dependence-only (decided):** `dep` discloses non-independence **without naming which convention is
+  correct** — this operationalizes claim D ("surface evidential *dependence*"); a premise-surfaced
+  variant would conflate D with handing over the answer.
+- **Caveat (real names):** real brand names add realism but introduce a possible brand-trust confound;
+  the 1-vs-5 count remains the manipulation, and brand exposure is balanced across items.
 
 ## 6. Procedure (~10 min)
 
-1. Consent (§12).
-2. Instructions + one **comprehension check** (must pass to proceed; ≤2 attempts).
+1. **Language choice** (English / 简体中文) → Consent (§12).
+2. Instructions (which pre-announce that some tasks show 1 AI model, others 5) + a non-scored
+   **worked example** + one **comprehension check** (correct option pre-selected; ≤2 attempts).
 3. **12 trials.** Each trial: short query + AI answer in the assigned display condition, then:
    - **Primary behavioral DV — Accept vs Flag** (forced choice):
      "Would you (a) **use this answer as-is**, or (b) **flag that key information is missing / ask a
      clarifying question first**?"
    - If (b): pick which clarifying question is most important from ‹4› options, exactly one of which
      targets the true missing convention (**objective gap-identification** measure).
-   - **Primary subjective DV — Confidence** slider 0–100: "How confident are you this answer is
-     correct as given?"
+   - **Primary subjective DV — Confidence:** a **1–5 star** rating (1 = not at all sure,
+     5 = completely sure): "How confident are you this answer is correct?"
    - ≤ ~40 s/trial → ≤ ~8 min for 12 trials.
-4. Brief demographics + single AI-literacy item (exploratory moderator).
+4. Brief demographics (**age bracket**, incl. "Under 18") + single AI-literacy item (exploratory).
 5. **Debrief** (§12): the "AI consensus" displays were curated illustrations and the answers were
    intentionally underspecified; explain the study aim.
 
 ## 7. Measures
 
-- **Primary:** (i) accept-as-is (binary, per trial); (ii) confidence (0–100, per trial).
+- **Primary:** (i) accept-as-is (binary, per trial); (ii) confidence (**1–5 star** rating, per trial).
 - **Objective gold (no LLM judge):** gap-identification = picked the clarifying question that names
   the true missing convention (deterministic scoring against the item key).
 - **Secondary/exploratory:** clarifying-question choice distribution; per-condition RT; moderators.
@@ -111,7 +120,7 @@ intended convention). Item text is fixed and identical across the three display 
 
 Exclude a participant if any: fails the comprehension check twice; fails an embedded
 **instructed-response attention check**; total time < ‹CONFIRM: 120 s› or implausibly fast;
-straight-lines the confidence slider (zero variance across all 12 trials); duplicate IP/Prolific ID.
+straight-lines the star rating (zero variance across all 12 trials); duplicate IP/Prolific ID.
 Excluded participants are replaced up to the recruitment cap. Report N excluded per rule.
 
 ## 9. Analysis plan
@@ -121,8 +130,9 @@ Excluded participants are replaced up to the recruitment cap. Report N excluded 
   This is the frozen confirmatory engine and matches the power simulation (§10). Primary contrasts:
   fake−single (H-U1a), dep−fake (H-U2a). A crossed-random-intercept GLMM (participant + item) is
   reported only as a **sensitivity** check.
-- **Confidence (0–100):** linear mixed model, same random-effects structure. Contrasts: fake−single
-  (H-U1b), dep−fake (H-U2b).
+- **Confidence (1–5 stars):** linear mixed model (rating treated as approximately interval; an ordinal
+  mixed model is a sensitivity check), same random-effects structure. Contrasts: fake−single (H-U1b),
+  dep−fake (H-U2b).
 - **Fitting:** Python `statsmodels`, in the frozen script `analysis/preregistered_analysis.py`
   (accept → GEE, confidence → `MixedLM`). An R `lme4`/`glmmTMB` GLMM may additionally be reported as a
   sensitivity check. The script is validated on simulated data (rejects all 4 under the pre-registered
@@ -152,7 +162,8 @@ one-sided α=0.025 per family.
 disclosure effect is weak the study is underpowered for D, so the **dep** manipulation should be made
 maximally salient. **Smallest effect of interest (pre-registered):** fake−single ≥ ‹CONFIRM: 10 pp›
 on accept-rate; dep−fake ≥ ‹CONFIRM: 8 pp›. Effects below these are treated as "not detected," not
-"absent." (Confidence DV carries additional power as a secondary safeguard.)
+"absent." (The power table concerns the behavioral accept DV; the confidence DV — a 1–5 star rating —
+is an additional secondary safeguard.)
 
 ## 11. Deviations log
 
