@@ -1,11 +1,9 @@
+{{ block title }}{{ T.consent_title }}{{ endblock }}
 {{ block content }}
-<h3>Making sense of AI assistants' answers</h3>
-<p>You are invited to a short (~10 minute) study on how people read answers from AI assistants.
-You will judge 12 brief work-style tasks and rate your confidence. Participation is voluntary and
-anonymous; you may stop anytime by closing the window.</p>
-<p><b>Some details about the study's exact purpose are withheld here and will be fully explained at
-the end.</b> Risks are no more than ordinary computer use. You will be paid on completion.</p>
-<p>By continuing you confirm you are 18 or older, have read the above, understand some details are
-withheld until the end, and agree to take part.</p>
-{{ next_button }}
+{{ wrap_open }}
+<p>{{ T.consent_p1 }}</p>
+<p style="color:#555;">{{ T.consent_p2 }}</p>
+<p><b>{{ T.consent_agree }}</b></p>
+<button type="submit" class="btn btn-primary">{{ T.next }}</button>
+{{ wrap_close }}
 {{ endblock }}

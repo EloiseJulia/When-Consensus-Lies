@@ -1,0 +1,29 @@
+# Render Blueprint — free-tier deploy of the oTree study.
+# In Render: New + -> Blueprint -> connect this GitHub repo. Render reads this file.
+services:
+  - type: web
+    name: reliance
+    runtime: python
+    plan: free                       # free web service (sleeps after ~15 min idle)
+    rootDir: paper/studies/human-reliance/otree
+    buildCommand: pip install -r requirements.txt
+    startCommand: otree prodserver $PORT
+    envVars:
+      - key: OTREE_PRODUCTION
+        value: "1"
+      - key: OTREE_AUTH_LEVEL
+        value: STUDY                 # locks admin/demo; participant & room links stay public
+      - key: OTREE_ADMIN_PASSWORD
+        generateValue: true          # see it in Render -> Environment
+      - key: OTREE_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: DATABASE_URL
+        fromDatabase:
+          name: reliance-db
+          property: connectionString
+
+databases:
+  - name: reliance-db
+    plan: free                       # free Postgres (persists data; free plan expires ~30 days)

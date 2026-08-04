@@ -1,6 +1,10 @@
+{{ block title }}{{ T.attn_title }}{{ endblock }}
 {{ block content }}
-<h3>Attention check</h3>
-<p>To show you are reading, please select <b>Disagree</b> below.</p>
-{{ formfields }}
-{{ next_button }}
+{{ wrap_open }}
+<p>{{ T.attn_q }}</p>
+<label style="display:block;margin:6px 0;"><input type="radio" name="attn" value="1"> {{ T.attn_a1 }}</label>
+<label style="display:block;margin:6px 0;"><input type="radio" name="attn" value="0"> {{ T.attn_a0 }}</label>
+<label style="display:block;margin:6px 0;"><input type="radio" name="attn" value="2"> {{ T.attn_a2 }}</label>
+<button type="submit" class="btn btn-primary" style="margin-top:10px;">{{ T.next }}</button>
+{{ wrap_close }}
 {{ endblock }}

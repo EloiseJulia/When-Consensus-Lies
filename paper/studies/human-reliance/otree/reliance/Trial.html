@@ -1,60 +1,62 @@
+{{ block title }}{{ progress }}{{ endblock }}
 {{ block content }}
-<p style="color:#666;">Task {{ trial_num }} of {{ total }}</p>
-
-<div style="background:#f3f4f6;padding:10px;border-radius:6px;margin-bottom:10px;">
-  <b>Scenario.</b> {{ item.scenario }}<br>
-  <b>Task.</b> {{ item.task }}
+{{ wrap_open }}
+<div style="background:#eef2f7;border-left:4px solid #3B6EA5;padding:10px 12px;border-radius:6px;margin-bottom:12px;">
+  <div><span style="color:#3B6EA5;font-weight:600;">{{ T.lbl_scenario }}</span> — {{ item.scenario }}</div>
+  <div style="margin-top:4px;"><span style="color:#3B6EA5;font-weight:600;">{{ T.lbl_task }}</span> — {{ item.task }}</div>
 </div>
 
-{{ if cond == 'single' }}
-<div style="border:1px solid #ddd;padding:10px;border-radius:6px;">
-  &#129302; <b>AI assistant answered:</b><br>
-  "{{ item.answer }}"
+<div style="border:1px solid #d7dde5;border-radius:8px;padding:12px;background:#fff;">
+  {{ if is_multi }}
+    <div style="font-weight:600;color:#1a7f37;margin-bottom:8px;">{{ T.lbl_answer_multi }}</div>
+    <div style="margin-bottom:8px;">
+      {{ for m in models }}<span style="display:inline-block;background:#eef2f7;border:1px solid #cfd8e3;border-radius:14px;padding:2px 10px;margin:2px;font-size:.9em;">&#129302; {{ m }} &#10003;</span>{{ endfor }}
+    </div>
+    <div style="font-size:1.05em;">"{{ item.answer }}"</div>
+    {{ if cond == 'fake' }}<div style="margin-top:8px;color:#555;font-size:.92em;">{{ T.banner_fake }}</div>{{ endif }}
+    {{ if cond == 'dep' }}<div style="margin-top:8px;color:#a00;font-size:.92em;background:#fff5f5;border:1px solid #f3c2c2;padding:6px 8px;border-radius:6px;">{{ T.banner_dep }}</div>{{ endif }}
+  {{ endif }}
+  {{ if cond == 'single' }}
+    <div style="font-weight:600;margin-bottom:8px;">{{ T.lbl_answer_single }}</div>
+    <div style="margin-bottom:8px;">
+      <span style="display:inline-block;background:#eef2f7;border:1px solid #cfd8e3;border-radius:14px;padding:2px 10px;margin:2px;font-size:.9em;">&#129302; {{ single_model }} &#10003;</span>
+    </div>
+    <div style="font-size:1.05em;">"{{ item.answer }}"</div>
+  {{ endif }}
 </div>
-{{ endif }}
-{{ if cond == 'fake' }}
-<div style="border:1px solid #ddd;padding:10px;border-radius:6px;">
-  &#9989; <b>5 of 5 AI models agree:</b><br>
-  [Model A &#10003;] [Model B &#10003;] [Model C &#10003;] [Model D &#10003;] [Model E &#10003;]<br>
-  "{{ item.answer }}"<br>
-  <small style="color:#555;">&#8505; Five separate AI models were each queried and all five returned this answer.</small>
-</div>
-{{ endif }}
-{{ if cond == 'dep' }}
-<div style="border:1px solid #ddd;padding:10px;border-radius:6px;">
-  &#9989; <b>5 of 5 AI models agree:</b><br>
-  [Model A &#10003;] [Model B &#10003;] [Model C &#10003;] [Model D &#10003;] [Model E &#10003;]<br>
-  "{{ item.answer }}"<br>
-  <small style="color:#a00;">&#9888; These five answers are not independent: all five made the same single
-  unstated assumption, so together they count as about one independent check, not five.</small>
-</div>
-{{ endif }}
 
-<p style="margin-top:14px;"><b>What would you do?</b></p>
-{{ formfield 'accept' }}
-
-<div id="gapbox" style="display:none;margin:8px 0 8px 16px;">
-  <p><b>Which clarifying question is most important?</b></p>
-  {{ for o in options }}
-  <label style="display:block;margin:3px 0;">
-    <input type="radio" name="gap_choice" value="{{ o.i }}"> {{ o.text }}
+<div style="margin-top:16px;">
+  <p style="font-weight:600;margin-bottom:6px;">{{ T.q1 }}</p>
+  <label style="display:block;margin:6px 0;padding:9px 10px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
+    <input type="radio" name="accept" value="1"> {{ T.a_accept }}
   </label>
+  <label style="display:block;margin:6px 0;padding:9px 10px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
+    <input type="radio" name="accept" value="0"> {{ T.a_flag }}
+  </label>
+</div>
+
+<div id="gapbox" style="display:none;margin:6px 0 6px 8px;padding:10px;background:#fafafa;border-radius:6px;">
+  <p style="font-weight:600;">{{ T.gap_q }}</p>
+  {{ for o in options }}
+  <label style="display:block;margin:4px 0;"><input type="radio" name="gap_choice" value="{{ o.i }}"> {{ o.text }}</label>
   {{ endfor }}
 </div>
 
-<p style="margin-top:14px;"><b>How confident are you this answer is correct as given?</b></p>
-<div>
-  0 <input type="range" name="confidence" min="0" max="100" value="50"
-           style="width:60%;" oninput="document.getElementById('cv').textContent=this.value"> 100
-  &nbsp; <b><span id="cv">50</span></b>
+<div style="margin-top:16px;">
+  <p style="font-weight:600;margin-bottom:2px;">{{ T.conf_q }}</p>
+  <div style="font-size:.85em;color:#777;margin-bottom:4px;">{{ T.conf_star_hint }}</div>
+  <div id="stars" style="font-size:2em;color:#f5a623;cursor:pointer;user-select:none;line-height:1;">
+    <span data-v="1">&#9734;</span><span data-v="2">&#9734;</span><span data-v="3">&#9734;</span><span data-v="4">&#9734;</span><span data-v="5">&#9734;</span>
+  </div>
+  <input type="hidden" name="confidence" id="confidence" value="">
 </div>
 
 <input type="hidden" name="rt_ms" id="rt_ms" value="0">
+<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.next }}</button>
 
 <script>
   var _t0 = Date.now();
-  var _form = document.querySelector('form');
-  _form.addEventListener('submit', function () {
+  document.querySelector('form').addEventListener('submit', function () {
     document.getElementById('rt_ms').value = Date.now() - _t0;
   });
   document.querySelectorAll('input[name="accept"]').forEach(function (r) {
@@ -62,7 +64,15 @@
       document.getElementById('gapbox').style.display = (this.value === '0') ? 'block' : 'none';
     });
   });
+  (function () {
+    var stars = document.querySelectorAll('#stars span'), inp = document.getElementById('confidence');
+    function paint(n) { stars.forEach(function (s) { s.innerHTML = (parseInt(s.getAttribute('data-v')) <= n) ? '&#9733;' : '&#9734;'; }); }
+    stars.forEach(function (s) {
+      s.addEventListener('click', function () { var n = parseInt(this.getAttribute('data-v')); inp.value = n; paint(n); });
+      s.addEventListener('mouseover', function () { paint(parseInt(this.getAttribute('data-v'))); });
+    });
+    document.getElementById('stars').addEventListener('mouseleave', function () { paint(inp.value ? parseInt(inp.value) : 0); });
+  })();
 </script>
-
-{{ next_button }}
+{{ wrap_close }}
 {{ endblock }}

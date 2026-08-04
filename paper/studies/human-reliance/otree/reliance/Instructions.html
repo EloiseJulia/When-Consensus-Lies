@@ -1,12 +1,14 @@
+{{ block title }}{{ T.instr_title }}{{ endblock }}
 {{ block content }}
-<h3>Instructions</h3>
-<p>On each screen you will see a short workplace <b>scenario</b>, a <b>task</b>, and an
-<b>AI assistant's answer</b>. Your job is to decide:</p>
-<ul>
-  <li><b>Use the answer as-is</b>, or</li>
-  <li><b>Flag that key information is missing</b> / ask a clarifying question first.</li>
+{{ wrap_open }}
+<p>{{ T.instr_p1 }}</p>
+<p>{{ T.instr_multi }}</p>
+<p>{{ T.instr_p2 }}</p>
+<ul style="line-height:1.8;">
+  <li>{{ T.instr_opt1 }}</li>
+  <li>{{ T.instr_opt2 }}</li>
 </ul>
-<p>If you flag, you'll pick the most important clarifying question. Then you'll rate how confident you
-are that the answer is correct, from 0 to 100. There are 12 short tasks. Please read each carefully.</p>
-{{ next_button }}
+<p>{{ T.instr_p3 }}</p>
+<button type="submit" class="btn btn-primary">{{ T.next }}</button>
+{{ wrap_close }}
 {{ endblock }}

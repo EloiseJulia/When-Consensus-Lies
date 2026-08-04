@@ -1,5 +1,14 @@
+{{ block title }}{{ T.demo_title }}{{ endblock }}
 {{ block content }}
-<h3>A few last questions</h3>
-{{ formfields }}
-{{ next_button }}
+{{ wrap_open }}
+<p style="font-weight:600;">{{ T.demo_age }}</p>
+{{ for a in ages }}
+<label style="display:block;margin:4px 0;"><input type="radio" name="age_group" value="{{ a.i }}"> {{ a.text }}</label>
+{{ endfor }}
+<p style="font-weight:600;margin-top:12px;">{{ T.demo_ai_q }}</p>
+{{ for o in ai }}
+<label style="display:block;margin:4px 0;"><input type="radio" name="ai_use" value="{{ o.i }}"> {{ o.text }}</label>
+{{ endfor }}
+<button type="submit" class="btn btn-primary" style="margin-top:12px;">{{ T.next }}</button>
+{{ wrap_close }}
 {{ endblock }}

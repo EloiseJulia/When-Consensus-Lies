@@ -1,6 +1,10 @@
+{{ block title }}{{ T.comp_title }}{{ endblock }}
 {{ block content }}
-<h3>Quick check</h3>
-<p>In each task, your job is to decide:</p>
-{{ formfields }}
-{{ next_button }}
+{{ wrap_open }}
+<p>{{ T.comp_q }}</p>
+<label style="display:block;margin:6px 0;"><input type="radio" name="comp" value="0"> {{ T.comp_o0 }}</label>
+<label style="display:block;margin:6px 0;"><input type="radio" name="comp" value="1" checked> {{ T.comp_o1 }}</label>
+<label style="display:block;margin:6px 0;"><input type="radio" name="comp" value="2"> {{ T.comp_o2 }}</label>
+<button type="submit" class="btn btn-primary" style="margin-top:10px;">{{ T.next }}</button>
+{{ wrap_close }}
 {{ endblock }}
