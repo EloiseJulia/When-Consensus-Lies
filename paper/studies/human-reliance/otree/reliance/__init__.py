@@ -15,9 +15,9 @@ doc = "Do people over-rely on unanimous multi-model AI consensus, and does discl
 class C(BaseConstants):
     NAME_IN_URL = 'reliance'
     PLAYERS_PER_GROUP = None
-    NUM_ROUNDS = 12
+    NUM_ROUNDS = 14
     CONDITIONS = ['single', 'fake', 'dep']
-    ATTENTION_ROUND = 7            # attention-check screen shown once, after this trial
+    ATTENTION_ROUND = 8            # attention-check screen shown once, after this trial
     COMP_CORRECT = 1              # correct comprehension option index
     MAX_COMP_ATTEMPTS = 2
 
@@ -37,10 +37,13 @@ def creating_session(subsession: Subsession):
         random.shuffle(order)                                # per-participant trial order
         trials = []
         for it in order:
+            item = stimuli.ITEMS[it]
             cond = C.CONDITIONS[(it + g) % 3]                # condition(g, i) = CONDITIONS[(i+g)%3]
             perm = [0, 1, 2, 3]
-            random.shuffle(perm)                             # option order; 0 = GOLD in canonical list
-            trials.append(dict(item=it, cond=cond, perm=perm, gold_pos=perm.index(0)))
+            random.shuffle(perm)                             # option order; 0 = GOLD (if any)
+            gold_pos = perm.index(0) if item['gold'] is not None else None
+            trials.append(dict(item=it, cond=cond, perm=perm, gold_pos=gold_pos,
+                               complete=item['complete']))
         part.vars.update(lang=lang, g=g, trials=trials, comp_attempts=0,
                          passed_comprehension=None, passed_attention=None)
 
@@ -95,7 +98,10 @@ def _cur_options(player):
     lang = _lang(player)
     t = _cur(player)
     it = stimuli.ITEMS[t['item']]
-    canonical = [it['gold'][lang]] + it['distractors'][lang]     # index 0 = GOLD
+    if it['gold'] is None:                                       # complete item: 4 generic options
+        canonical = it['distractors'][lang]
+    else:                                                        # underspecified: gold + 3 distractors
+        canonical = [it['gold'][lang]] + it['distractors'][lang]
     return [dict(i=k, text=canonical[t['perm'][k]]) for k in range(4)]
 
 
@@ -187,7 +193,8 @@ class Trial(Page):
     @staticmethod
     def before_next_page(player, timeout_happened):
         t = _cur(player)
-        if player.accept == 0 and player.field_maybe_none('gap_choice') is not None:
+        if (player.accept == 0 and t['gold_pos'] is not None
+                and player.field_maybe_none('gap_choice') is not None):
             player.gap_correct = 1 if player.gap_choice == t['gold_pos'] else 0
         else:
             player.gap_correct = None
@@ -247,9 +254,10 @@ page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, 
 
 # ----------------------------------------------------------------- export (matches analysis schema)
 def custom_export(players):
-    yield ['participant_id', 'item_id', 'condition', 'accept', 'confidence', 'gap_correct',
-           'rt_sec', 'order_index', 'group_g', 'lang', 'passed_comprehension', 'passed_attention',
-           'total_time_sec', 'straightline_confidence', 'duplicate_id', 'age_group', 'ai_use']
+    yield ['participant_id', 'label', 'item_id', 'condition', 'complete', 'accept', 'confidence',
+           'gap_correct', 'rt_sec', 'order_index', 'group_g', 'lang', 'passed_comprehension',
+           'passed_attention', 'total_time_sec', 'straightline_confidence', 'duplicate_id',
+           'age_group', 'ai_use']
     from collections import defaultdict
     byp = defaultdict(list)
     for p in players:
@@ -260,24 +268,28 @@ def custom_export(players):
         last = plist[-1]
         age_group = _flag(last.field_maybe_none('age_group'))
         ai_use = _flag(last.field_maybe_none('ai_use'))
+        label = _flag(getattr(part, 'label', None))
         confs = [p.field_maybe_none('confidence') for p in plist]
         confs = [c for c in confs if c is not None]
         straight = 1 if (len(confs) > 1 and len(set(confs)) == 1) else 0
+        rts = [p.field_maybe_none('rt_ms') for p in plist]
+        total_time = round(sum(r for r in rts if r is not None) / 1000.0, 1)
         trials = part.vars.get('trials', [])
         for p in plist:
             idx = p.round_number - 1
             t = trials[idx] if idx < len(trials) else {}
             item_id = stimuli.ITEMS[t['item']]['id'] if t else ''
+            complete = 1 if t.get('complete') else 0
             gc = p.field_maybe_none('gap_correct')
             rt = p.field_maybe_none('rt_ms')
-            yield [part.code, item_id, t.get('cond', ''),
+            yield [part.code, label, item_id, t.get('cond', ''), complete,
                    p.field_maybe_none('accept'), p.field_maybe_none('confidence'),
                    '' if gc is None else gc,
                    '' if rt is None else round(rt / 1000.0, 1),
                    idx, part.vars.get('g', ''), part.vars.get('lang', ''),
                    _flag(part.vars.get('passed_comprehension')),
                    _flag(part.vars.get('passed_attention')),
-                   '', straight, 0, age_group, ai_use]
+                   total_time, straight, 0, age_group, ai_use]
 
 
 def _flag(v):

@@ -1,15 +1,36 @@
 # -*- coding: utf-8 -*-
-"""12 audited items, bilingual (en / zh). Item logic (id, conv, which option is GOLD) is
-language-independent; only the display text differs by language. options[0] is always the GOLD
-(decisive) clarifying question; the other three are cosmetic/non-decisive distractors. At runtime
-the four options are shuffled per trial (see __init__.creating_session)."""
+"""Items for the human-reliance study, bilingual (en/zh).
+
+`complete` marks whether the task is fully specified:
+  - complete=False (underspecified): the answer silently commits to one value of an UNSTATED
+    convention; the appropriate response is FLAG. `gold` = the decisive clarifying question
+    (index 0 of [gold]+distractors); the 3 distractors are non-decisive.
+  - complete=True (well-specified): the convention IS stated, so the answer is correct and the
+    appropriate response is ACCEPT. `gold` is None (gap-ID not scored); options are generic.
+
+The completeness factor (crossed with display condition) drives the PRIMARY discrimination DV:
+does displayed consensus reduce a participant's accept-gap between complete and underspecified
+items (i.e., degrade their ability to notice missing information)? This mirrors the paper's
+within-item k=0 (convention retained) vs k>=1 (convention deleted) control.
+
+Answers are stripped of any text that would self-disclose the missing convention.
+Option order is shuffled per trial at runtime (see __init__.creating_session).
+"""
+
+# generic, non-decisive clarifying options for COMPLETE items (gold=None)
+_GEN = {
+    "en": ["Should the answer include units?", "Should it be a number or a full sentence?",
+           "Should it be rounded?", "Should the result be bolded?"],
+    "zh": ["答案要带单位吗?", "写成数字还是完整句子?", "要四舍五入吗?", "结果要加粗吗?"],
+}
 
 ITEMS = [
-    dict(id="01", conv="fiscal-year start",
-         scenario={"en": 'A coworker messages before going on leave: "Pull our Q1 revenue for the board deck."',
+    # ---------------------------------------------------------------- UNDERSPECIFIED (9) ----
+    dict(id="U1", conv="fiscal-year start", complete=False,
+         scenario={"en": 'A coworker messages before leave: "Pull our Q1 revenue for the board deck."',
                    "zh": '同事休假前留言:"帮我拉一下我们的 Q1 营收,放进给董事会的材料里。"'},
          task={"en": "Report Q1 revenue.", "zh": "报告 Q1 营收。"},
-         answer={"en": "Q1 revenue (January-March) was $2.4M.", "zh": "Q1(1-3 月)营收为 240 万美元。"},
+         answer={"en": "Q1 revenue was $2.4M.", "zh": "Q1 营收为 240 万美元。"},
          gold={"en": "Which months count as Q1 - does the fiscal year start in January or another month?",
                "zh": "Q1 指哪几个月——财年是从 1 月开始,还是别的月份?"},
          distractors={"en": ["Should the number be rounded to the nearest $10,000?",
@@ -17,7 +38,7 @@ ITEMS = [
                              "Should the deck use a chart or a table?"],
                       "zh": ["营收数字要四舍五入到最近的 1 万美元吗?", "答案里要带美元符号吗?",
                              "材料里用图表还是表格?"]}),
-    dict(id="02", conv="rounding/remainder",
+    dict(id="U2", conv="rounding/remainder", complete=False,
          scenario={"en": 'Handoff note: "Split the $100.00 bonus pool equally among the 3 and tell me each amount."',
                    "zh": '交接便条:"把 100.00 美元的奖金池在 3 个人之间平均分,把每人金额告诉我。"'},
          task={"en": "Give each person's amount.", "zh": "给出每人金额。"},
@@ -29,11 +50,11 @@ ITEMS = [
                              "Should the names be listed alphabetically?"],
                       "zh": ["金额要列成清单还是写成一句话?", "每个金额要带美元符号吗?",
                              "名字要按字母顺序排列吗?"]}),
-    dict(id="03", conv="inclusive/exclusive range",
+    dict(id="U3", conv="inclusive/exclusive range", complete=False,
          scenario={"en": '"Give me total sales for the first week of March (March 1 to March 7)."',
                    "zh": '"给我三月第一周(3 月 1 日到 3 月 7 日)的销售总额。"'},
          task={"en": "Total sales for that range.", "zh": "该区间的销售总额。"},
-         answer={"en": "Total sales March 1-7 were $18,200.", "zh": "3 月 1-7 日销售总额为 18,200 美元。"},
+         answer={"en": "Total sales for that week were $18,200.", "zh": "那一周的销售总额为 18,200 美元。"},
          gold={"en": "Is March 7 itself included, or does the range stop at the end of March 6?",
                "zh": "3 月 7 日当天算在内,还是到 3 月 6 日结束为止?"},
          distractors={"en": ["Should the total be rounded to the nearest $100?",
@@ -41,7 +62,7 @@ ITEMS = [
                              "Should the answer be a sentence or a table?"],
                       "zh": ["总额要四舍五入到最近的 100 美元吗?", "答案要带美元符号吗?",
                              "答案写成一句话还是表格?"]}),
-    dict(id="04", conv="dedup",
+    dict(id="U4", conv="dedup", complete=False,
          scenario={"en": '"How many unique customers did we serve last month? Here is the order log."',
                    "zh": '"上个月我们服务了多少位独立客户?这是订单日志。"'},
          task={"en": "Count unique customers.", "zh": "统计独立客户数。"},
@@ -52,18 +73,7 @@ ITEMS = [
                              "Should the answer say 'customers' or 'people'?",
                              "Should the answer be a sentence or a table?"],
                       "zh": ["数字要取整到整数吗?", "答案说'客户'还是'人'?", "答案写成一句话还是表格?"]}),
-    dict(id="05", conv="top-N tie",
-         scenario={"en": '"Send me the top 10 sales reps by revenue this quarter." (reps ranked 10 and 11 are tied)',
-                   "zh": '"把本季度按营收排名前 10 的销售代表发给我。"(第 10 名和第 11 名营收并列)'},
-         task={"en": "List the top 10.", "zh": "列出前 10。"},
-         answer={"en": "Here are the top 10 reps [list].", "zh": "这是前 10 名代表 [名单]。"},
-         gold={"en": "Two reps are tied at #10 - include both, or exactly ten names?",
-               "zh": "有两人在第 10 名并列——都列进去,还是正好只列十个名字?"},
-         distractors={"en": ["Should the names be numbered?",
-                             "Should the list be alphabetical or by rank?",
-                             "Should the list be sent by email or chat?"],
-                      "zh": ["名单要编号吗?", "名单按字母还是按排名?", "名单用邮件还是聊天发?"]}),
-    dict(id="06", conv="timezone",
+    dict(id="U5", conv="timezone", complete=False,
          scenario={"en": '"How many orders came in before midnight on Friday?"',
                    "zh": '"周五午夜之前有多少笔订单?"'},
          task={"en": "Count Friday's pre-midnight orders.", "zh": "统计周五午夜前的订单。"},
@@ -74,18 +84,7 @@ ITEMS = [
                              "Should the answer say 'orders' or 'purchases'?",
                              "Should the answer be a full sentence?"],
                       "zh": ["数字要取整到整数吗?", "答案说'订单'还是'购买'?", "答案要写成完整句子吗?"]}),
-    dict(id="07", conv="unit/scale",
-         scenario={"en": 'A budget tracker shows this team\'s budget as "5"; the unit label (dollars, or thousands of dollars) is missing. "Is our $4,200 spend within budget?"',
-                   "zh": '预算表上这个团队的预算写着 "5",单位标签(美元,还是千美元)缺失。"我们花了 4,200 美元,超预算了吗?"'},
-         task={"en": "Say whether spend is within budget.", "zh": "判断是否在预算内。"},
-         answer={"en": "Yes - $4,200 is within the $5,000 budget.", "zh": "没超——4,200 美元在 5,000 美元预算之内。"},
-         gold={"en": 'Is the budget "5" in dollars, or in thousands of dollars?',
-               "zh": "预算的 '5' 是指 5 美元,还是 5 千美元?"},
-         distractors={"en": ["Should the answer include a dollar sign?",
-                             "Should the answer be a full sentence?",
-                             "Should the result be bolded?"],
-                      "zh": ["答案要带美元符号吗?", "答案要写成完整句子吗?", "结果要加粗吗?"]}),
-    dict(id="08", conv="percentage base",
+    dict(id="U6", conv="percentage base", complete=False,
          scenario={"en": '"Customer satisfaction was 60% last month. A report says it \'increased 20%\' this month. What is this month\'s score?"',
                    "zh": '"上个月客户满意度是 60%。一份报告说这个月\'提高了 20%\'。这个月是多少?"'},
          task={"en": "Report this month's score.", "zh": "报告这个月的分数。"},
@@ -96,7 +95,7 @@ ITEMS = [
                              "Should the answer be rounded to a whole percent?",
                              "Should the result be shown in bold?"],
                       "zh": ["答案里要带'满意度'这个词吗?", "答案要取整到整数百分比吗?", "结果要加粗显示吗?"]}),
-    dict(id="09", conv="mean vs median",
+    dict(id="U7", conv="mean vs median", complete=False,
          scenario={"en": '"What is the average response time for support tickets this week?" (a few took hours; most took minutes)',
                    "zh": '"这周工单的平均响应时间是多少?"(少数几单花了几小时,多数只要几分钟)'},
          task={"en": "Report the average.", "zh": "报告平均值。"},
@@ -107,7 +106,7 @@ ITEMS = [
                              "Should the answer include the word 'minutes'?",
                              "Should the answer be a sentence or a table?"],
                       "zh": ["答案要取整到整分钟吗?", "答案里要带'分钟'这个词吗?", "答案写成一句话还是表格?"]}),
-    dict(id="10", conv="business vs calendar days",
+    dict(id="U8", conv="business vs calendar days", complete=False,
          scenario={"en": '"The SLA says reply within 2 days. A ticket arrived Friday 4pm. When is it due?"',
                    "zh": '"SLA 规定 2 天内回复。一个工单周五下午 4 点到达。什么时候到期?"'},
          task={"en": "Give the due time.", "zh": "给出到期时间。"},
@@ -118,18 +117,7 @@ ITEMS = [
                              "Should the answer include the weekday name?",
                              "Should the answer be a full sentence?"],
                       "zh": ["到期时间用'上午/下午'怎么写?", "答案要带星期几吗?", "答案要写成完整句子吗?"]}),
-    dict(id="11", conv="sort tie-break",
-         scenario={"en": '"Rank these regions by growth and tell me who is #1." (two regions are tied on growth)',
-                   "zh": '"把这些地区按增长排名,告诉我谁是第一。"(两个地区增长并列)'},
-         task={"en": "Name the #1 region.", "zh": "说出第一名地区。"},
-         answer={"en": "North is #1 by growth.", "zh": "按增长,North 排第一。"},
-         gold={"en": "North and West are tied on growth - how should the tie be broken (e.g., by revenue)?",
-               "zh": "North 和 West 增长并列——并列怎么打破(比如按营收大小)?"},
-         distractors={"en": ["Should the answer include both region names?",
-                             "Should we show percentages or ranks?",
-                             "Should the answer be presented in bold?"],
-                      "zh": ["答案要把两个地区名都列出来吗?", "要显示百分比还是排名?", "答案要加粗吗?"]}),
-    dict(id="12", conv="null/blank handling",
+    dict(id="U9", conv="null/blank handling", complete=False,
          scenario={"en": '"What is the average satisfaction score from this survey?" (several respondents left it blank)',
                    "zh": '"这份问卷的平均满意度分是多少?"(有几位受访者没填分数)'},
          task={"en": "Report the average score.", "zh": "报告平均分。"},
@@ -140,6 +128,40 @@ ITEMS = [
                              "Should the answer include 'out of 5'?",
                              "Should the answer be a sentence or a table?"],
                       "zh": ["答案要取整到一位小数吗?", "答案要带'满分 5'吗?", "答案写成一句话还是表格?"]}),
+    # ---------------------------------------------------------------- COMPLETE (5) ----------
+    # Well-specified twins: the convention is STATED, so the answer is correct -> ACCEPT.
+    dict(id="C1", conv="fiscal-year start (stated)", complete=True,
+         scenario={"en": 'A coworker: "Reminder - our fiscal year starts in January. Which months are Q1?"',
+                   "zh": '同事:"提醒一下——我们的财年从 1 月开始。Q1 是哪几个月?"'},
+         task={"en": "Name the Q1 months.", "zh": "说出 Q1 是哪几个月。"},
+         answer={"en": "Q1 is January, February, and March.", "zh": "Q1 是 1 月、2 月、3 月。"},
+         gold=None, distractors=_GEN),
+    dict(id="C2", conv="inclusive range (stated)", complete=True,
+         scenario={"en": '"Count the days from March 1 to March 5, including both March 1 and March 5."',
+                   "zh": '"数一下从 3 月 1 日到 3 月 5 日一共多少天,3 月 1 日和 3 月 5 日都算在内。"'},
+         task={"en": "Give the number of days.", "zh": "给出天数。"},
+         answer={"en": "That is 5 days.", "zh": "一共 5 天。"},
+         gold=None, distractors=_GEN),
+    dict(id="C3", conv="rounding (stated)", complete=True,
+         scenario={"en": '"Split a $60 gift card equally among 4 people - it divides evenly. How much each?"',
+                   "zh": '"把一张 60 美元的礼品卡在 4 个人之间平均分——正好整除。每人多少?"'},
+         task={"en": "Give each person's amount.", "zh": "给出每人金额。"},
+         answer={"en": "Each person gets $15.", "zh": "每人分得 15 美元。"},
+         gold=None, distractors=_GEN),
+    dict(id="C4", conv="calendar days (stated)", complete=True,
+         scenario={"en": '"Deliver within 2 calendar days. An order shipped on Monday - when does it arrive?"',
+                   "zh": '"2 个自然日内送达。一个订单周一发货——什么时候到?"'},
+         task={"en": "Give the arrival day.", "zh": "给出到达日。"},
+         answer={"en": "It arrives on Wednesday.", "zh": "周三到达。"},
+         gold=None, distractors=_GEN),
+    dict(id="C5", conv="median (stated)", complete=True,
+         scenario={"en": '"What is the median response time this week? The middle value is 9 minutes."',
+                   "zh": '"这周响应时间的中位数是多少?中间值是 9 分钟。"'},
+         task={"en": "Report the median.", "zh": "报告中位数。"},
+         answer={"en": "The median response time is 9 minutes.", "zh": "响应时间的中位数是 9 分钟。"},
+         gold=None, distractors=_GEN),
 ]
 
-assert len(ITEMS) == 12
+N_UNDERSPECIFIED = sum(1 for it in ITEMS if not it["complete"])
+N_COMPLETE = sum(1 for it in ITEMS if it["complete"])
+assert len(ITEMS) == 14 and N_UNDERSPECIFIED == 9 and N_COMPLETE == 5
