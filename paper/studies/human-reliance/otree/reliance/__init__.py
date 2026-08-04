@@ -6,6 +6,7 @@ per-participant trial-order + option-order randomization. Language is chosen by 
 ('language': 'en' | 'zh'). Exports one row per trial matching ../../analysis/preregistered_analysis.py.
 """
 import random
+import time
 from otree.api import *
 from . import stimuli, content
 
@@ -124,6 +125,7 @@ class Language(Page):
     @staticmethod
     def before_next_page(player, timeout_happened):
         player.participant.vars['lang'] = player.lang_choice
+        player.participant.vars['t_start'] = time.time()
 
 
 class _Round1(Page):
@@ -256,6 +258,10 @@ class Debrief(_LastRound):
     def vars_for_template(player):
         return dict(_base(player), code=player.participant.code)
 
+    @staticmethod
+    def before_next_page(player, timeout_happened):
+        player.participant.vars['t_end'] = time.time()
+
 
 page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, Trial,
                  AttentionCheck, Demographics, Debrief]
@@ -282,7 +288,11 @@ def custom_export(players):
         confs = [c for c in confs if c is not None]
         straight = 1 if (len(confs) > 1 and len(set(confs)) == 1) else 0
         rts = [p.field_maybe_none('rt_ms') for p in plist]
-        total_time = round(sum(r for r in rts if r is not None) / 1000.0, 1)
+        ts, te = part.vars.get('t_start'), part.vars.get('t_end')
+        if ts and te:
+            total_time = round(te - ts, 1)                       # true elapsed (Language -> Debrief)
+        else:
+            total_time = round(sum(r for r in rts if r is not None) / 1000.0, 1)  # fallback: trial time
         trials = part.vars.get('trials', [])
         for p in plist:
             idx = p.round_number - 1
