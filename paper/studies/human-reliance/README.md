@@ -1,200 +1,174 @@
-# Human-validation study — *When Consensus Lies* (Phase 8)
+# Human-reliance study — *When Consensus Lies*
 
-**Do people over-rely on unanimous multi-model AI "consensus," and does disclosing evidential
-dependence reduce it?**
+**Do people over-rely on an apparently unanimous multi-model AI answer, and can a disclosure of
+shared-input dependence reduce that reliance?**
 
-This folder contains the complete design of a pre-registered online experiment that accompanies the
-system paper *When Consensus Lies: Fake Redundancy in Multi-Model AI Systems*. It is the authoritative
-entry point; each component has its own file (see the [directory map](#directory-map)).
+This folder contains the current implementation and documentation for a bilingual, online,
+pre-registered human study accompanying *When Consensus Lies: Fake Redundancy in Multi-Model AI
+Systems*. The runnable oTree code is the source of truth.
 
-> **Status:** design complete and internally validated (power simulation, cross-family stimulus audit,
-> bot-tested survey app, frozen analysis validated end-to-end). **Not yet frozen or run.** Data
-> collection must not begin until the pre-registration is frozen on OSF/AsPredicted and IRB
-> determination is obtained.
-
----
+> **Status:** redesigned implementation complete; do not collect data until the owned
+> pre-registration is frozen and the required ethics/IRB determination and consent procedures are in
+> place.
 
 ## 1. Why this study
 
-The paper establishes, as **properties of the system** (no humans required):
+The system work shows that multiple model outputs can look like independent corroboration even when
+they arise from the same underspecified input. This study tests the human-reliance link: whether an
+interface saying that five AI models agree increases acceptance of an answer that silently fills a
+missing convention, and whether explaining the shared-prompt mechanism reduces this effect.
 
-- **A — fake redundancy.** Five same-prompt agents supply ≈ one independent judgment
-  (n_eff = 1.10, ICC = 0.89; the within-item k=0-vs-k≥1 control gives ΔCD = 0.82).
-- **B — interfaces mask it.** Current product UIs render this as independent corroboration ("N/N agree").
+The study is deliberately narrow. It tests decisions about the displayed answers in controlled
+workplace-style tasks; it does not claim that all AI agreement or all AI reliance is inappropriate.
 
-Two further claims the paper currently **borrows from the literature** rather than measures:
+## 2. Confirmatory hypotheses
 
-- **C — over-reliance.** People read unanimity as reliability and under-account for source
-  non-independence (*correlation / system neglect*: Budescu & Yu 2007; Enke & Zimmermann 2019;
-  Levy et al. 2022).
-- **D — the fix.** Surfacing *evidential dependence* would reduce that over-reliance (the demoted §9
-  design implications, and the abstract's normative "should").
+The confirmatory outcomes are the two behavioral `accept` contrasts **on underspecified items**:
 
-**This study measures C and D directly.** It is **not logically required** — the paper's argument
-closes on the system properties A/B and the borrowed C. Its purpose is to (i) convert *borrowed → measured*,
-and (ii) put a human in the loop so the work sits comfortably at CSCW. Success lets the paper **re-earn**
-the demoted design implications (§9) and the normative abstract line with first-party evidence. The design
-is deliberately narrow: it tests **only** C and D and adds no other defensive arms.
+| ID | Prediction |
+|---|---|
+| **H-U1a** | `accept(fake) > accept(single)` |
+| **H-U2a** | `accept(dep) < accept(fake)` |
 
-## 2. Hypotheses (pre-registered, directional)
+Here, `accept=1` means “ready to use as-is.” On an underspecified item, the appropriate response is
+to flag the missing convention. The two directional, one-sided tests use GEE logistic models with
+participant clustering, item fixed effects, and Mancl–DeRouen bias-reduced covariance; Holm corrects
+these two tests at family-wise α=.05.
 
-Conditions: **single** (one-model answer) · **fake** ("5 of 5 models agree") · **dep** (same consensus,
-with a disclosure that the models are *not independent*, without revealing the correct value).
-
-| ID | Claim | Prediction |
-|----|-------|------------|
-| **H-U1a** | C | P(accept-as-is \| fake) > P(accept-as-is \| single) |
-| **H-U1b** | C | confidence(fake) > confidence(single) |
-| **H-U2a** | D | P(accept-as-is \| dep) < P(accept-as-is \| fake) |
-| **H-U2b** | D | confidence(dep) < confidence(fake) |
-
-Exploratory: dep vs single; objective gap-identification by condition; moderation by AI-literacy.
+Pre-registered secondary analyses (not in the Holm family) are the corresponding 1–5-star
+confidence contrasts, the condition × completeness discrimination interaction on `accept`, a
+first-exposure between-subjects read, and objective gap identification. The interaction asks whether
+the fake-consensus display shrinks the accept gap between complete and underspecified items, and
+whether the dependence disclosure restores it.
 
 ## 3. Design
 
-- **Online, within-subjects**, single ~10-minute session (Prolific, general population).
-- **3 display conditions × 12 items**, balanced **Latin square**: `condition(group g, item i) =
-  CONDITIONS[(i + g) mod 3]`, with `g` assigned round-robin on arrival. Each participant sees each item
-  **once** (4 items per condition); across the three groups each item appears in all three conditions
-  equally. Trial order and the 4 clarifying-option positions are randomized per participant/trial.
-- Participants do **not** hold the missing convention (matches the paper's lost-handoff narrative, §8.4):
-  the decisive disambiguator is outside the shown prompt (H1_external family).
+- **Online, within-subjects**, about **11 minutes**.
+- **14 items:** 9 underspecified items (U1–U9) and 5 complete controls (C1–C5).
+- **3 display conditions:** `single`, `fake`, `dep`.
+- Every participant sees every item once. A balanced Latin square assigns
+  `condition(g, i) = CONDITIONS[(i + g) % 3]`, with arrival-round-robin `g ∈ {0,1,2}`.
+- Participant trial order and each trial’s four clarification-option order are randomized.
+- One stable participant link serves both **English and 简体中文**; language is selected on the first
+  in-page screen.
 
-## 4. The three display conditions
+The 9 underspecified items omit a decisive convention—fiscal-year start, rounding/remainder,
+range inclusiveness, deduplication, timezone, percentage base, mean versus median, business versus
+calendar days, or null/blank handling. Their answers silently assume one convention, so FLAG is
+appropriate. The 5 complete items state the needed convention and have answers that should be
+ACCEPTED. These controls stop an “always flag” strategy from forcing the accept baseline to floor and
+support the discrimination check.
 
-The **scenario, task, and answer text are identical** across conditions; only the evidence framing
-differs. `fake` carries a **length-matched neutral banner** so the key **dep vs fake** contrast isolates
-the *dependence content*, not the mere presence of a banner. Worked example (Item 01):
+## 4. Display conditions
 
-- **single** — `🤖 AI assistant answered: "Q1 revenue (January–March) was $2.4M."`
-- **fake** — `✅ 5 of 5 AI models agree: [Model A–E ✓] "…$2.4M." ℹ Five separate AI models were each
-  queried and all five returned this answer.`
-- **dep** — same consensus block + `⚠ These five answers are not independent: all five made the same
-  single unstated assumption, so together they count as about one independent check, not five.`
+Scenario, task, and answer text are identical across conditions. All answers appear in a consistent
+card; only their source framing differs.
 
-Model badges are generic (Model A–E) to avoid brand effects. `single` is intentionally lighter (the
-consensus display itself is part of the H-U1 manipulation); the *matched* comparison is dep vs fake.
+| Condition | Display |
+|---|---|
+| `single` | One chip carrying one real model name: ChatGPT, Gemini, Claude, Copilot, or DeepSeek. |
+| `fake` | Five real-name chips—ChatGPT, Gemini, Claude, Copilot, DeepSeek—all show the same answer, with a neutral note that five different models were asked. |
+| `dep` | The same five-chip agreement display, plus a neutral mechanism disclosure: all five received the **same prompt**, which omitted one needed detail, and each filled that gap on its own. |
 
-## 5. Stimuli
+The `dep` text is not a verdict and does not identify the omitted convention or correct answer. The
+agreement displays are researcher-curated illustrations rather than live model outputs; this mild
+deception is disclosed at debrief.
 
-**12 lay-readable items**, each a workplace-handoff scenario whose answer silently commits to one value
-of a single unstated convention. Convention types (one per item): fiscal-year start · rounding/remainder
-· inclusive/exclusive date range · dedup · top-N tie · timezone · unit/scale · percentage base ·
-mean-vs-median · business-vs-calendar days · sort tie-break · null/blank handling.
+## 5. Participant experience and measures
 
-Each item has 4 clarifying-question options: exactly **one GOLD** (names the decisive gap) and three
-**cosmetic/non-decisive** distractors, giving clean objective gap-identification scoring.
+Participants complete language selection → consent → instructions → a non-scored worked example →
+a comprehension check → 14 trials → an attention screen after round 8 → demographics → debrief.
+Instructions announce that some trials show one AI and some show five, and that some answers are fine
+to use. The worked example does not state an answer key. The comprehension check’s correct option is
+pre-selected and is recorded, but is not used as an exclusion.
 
-**Provenance (Law 6).** Items were authored by an Anthropic-family model (Opus) and independently
-audited for construct validity by a **different family** (GPT-5.6), which caught a broken item (07, no
-divergent answer) and a math-trap item (08), both replaced, and tightened all distractors. See
-`STIMULI-v2.md` (final) and `STIMULI-draft.md` (v1 + audit trail). **Still needs owner sign-off.**
+On each trial participants choose:
 
-## 6. Measures
+- **Ready to use as-is** (`accept=1`), or
+- **Important information is missing** (`accept=0`), then, if flagging, the most important
+  clarification from four randomized options.
 
-- **Primary — behavioral:** `accept` (1 = use answer as-is; 0 = flag missing info). Flagging is the
-  appropriate response on every item.
-- **Primary — subjective:** `confidence` 0–100.
-- **Objective gold (no LLM judge):** `gap_correct` — when a participant flags, whether they pick the
-  clarifying question that names the true missing convention (deterministic against the item key).
-- Secondary/exploratory: clarifying-question distribution, response time, AI-literacy moderation.
+They then provide a required **1–5-star confidence** rating. On underspecified trials only, the
+single decisive clarification is scored deterministically as `gap_correct`; complete trials have
+generic options and no gap score. Response time, language, age bracket (including Under 18), and
+AI-use frequency are retained.
 
-## 7. Procedure (~10 min)
+## 6. Data quality and exclusions
 
-Consent → instructions + worked example → comprehension check (≤2 attempts) → **12 trials** → one
-instructed-response attention-check screen (round 7) → brief demographics + one AI-literacy item →
-**debrief** (discloses the curated "consensus" displays and the intentional underspecification).
+The implemented, functional participant-level exclusions are:
 
-**Pre-specified exclusions:** failed comprehension (2×); failed attention check; total time < 120 s
-(‹CONFIRM›); zero-variance confidence (straightlining); duplicate ID. Excluded participants are
-replaced up to the recruitment cap.
+1. failed instructed-response attention check;
+2. total recorded trial time below 120 seconds;
+3. duplicate ID.
 
-## 8. Sample & power
+Comprehension is not excluded because its correct response is pre-selected. Uniform confidence
+ratings are retained and supplied as `straightline_confidence` for a robustness split rather than an
+exclusion.
 
-Simulation-based (GEE logistic with participant + item random intercepts). Assumptions:
-p(accept\|single)=.55, fake=.72, dep=.56; SD_participant=.6, SD_item=.5 (logit); one-sided α=.025/family.
+## 7. Sample, calibration, and pilot gate
 
-| items | N | H-U1 (fake>single) | H-U2 (dep<fake) | **both** |
-|-------|---|--------------------|-----------------|----------|
-| 9  | 50 | .80 | .76 | .66 |
-| **12** | **50** | **.93** | **.90** | **.85** |
-| 12 | 60 | .94 | .93 | .90 |
-| 12 | 50 (conservative) | .71 | .53 | .43 |
+The archived simulation in `analysis/power_analysis.py` supports a target of approximately
+**55–65 analyzable participants**, recruited with a buffer. Under the expected effect, power for
+both behavioral contrasts is about .93 at N=50 and .95 at N=65. Under a
+conservative/smaller effect it is about .49 at N=65 and .76 at N=90; recruit about **90** if such
+smaller effects are plausible.
 
-**Decision:** **12 items; recruit ≈ 65 → ≈ 55 analyzable.** H-U2 (D) is the power-limiting arm, so the
-dependence disclosure is made maximally salient. Pre-registered smallest effects of interest:
-fake−single ≥ 10 pp on accept; dep−fake ≥ 8 pp (‹CONFIRM›). The reproduction script is in the analysis
-folder.
+| Scenario | N | Power for both accept contrasts |
+|---|---:|---:|
+| Expected effect | 50 | ~.93 |
+| Expected effect | 65 | ~.95 |
+| Conservative/smaller effect | 65 | ~.49 |
+| Conservative/smaller effect | 90 | ~.76 |
 
-## 9. Analysis (frozen with the pre-registration — Law 7)
+At N=65, simulated null calibration was approximately .047 per test and .07 FWER, indicating mildly
+liberal small-sample GEE behavior. A permutation sensitivity analysis is pre-registered and
+calibration is re-checked at pilot.
 
-- **accept** (behavioral): **GEE logistic**, exchangeable, participant-clustered, item fixed effects —
-  the confirmatory engine (matches the power simulation). Crossed-random-intercept GLMM as sensitivity.
-- **confidence** (subjective): **linear mixed model** with crossed participant + item random intercepts.
-- Directional one-sided tests; **Holm** correction across the 4 primary contrasts at family-wise α = .05.
-- The script (`analysis/preregistered_analysis.py`) is written and validated on *simulated* data
-  **before** data collection: it rejects all 4 hypotheses under the pre-registered effect and ~none under
-  the null. Only the input data file changes at run time.
+Before launch, run and discard a mandatory **n≈20 go/no-go pilot**. Proceed only if single-condition
+underspecified acceptance is ~.35–.75; fake minus single acceptance is at least +5 percentage points
+in the predicted direction; gap-identification accuracy is below .90 (otherwise harden distractors);
+and fewer than 40% of participants correctly guess the hypothesis.
 
-## 10. Ethics
+## 8. Implementation and deployment
 
-Minimal-risk, with **authorized (mild) deception + full debrief** (the "5/5 agree" displays are curated
-illustrations, not live model outputs; tasks are intentionally underspecified). Anonymous platform IDs
-only; fair pay (~$2 / 10 min ≈ $12/hr). Consent states some details are withheld until the end; the
-debrief discloses everything and offers data withdrawal. Files in `ethics/`. **IRB/exempt determination
-at Chang'an University required before launch.**
+`otree/` contains the runnable oTree 6 app. It supplies the one-link language choice, Latin-square
+assignment, option randomization, real-name model chips, star confidence rating, quality fields, and
+trial-level custom export. Deploy a persistent web service and Postgres database on free-tier
+**Render** or **Fly.io**, then share the stable oTree room participant URL. See `otree/README.md` and
+`otree/DEPLOY.md`.
 
-## 11. Implementation
+## 9. Export and analysis
 
-Runnable **oTree 6** app in `otree/` implementing the design above. Validated headlessly with bots
-(`otree test reliance 6`) across the full flow, and its `custom_export` produces one row per trial in the
-**exact schema** the analysis script consumes — verified end-to-end
-(`oTree export → preregistered_analysis.py`). See `otree/README.md` to run/deploy.
+One CSV row is produced per trial:
 
-## 12. How the results feed back into the paper
-
-- **If C and D hold:** re-promote the §9 design implications from "falsifiable conjectures" back to
-  evidence-backed implications; restore the abstract's normative "should"; foreground the
-  human-in-the-loop framing for CSCW.
-- **If only C holds (not D):** keep the descriptive framing; report D as null/underpowered and discuss.
-- **If neither holds:** the system contribution stands on A/B; report the human null honestly as a bound
-  on the reliance mechanism. (Metrics/hypotheses are frozen, so any outcome is reportable without
-  p-hacking.)
-
-## 13. Directory map
-
+```text
+participant_id,label,item_id,condition,complete,accept,confidence,gap_correct,rt_sec,
+order_index,group_g,lang,passed_comprehension,passed_attention,total_time_sec,
+straightline_confidence,duplicate_id,age_group,ai_use
 ```
-README.md                     ← this overview
-PREREGISTRATION.md            hypotheses, design, DVs, exclusions, analysis, power, ethics, deviations log
-STIMULI-v2.md                 final 12 items (audited)
-STIMULI-draft.md              v1 items + the cross-family audit trail
-SURVEY-implementation.md      platform choice, Latin square, randomization, attention checks, UI copy
+
+`analysis/preregistered_analysis.py` consumes this schema. Its frozen confirmatory models and
+secondary analyses are described in `analysis/README.md`; run it with:
+
+```bash
+python analysis/preregistered_analysis.py --data reliance_custom.csv
+```
+
+## 10. Directory map
+
+```text
+README.md                     study overview (this file)
+STIMULI-v2.md                 current 14-item design and provenance
+SURVEY-implementation.md      platform, flow, randomization, displays, export
 analysis/
-  preregistered_analysis.py   FROZEN confirmatory analysis (GEE + MixedLM + Holm); self-tests on sim data
-  README.md                   how to run + data schema
-ethics/
-  PROTOCOL-IRB-summary.md      protocol for the IRB/ethics form
-  consent.md                  participant consent (authorized-deception clause)
-  debrief.md                  end-of-study debrief (deception disclosure + withdrawal)
+  preregistered_analysis.py   frozen analysis pipeline
+  power_analysis.py           archived power and calibration simulation
+  README.md                   analysis instructions and schema
 otree/
-  settings.py, requirements.txt, _static/
-  reliance/                   __init__.py (logic), stimuli.py (12 items), tests.py (bot), *.html (pages)
-  README.md, .gitignore
+  reliance/stimuli.py         authoritative exact bilingual items and `complete` flags
+  reliance/content.py         authoritative UI copy
+  reliance/__init__.py        assignment, page logic, and custom export
+  README.md, DEPLOY.md        run and deployment instructions
+PREREGISTRATION.md            owned pre-registration document (not edited here)
+ethics/                       owned ethics materials (not edited here)
 ```
-
-## 14. Remaining steps (execution)
-
-1. Owner sign-off on `STIMULI-v2.md` (esp. items 07/08) and resolve the `‹CONFIRM›` items across files
-   (platform, budget, min-time, IRB route, slider-no-default, smallest effects of interest).
-2. Freeze the pre-registration + analysis script + oTree code on OSF/AsPredicted.
-3. IRB/exempt determination (Chang'an University).
-4. Pilot (n ≈ 5) → confirm ~10-min timing and comprehension pass-rate.
-5. Launch on Prolific (recruit ≈ 65) → run the frozen analysis → report.
-6. Fold measured C/D back into the paper (§12).
-
-## 15. Laws honored
-
-Law 6 (provenance): stimuli authored and audited by different model families. Law 7 (pre-registration +
-executable gold): hypotheses, metric definitions, exclusions, and the analysis script are frozen before
-any run; the primary gap-identification measure is deterministic (no LLM judge). Independent adversarial
-audit > self-review (cross-family stimulus audit).

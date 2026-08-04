@@ -64,6 +64,7 @@ class Player(BasePlayer):
     age_group = models.IntegerField(blank=True)              # index into T['age_groups'] (1-based)
     ai_use = models.IntegerField(blank=True)
     lang_choice = models.StringField(blank=True)             # chosen on the first (Language) page
+    consent = models.BooleanField(blank=True)                # recorded affirmative consent
 
 
 # ----------------------------------------------------------------- helpers
@@ -136,7 +137,13 @@ class _Round1(Page):
 
 
 class Consent(_Round1):
-    pass
+    form_model = 'player'
+    form_fields = ['consent']
+
+    @staticmethod
+    def error_message(player, values):
+        if not values.get('consent'):
+            return 'Please tick the consent box to take part / 请勾选"同意"才能参与。'
 
 
 class Instructions(_Round1):
@@ -245,7 +252,9 @@ class Demographics(_LastRound):
 
 
 class Debrief(_LastRound):
-    pass
+    @staticmethod
+    def vars_for_template(player):
+        return dict(_base(player), code=player.participant.code)
 
 
 page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, Trial,

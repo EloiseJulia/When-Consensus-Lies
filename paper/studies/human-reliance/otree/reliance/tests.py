@@ -9,7 +9,7 @@ class PlayerBot(Bot):
     def play_round(self):
         if self.round_number == 1:
             yield Language, dict(lang_choice=random.choice(['en', 'zh']))
-            yield Consent
+            yield Consent, dict(consent=True)
             yield Instructions
             yield WorkedExample
             yield Comprehension, dict(comp=C.COMP_CORRECT)

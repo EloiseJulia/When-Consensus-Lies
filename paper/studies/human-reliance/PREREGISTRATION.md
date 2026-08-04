@@ -1,191 +1,194 @@
 # Pre-registration (DRAFT — not yet frozen)
 
-**Study:** Do people over-rely on unanimous multi-model AI consensus, and does surfacing
-evidential dependence reduce it?
+**Study:** Do people over-rely on unanimous multi-model AI "consensus," and does surfacing the
+*mechanism* of that consensus (a shared prompt with an unstated detail) reduce it?
 **Paper:** *When Consensus Lies: Fake Redundancy in Multi-Model AI Systems* — human-validation study.
-**Status:** DRAFT for owner review. **Do NOT collect data until this is frozen on OSF/AsPredicted.**
-**Provenance note (Law 7):** hypotheses, conditions, primary DVs, exclusions, and the analysis
-script must be frozen *before* the first non-pilot participant. No metric redefinition afterward.
+**Status:** DRAFT for owner review. **Do NOT collect data until this is frozen on OSF/AsPredicted and a
+mandatory pilot (§11) passes its go/no-go.**
+**Provenance (Law 7):** hypotheses, conditions, primary DVs, exclusions, and the analysis script must be
+frozen *before* the first non-pilot participant. No metric redefinition afterward.
 
-> ⚠️ **CONFIRM-BEFORE-FREEZE** items are flagged inline with `‹CONFIRM›`.
+> This design was revised after a 3-model adversarial ROI review (Opus 5 / GPT-5.6 / Gemini 3.1). Key
+> changes: added well-specified ("complete") items so the accept baseline is not at floor; the primary DV
+> is the behavioral accept contrast (well-powered); the `dep` disclosure states the *mechanism*, not a
+> verdict; inert exclusions were fixed. ⚠️ `‹CONFIRM›` items remain.
 
 ---
 
-## 1. Background & why this study (kept tight to two gaps)
+## 1. Background & why this study
 
-The paper establishes, as **system properties** (no humans needed):
-- **A** — five same-prompt agents supply ≈ one independent judgment (n_eff = 1.10, ICC = 0.89,
-  same-item ΔCD = 0.82): *fake redundancy*.
-- **B** — current product UIs render this as independent corroboration ("N/N agree").
+The paper establishes, as **system properties** (no humans needed): **A** — five same-prompt agents supply
+≈ one independent judgment (n_eff = 1.10, ICC = 0.89; within-item ΔCD = 0.82); **B** — product UIs render
+this as independent corroboration ("N/N agree"). Two claims the paper currently **borrows from the
+literature**: **C** — people read unanimity as reliability and under-account for source non-independence
+(correlation/system neglect; Budescu & Yu 2007; Enke & Zimmermann 2019; Levy et al. 2022); **D** —
+surfacing evidential dependence would reduce that over-reliance.
 
-Two claims the paper currently **borrows from the literature** rather than measures:
-- **C** — users read unanimity as reliability and under-account for source non-independence
-  (*correlation / system neglect*: Budescu & Yu 2007; Enke & Zimmermann 2019; Levy et al. 2022).
-- **D** — surfacing *evidential dependence* would reduce that over-reliance (the demoted §9 design
-  implication + the abstract's normative "should").
+This study **measures C and D directly**. It is *not* logically required (the loop closes on A/B + borrowed
+C); its purpose is borrowed→measured and human-in-the-loop CSCW fit. Scope is limited to C and D.
 
-This study **measures C and D directly**. It is *not* logically required (the loop already closes on
-system properties); its purpose is to convert borrowed→measured and restore human-in-the-loop CSCW
-fit. Scope is deliberately limited to C and D — no additional defensive arms.
+## 2. Hypotheses
 
-## 2. Hypotheses (directional, pre-registered)
+Conditions: **single** (one AI model's answer), **fake** ("5 of 5 AI models agree"), **dep** (same 5-model
+agreement + a disclosure of the *mechanism*: the five were sent the **same prompt**, which left one needed
+detail unspecified — each model filled it on its own; the disclosure does **not** reveal the correct value).
 
-Let **single** = one-model answer, **fake** = "5/5 models agree" unanimity, **dep** =
-dependence-disclosed display.
+**Primary (confirmatory), on UNDERSPECIFIED items — behavioral acceptance:**
+- **H-U1a (C):** P(accept-as-is | fake) > P(accept-as-is | single)
+- **H-U2a (D):** P(accept-as-is | dep)  < P(accept-as-is | fake)
 
-- **H-U1 (C, over-reliance from fake consensus):**
-  - H-U1a: P(accept-as-is | **fake**) > P(accept-as-is | **single**)
-  - H-U1b: confidence(**fake**) > confidence(**single**)
-- **H-U2 (D, dependence disclosure corrects it):**
-  - H-U2a: P(accept-as-is | **dep**) < P(accept-as-is | **fake**)
-  - H-U2b: confidence(**dep**) < confidence(**fake**)
+**Secondary (pre-registered, not in the confirmatory family):**
+- **H-U1b / H-U2b (confidence):** the same fake>single / dep<fake pattern on the 1–5 star confidence rating.
+- **Discrimination (H-Disc):** displayed consensus degrades the ability to tell a well-specified answer
+  from an underspecified one — i.e., **fake shrinks** the accept gap [accept(complete) − accept(underspec)]
+  vs single (condition × completeness interaction < 0), and **dep restores** it.
 
-Exploratory (not confirmatory): dep vs single; gap-identification accuracy across conditions;
-effect moderation by AI-literacy / domain.
+Exploratory: first-exposure (first-trial) read; gap-identification accuracy; age / AI-literacy moderation.
 
 ## 3. Design
 
-- Online, **within-subjects**, single session, **3 display conditions × 12 items**, **Latin square**:
-  each participant sees each item exactly once; conditions balanced within participant
-  (4 trials/condition); item×condition rotation counterbalanced across participants.
-- Participants do **not** hold the missing convention (matches the lost-handoff scenario, §8.4):
-  the decisive disambiguator is *outside* the shown prompt (H1_external family).
-- Trial order randomized per participant.
+- Online, **within-subjects**, single ~11-minute session, bilingual (English / 简体中文, chosen on the
+  first page), delivered as one participant link.
+- **3 display conditions × 14 items**, balanced **Latin square**: `condition(group g, item i) =
+  CONDITIONS[(i + g) mod 3]`, `g` assigned round-robin; trial order and the 4 clarifying-option positions
+  randomized per participant. (With 14 items over 3 conditions the per-participant condition counts are
+  4–5 each; across the 3 groups every item appears in all three conditions.)
+- **Completeness factor:** 9 items are **underspecified** (a decisive convention is unstated → appropriate
+  response = flag); 5 items are **complete** (the convention is stated → appropriate response = accept).
+  The complete items break the "always-flag" set (keeping the accept baseline off the floor) and enable the
+  discrimination check. Participants do not hold the missing convention on underspecified items (matches the
+  lost-handoff scenario, §8.4 of the paper).
 
 ## 4. Participants
 
-- **Bilingual** (English / Simplified Chinese, chosen on the first page). Delivered as a single
-  participant link (oTree room / session-wide link), **team-recruited** (Prolific or a local pool /
-  WeChat / university subject pool).
-- **All ages are eligible** (no 18+ gate): we deliberately want variation across age. **Minors (<18)
-  require guardian consent per IRB — confirm the consent/assent procedure before recruiting minors.**
-- **Target N = 55 analyzable; recruit ≈ 65** (≈15% expected exclusions).
-- Payment ≈ ‹CONFIRM› $2 (Prolific) or local-equivalent, for ~10 min.
-- Stopping rule: fixed-N (recruit to the pre-set number); no optional stopping / peeking.
-- Power basis (§10) assumes this N.
+- **All ages eligible** (no 18+ gate): we deliberately want age variation. **Minors (<18) require guardian
+  consent per IRB — confirm the consent/assent procedure before recruiting minors** (‹CONFIRM›). Because
+  Prolific prohibits <18, all-ages recruitment implies a **team/local channel** (university pool / WeChat /
+  平台如见数), not Prolific.
+- **Target ≈ 65 analyzable; recruit with a buffer for exclusions.** If effects may be small, **recruit ≈ 90**
+  (see §10).
+- Payment ≈ ‹CONFIRM› local-equivalent for ~11 min. Fixed-N stopping rule; no optional stopping / peeking.
 
 ## 5. Materials
 
-**5.1 Items (12).** Lay-readable underspecified workplace queries (general-population sample), each
-anchored to one of the paper's H1_external **convention types** (fiscal-year start, rounding/remainder,
-inclusive/exclusive date range, dedup, top-N tie, timezone, unit/scale, percentage base,
-mean-vs-median, business-vs-calendar days, sort tie-break, null/blank handling) — one type per item.
-Each is 2–3 sentences (~30–45 s), contains exactly one decision-relevant **unstated convention** whose
-plausible values yield different answers, and the displayed AI answer silently commits to one reading.
-Items are **bilingual** and identical across the three display conditions; authored by one model family
-and **audited for construct validity by a different family** (`STIMULI-v2.md`). A verbatim expert
-replication on the benchmark's own items is a possible follow-up.
+**5.1 Items (14 = 9 underspecified + 5 complete).** Lay-readable workplace-handoff queries covering the
+paper's H1_external **convention types** (fiscal-year start, rounding/remainder, inclusive/exclusive date
+range, dedup, timezone, percentage base, mean-vs-median, business-vs-calendar days, null/blank). Each
+**underspecified** item's answer silently commits to one value of the unstated convention (appropriate
+response = flag); item answers are stripped of text that would self-disclose the convention. The **5
+complete** items state the convention (e.g., "our fiscal year starts in January"), so the answer is correct
+(appropriate response = accept). Items are bilingual, identical across the three display conditions; authored
+by one model family and **audited for construct validity by a different family** (see `STIMULI-v2.md` /
+`otree/reliance/stimuli.py`).
 
-**5.2 Display conditions (the only manipulation).** The scenario/task/answer text is identical across
-conditions; only the *evidence framing* differs, shown in a **consistent card** with **real model-name
-chips** (ChatGPT, Gemini, Claude, Copilot, DeepSeek). The "agreement" displays are **curated
-illustrations**, disclosed at debrief.
-- **single:** one AI model's answer (1 model chip).
-- **fake:** 5 AI models were asked and all 5 agree (5 chips) + a length-matched neutral note.
-- **dep:** the same 5-model agreement **plus a dependence disclosure that reveals NON-independence,
-  not the correct value**: "⚠ these five answers are not independent — all five made the same single
-  unstated assumption, so together they count as about **one** independent check, not five."
-- **dependence-only (decided):** `dep` discloses non-independence **without naming which convention is
-  correct** — this operationalizes claim D ("surface evidential *dependence*"); a premise-surfaced
-  variant would conflate D with handing over the answer.
-- **Caveat (real names):** real brand names add realism but introduce a possible brand-trust confound;
-  the 1-vs-5 count remains the manipulation, and brand exposure is balanced across items.
+**5.2 Display conditions (the only manipulation).** Scenario/task/answer text is identical across conditions;
+only the evidence framing differs, shown in a **consistent card** with **real model-name chips** (ChatGPT,
+Gemini, Claude, Copilot, DeepSeek; single = 1 chip, fake/dep = 5 chips). The "agreement" displays are
+**curated illustrations**, disclosed at debrief.
+- **single:** one AI model's answer.
+- **fake:** 5 AI models were asked and all 5 agree (+ a length-matched neutral note).
+- **dep:** the same 5-model agreement **plus a mechanism disclosure** — "all five models were sent the
+  **same prompt**, which did not specify one needed detail; each model filled that gap on its own." This
+  states the *cause* of the correlated agreement, **not** a verdict ("counts as one, not five"), so a
+  positive H-U2a reflects the participant reasoning about shared-source dependence, not obeying an
+  instruction to discount. Neutral (non-alarm) styling.
+- **Caveats (‹CONFIRM›, owner-decided):** confidence is a **1–5 star** rating (not a 0–100 slider); real
+  brand names are used (possible brand-trust confound; the 1-vs-5 count is the manipulation and brand
+  exposure is spread across items); the comprehension check's correct option is **pre-selected** (so it is
+  not used as an exclusion).
 
-## 6. Procedure (~10 min)
+## 6. Procedure (~11 min)
 
-1. **Language choice** (English / 简体中文) → Consent (§12).
-2. Instructions (which pre-announce that some tasks show 1 AI model, others 5) + a non-scored
-   **worked example** + one **comprehension check** (correct option pre-selected; ≤2 attempts).
-3. **12 trials.** Each trial: short query + AI answer in the assigned display condition, then:
-   - **Primary behavioral DV — Accept vs Flag** (forced choice):
-     "Would you (a) **use this answer as-is**, or (b) **flag that key information is missing / ask a
-     clarifying question first**?"
-   - If (b): pick which clarifying question is most important from ‹4› options, exactly one of which
-     targets the true missing convention (**objective gap-identification** measure).
-   - **Primary subjective DV — Confidence:** a **1–5 star** rating (1 = not at all sure,
-     5 = completely sure): "How confident are you this answer is correct?"
-   - ≤ ~40 s/trial → ≤ ~8 min for 12 trials.
-4. Brief demographics (**age bracket**, incl. "Under 18") + single AI-literacy item (exploratory).
-5. **Debrief** (§12): the "AI consensus" displays were curated illustrations and the answers were
-   intentionally underspecified; explain the study aim.
+Language choice → **consent** (§13, with a recorded affirmative-consent control) → instructions
+(pre-announcing that some tasks show 1 AI and others 5, and that **some answers are fine to use**) → a
+non-scored **worked example** (which does **not** state the answer key) → comprehension check (correct
+option pre-selected; ≤2 attempts) → **14 trials** → one instructed-response **attention check** (after
+trial 8) → brief demographics (**age bracket**, incl. "Under 18"; + one AI-literacy item) → **debrief**
+(discloses the curated displays and the deliberate underspecification).
+
+Per trial: **Accept-as-is vs Flag-missing-info**; if Flag → pick the most important clarifying question
+(4 options; on underspecified items exactly one is the GOLD); then a **1–5 star confidence** rating.
 
 ## 7. Measures
 
-- **Primary:** (i) accept-as-is (binary, per trial); (ii) confidence (**1–5 star** rating, per trial).
-- **Objective gold (no LLM judge):** gap-identification = picked the clarifying question that names
-  the true missing convention (deterministic scoring against the item key).
-- **Secondary/exploratory:** clarifying-question choice distribution; per-condition RT; moderators.
+- **Primary (confirmatory):** accept-as-is (binary), on **underspecified** items.
+- **Secondary:** confidence (1–5 stars); **discrimination** = accept(complete) − accept(underspecified) by
+  condition; objective **gap-identification** (underspecified & flagged trials only; deterministic scoring
+  against the item key — no LLM judge); first-exposure accept.
+- Recorded per trial: `participant_id, label, item_id, condition, complete, accept, confidence, gap_correct,
+  rt_sec, order_index, group_g, lang` + participant-level exclusion fields.
 
 ## 8. Exclusion criteria (pre-specified, applied before analysis)
 
-Exclude a participant if any: fails the comprehension check twice; fails an embedded
-**instructed-response attention check**; total time < ‹CONFIRM: 120 s› or implausibly fast;
-straight-lines the star rating (zero variance across all 12 trials); duplicate IP/Prolific ID.
-Excluded participants are replaced up to the recruitment cap. Report N excluded per rule.
+Exclude a participant if: fails the **attention check**; total time **< 120 s** (‹CONFIRM›, pilot-refined)
+or implausibly fast; **duplicate** id. (The comprehension check is pre-selected and therefore **not** an
+exclusion. **Confidence-straightlining is NOT an exclusion** — excluding on a DV biases effects; it is a
+reported robustness split.) Excluded participants are replaced up to the recruitment cap; report N excluded
+per rule.
 
 ## 9. Analysis plan
 
-- **Accept (binary) [confirmatory]:** GEE logistic regression, exchangeable working correlation,
-  clustered on participant, with item as fixed-effect covariates (`accept ~ fake + dep + item`).
-  This is the frozen confirmatory engine and matches the power simulation (§10). Primary contrasts:
-  fake−single (H-U1a), dep−fake (H-U2a). A crossed-random-intercept GLMM (participant + item) is
-  reported only as a **sensitivity** check.
-- **Confidence (1–5 stars):** linear mixed model (rating treated as approximately interval; an ordinal
-  mixed model is a sensitivity check), same random-effects structure. Contrasts: fake−single (H-U1b),
-  dep−fake (H-U2b).
-- **Fitting:** Python `statsmodels`, in the frozen script `analysis/preregistered_analysis.py`
-  (accept → GEE, confidence → `MixedLM`). An R `lme4`/`glmmTMB` GLMM may additionally be reported as a
-  sensitivity check. The script is validated on simulated data (rejects all 4 under the pre-registered
-  effect; rejects ~none under the null) and is frozen together with this document.
-- **Multiplicity:** Holm correction across the **four** primary contrasts; one-sided at the
-  directional hypotheses; α = 0.05 family-wise. Report adjusted p, effect sizes (odds ratios /
-  mean diffs), and 95% CIs.
-- **Confirmatory vs exploratory** strictly separated in reporting.
-- The analysis script is written against **simulated** data and frozen with this document; only the
-  input data file changes at run time.
+- **PRIMARY (confirmatory) = the two behavioral accept contrasts on UNDERSPECIFIED items:** GEE logistic
+  regression, exchangeable working correlation, clustered on participant, item fixed effects,
+  **Mancl–DeRouen bias-reduced covariance**. Contrasts H-U1a (fake vs single), H-U2a (dep vs fake),
+  directional one-sided, **Holm** over the 2 at family-wise α = 0.05. This is the frozen engine and matches
+  the power simulation (§10). A crossed-random-intercept GLMM is a sensitivity check.
+- **Calibration safeguard:** GEE is mildly liberal in small samples (FWER ≈ 0.07 in the N=65 null
+  simulation), so a **cluster-permutation test** (shuffling condition labels within participant) is
+  pre-registered as the calibrated sensitivity analysis, and calibration is re-checked at the pilot.
+- **SECONDARY:** confidence contrasts H-U1b/H-U2b (GEE Gaussian, same structure; the 1–5 rating treated as
+  approximately interval, with an ordinal mixed model as sensitivity); **discrimination** (condition ×
+  completeness interaction on accept, over all 14 items); first-exposure; gap-identification. Reported
+  descriptively / with uncorrected one-sided p, **not** in the Holm family.
+- **Toolchain:** Python `statsmodels`, frozen script `analysis/preregistered_analysis.py`; power in
+  `analysis/power_analysis.py`. The script is validated on simulated data (rejects both primary contrasts
+  under the pre-registered effect, ~none under the null) and frozen with this document.
+- Confirmatory vs exploratory strictly separated in reporting.
 
 ## 10. Power analysis
 
-Simulation-based (GEE logistic, participant- and item-level random intercepts; 400 sims/point).
-Assumptions: p(accept | single)=0.55, **fake=0.72** (correlation-neglect effect ≈ +17 pp),
-**dep=0.56** (disclosure ≈ restores to single), SD_participant=0.6, SD_item=0.5 (logit),
-one-sided α=0.025 per family.
+Simulation-based (`analysis/power_analysis.py`; GEE logistic with participant + item random intercepts;
+150 sims/cell), family-wise Holm over the 2 primary accept contrasts.
 
-| items | N | power H-U1 (fake>single) | power H-U2 (dep<fake) | **both** |
+| effect | N | power H-U1a | power H-U2a | **both** |
 |---|---|---|---|---|
-| 9  | 50 | 0.80 | 0.76 | 0.66 |
-| **12** | **50** | **0.93** | **0.90** | **0.85** |
-| 12 | 60 | 0.94 | 0.93 | 0.90 |
-| 12 | 50 (conservative: fake=.68, dep=.58) | 0.71 | 0.53 | 0.43 |
+| pre-registered (underspecified accept single/fake/dep ≈ .40/.57/.42) | 50 | 0.98 | 0.95 | 0.93 |
+| pre-registered | **65** | 0.97 | 0.97 | **0.95** |
+| pre-registered | 80 | 0.99 | 0.99 | 0.99 |
+| **conservative** (fake +0.5 logit; dep restores) | 65 | 0.62 | 0.64 | **0.49** |
+| conservative | 90 | 0.83 | 0.84 | **0.76** |
 
-**Decision:** **12 items, recruit ≈65 → ≈55 analyzable.** H-U2 (D) is the power-limiting arm; if the
-disclosure effect is weak the study is underpowered for D, so the **dep** manipulation should be made
-maximally salient. **Smallest effect of interest (pre-registered):** fake−single ≥ ‹CONFIRM: 10 pp›
-on accept-rate; dep−fake ≥ ‹CONFIRM: 8 pp›. Effects below these are treated as "not detected," not
-"absent." (The power table concerns the behavioral accept DV; the confidence DV — a 1–5 star rating —
-is an additional secondary safeguard.)
+**Decision:** **recruit ≈ 65** for the expected effect (both-power 0.95); **recruit ≈ 90 if effects may be
+small.** Calibration (N=65 null): per-test type-I ≈ 0.047; FWER ≈ 0.07 → the permutation sensitivity (§9)
+and a pilot calibration check guard against the mild liberality. **Smallest effects of interest
+(pre-registered):** fake−single ≥ ‹CONFIRM: 8 pp› on accept; dep−fake ≥ ‹CONFIRM: 6 pp›.
 
-## 11. Deviations log
+## 11. Mandatory pilot (go / no-go) — before freeze / launch
 
-(Empty at freeze. Any post-freeze change is appended here with date + reason; it does not alter the
-confirmatory analysis.)
+Run a **design-validation pilot, n ≈ 20**, on the real app (data discarded). Proceed **only if all** hold;
+otherwise revise and re-pilot:
+1. **Ceiling/floor:** accept(single, underspecified) ∈ **[0.35, 0.75]**.
+2. **Manipulation:** accept(fake) − accept(single) on underspecified ≥ **+5 pp** in the predicted direction.
+3. **Gap-ID informativeness:** GOLD accuracy **< 0.90** (else harden the distractors).
+4. **Suspicion funnel:** **< 40%** of pilot participants correctly name the hypothesis (blind-coded probe).
+5. Re-estimate power at the pilot baseline and set final N.
 
-## 12. Ethics
+## 12. Deviations log
+(Empty at freeze. Any post-freeze change is appended with date + reason; it does not alter the confirmatory
+analysis.)
+
+## 13. Ethics
 
 - IRB / exemption: ‹CONFIRM: Chang'an University route›. Do not launch before determination.
-- Informed consent before any stimulus; voluntary; withdraw anytime.
-- **Deception:** mild — displays are curated and answers intentionally underspecified; **full debrief**
-  at the end explains this and the aim. No sensitive data collected.
-- Data: anonymous platform IDs only; store de-identified; no free-text PII requested.
-- Fair pay (≈ $12/hr).
+- **Consent:** a recorded affirmative-consent control before any stimulus; PI name, IRB #, compensation,
+  voluntary withdrawal, and a decline path stated (see `ethics/consent.md`). **All ages**; minors need
+  guardian consent (‹CONFIRM›).
+- **Deception (mild):** the multi-model "agreement" displays are curated and the items intentionally
+  underspecified; a **full debrief** discloses this and the aim.
+- Data: anonymous platform/label IDs only; stored de-identified; retained ‹N years›; aggregate/anonymized
+  results may be shared with the paper (OSF).
 
----
-
-### Open items to confirm with owner before freezing
-1. Platform (Prolific) + budget/payment.
-2. `dep` = dependence-only (recommended) vs premise-surfaced.
-3. The 12 items: domains + exact convention per item (needs a separate stimulus spec).
-4. Exclusion thresholds (min time, comprehension attempts).
-5. Smallest-effect-of-interest values.
-6. IRB route at Chang'an University.
-7. Analysis toolchain (R lme4 vs Python).
+### Open items to confirm before freezing
+Platform/recruitment channel & pay; minors' guardian-consent procedure (or restrict to 18+); min-time
+threshold; smallest effects of interest; IRB route; whether to keep 1–5 stars vs 0–100 and real vs generic
+model names (currently kept per owner).

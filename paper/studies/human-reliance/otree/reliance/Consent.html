@@ -3,7 +3,7 @@
 {{ wrap_open }}
 <p>{{ T.consent_p1 }}</p>
 <p style="color:#555;">{{ T.consent_p2 }}</p>
-<p><b>{{ T.consent_agree }}</b></p>
+<p><label><input type="checkbox" name="consent"> {{ T.consent_agree }}</label></p>
 <button type="submit" class="btn btn-primary">{{ T.next }}</button>
 {{ wrap_close }}
 {{ endblock }}

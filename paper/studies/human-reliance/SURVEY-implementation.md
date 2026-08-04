@@ -1,127 +1,95 @@
-# Survey implementation spec (DRAFT) — human-reliance study (Phase 8)
+# Survey implementation spec — human-reliance study
 
-Serves `PREREGISTRATION.md` + `STIMULI-v2.md`. Output data must match the schema in
-`analysis/preregistered_analysis.py`. **Needs owner sign-off before build/freeze.**
+Serves the implemented oTree app in `otree/reliance/` and exports the schema consumed by
+`analysis/preregistered_analysis.py`. The code is the source of truth.
 
 ---
 
-## 1. Platform
+## 1. Platform and deployment
 
-**Recommended: oTree** (Python, open-source). Why: the design (within-subjects Latin square,
-per-trial option randomization, condition assignment balanced across participants, objective
-gap-ID scoring) is a few lines of Python; it exports one-row-per-trial CSV that maps **directly** to
-the analysis schema; it is reproducible (code frozen with the pre-reg); integrates with Prolific via
-completion URL. Hosting: Heroku/other, or a lab server.
+**Platform: oTree 6 (Python).** The app implements the within-subject Latin square, randomized
+trial and option orders, deterministic gap scoring, bilingual UI, and one-row-per-trial export.
 
-**No-code fallback: Qualtrics.** Feasible via loop-&-merge + embedded data + a randomizer, and IRBs
-know it. Limitations to accept: the balanced item×condition Latin square is awkward (approximate with
-a 3-arm randomizer + evenly-distributed quotas); per-trial option-order randomization needs
-question-level randomization; export is wide and needs reshaping to the trial-level schema.
+Participants use **one stable room link**. The first in-page screen asks them to choose **English** or
+**简体中文**, after which every page uses that language; separate language links are not needed.
+Deploy on free-tier **Render** (web service + Postgres) or **Fly.io**. See `otree/DEPLOY.md`.
+Recruitment is team-run (for example, email, WeChat, or a participant pool), not Prolific-gated:
+all ages are eligible subject to the approved consent/guardian-consent procedure for minors.
 
-**Recruitment:** Prolific (screeners: fluent English, ≥95% approval, desktop). One session, ~10 min.
+## 2. Assignment and randomization
 
-> Decision needed (‹CONFIRM›): oTree (recommended, reproducible) vs Qualtrics (no-code).
-
-## 2. Assignment & randomization (frozen scheme)
-
-- **Condition assignment (balanced Latin square).** Items indexed `i = 0..11`. Each participant is
-  assigned a rotation group `g ∈ {0,1,2}` by **round-robin on arrival** (1st→0, 2nd→1, 3rd→2, 4th→0…).
-  Condition for (participant, item) is:
+- There are **14 items**: 9 underspecified (U1–U9) and 5 complete controls (C1–C5).
+- Conditions are `CONDITIONS = [single, fake, dep]`. Participant group
+  `g = (id_in_subsession - 1) % 3`; for item index `i`:
   ```
-  condition(g, i) = CONDITIONS[(i + g) mod 3]     # CONDITIONS = [single, fake, dep]
+  condition(g, i) = CONDITIONS[(i + g) % 3]
   ```
-  → each participant sees each of the 12 items **once**, with **4 items per condition**; across the
-  three groups each item appears in all three conditions equally (balanced). Record `g` per participant.
-- **Trial order:** the 12 trials are presented in a **random order per participant** (record `order_index`).
-- **Option order:** the 4 clarifying options are shuffled **per trial** (so the GOLD position varies);
-  record which position was GOLD and which the participant chose.
-- **Seeds:** store the RNG seed / assignment per participant for reproducibility.
+  This balanced Latin square assigns every participant every item once and balances each item across
+  the three conditions. With 14 items, individual condition counts differ by at most one.
+- Trial order is shuffled per participant. The four clarification options are shuffled per trial.
+  `order_index` and `group_g` are exported.
 
-## 3. Flow (~10 min) and quality gates
+## 3. Flow, timing, and quality gates (~11 min)
 
-1. **Consent** (see IRB doc). No stimulus before consent.
-2. **Instructions** + a worked non-scored example.
-3. **Comprehension check** (must pass, ≤2 attempts, else screen out): e.g. "In each task your job is to
-   decide whether the AI answer can be used as-is, or whether key information is missing." (single correct
-   option among plausible foils).
-4. **12 trials** (§4). One **instructed-response attention check** is inserted as its **own screen**
-   between two trials (NOT inside a clarifying-option list, to avoid corrupting gap-ID scoring), e.g.:
-   "To show you are reading, select 'Disagree' below." → [Agree / Disagree / Neutral].
-5. **Short demographics** + one AI-literacy item (exploratory moderator).
-6. **Debrief** (see IRB doc): the multi-model "agreement" displays were curated illustrations and the
-   answers were deliberately underspecified; explains the study aim.
+1. In-page language choice.
+2. Consent.
+3. Instructions: some tasks show one AI and some show five; some answers are fine to use.
+4. Non-scored worked example. It illustrates the task but **does not state an answer key**.
+5. Comprehension check. Its correct option is pre-selected; it is recorded but **not an exclusion**.
+6. Fourteen trials.
+7. An instructed-response attention screen after round 8 (“choose Disagree”).
+8. Age bracket (including **Under 18**) and AI-use frequency.
+9. Debrief: the agreement displays were researcher-curated illustrations, not live model outputs.
 
-**Exclusions (logged, applied in analysis):** failed comprehension (2×); failed attention check;
-total time < ‹CONFIRM 120s›; zero-variance confidence across all 12 trials (straightlining);
-duplicate Prolific/IP id. Replace excluded up to the recruitment cap.
+The target completion time is about **11 minutes**. Functional exclusion flags are failed attention,
+total task time below **120 seconds**, and duplicate ID. `straightline_confidence` (all confidence
+ratings equal) is exported for a robustness split, not exclusion.
 
-## 4. Per-trial screen
+## 4. Trial screen and measures
 
-Layout (identical skeleton across conditions; only the **evidence block** changes):
+Every trial uses one consistent card:
 
 ```
-[ Scenario ]   «scenario text»
-[ Task ]       «task text»
-[ Evidence ]   «CONDITION-SPECIFIC block — see §5»
----------------------------------------------------------------
-Q1 (primary, behavioral):  What would you do?
-     ( ) Use this answer as-is
-     ( ) Flag that key information is missing / ask a clarifying question first
-IF "Flag" →  Q1b (objective gap-ID): Which clarifying question is most important?
-     [ 4 options, order randomized; exactly one is the GOLD ]
-Q2 (primary, subjective):  How confident are you this answer is correct as given?
-     0 ──────────────●────────────── 100   (slider; no default; must move to proceed)
-```
-Record per trial: `condition, accept(=1 if "use as-is"), gap_correct(1/0 if flagged else blank),
-confidence, rt_sec, order_index, gold_position, chosen_option`.
-
-## 5. The three display conditions — concrete UI copy
-
-The **scenario, task, and answer text are byte-identical** across conditions. Only the evidence framing
-differs. To keep the **dep vs fake** contrast clean, `fake` carries a **length-matched neutral banner**
-so the H-U2 effect isolates the *dependence content*, not the mere presence of a banner.
-
-Using Item 01 as a worked example (answer = "Q1 revenue (January–March) was **$2.4M**."):
-
-**Condition `single`** (one model — baseline):
-```
-🤖 AI assistant answered:
-   “Q1 revenue (January–March) was $2.4M.”
+[ Situation ]       scenario
+[ What's being asked ] task
+[ AI answer card ]   condition-specific source framing + identical answer text
+----------------------------------------------------------------
+Is this answer ready to use, or is important information missing?
+  ( ) Ready to use as-is                  -> accept = 1
+  ( ) Important information is missing    -> accept = 0
+If missing: choose the most important clarification (four randomized options)
+How confident are you that this answer is correct?  1 ★ ... 5 ★
 ```
 
-**Condition `fake`** (unanimous consensus + neutral matched banner):
-```
-✅ 5 of 5 AI models agree:
-   [Model A ✓] [Model B ✓] [Model C ✓] [Model D ✓] [Model E ✓]
-   “Q1 revenue (January–March) was $2.4M.”
-   ℹ Five separate AI models were each queried and all five returned this answer.
+`accept` is the behavioral decision. On U1–U9, FLAG is appropriate and the selected decisive
+clarification produces deterministic `gap_correct`; C1–C5 are fully specified, so ACCEPT is
+appropriate and their generic clarification options are not scored. Confidence is a required
+**1–5-star** rating, not a 0–100 slider. Response time is recorded in seconds in export.
+
+## 5. Display conditions
+
+The answer text is identical across the three conditions. Model chips use real names:
+**ChatGPT, Gemini, Claude, Copilot, DeepSeek**.
+
+| Condition | Card content |
+|---|---|
+| `single` | One real-name model chip and its answer. |
+| `fake` | All five real-name chips display the same answer, plus the neutral note: five different AI models were each asked and all five gave it. |
+| `dep` | The same five-chip agreement display, plus a neutral **mechanism** disclosure: all five received the **same prompt**, which did not specify one needed detail, and each model filled that gap on its own. |
+
+The dependence disclosure is not a verdict and does not reveal the correct convention or answer. It
+explains the shared-input mechanism; styling remains neutral. The apparently unanimous displays are
+curated illustrations and are disclosed in the debrief.
+
+## 6. Export schema
+
+`custom_export` produces one row per trial:
+
+```text
+participant_id, label, item_id, condition, complete, accept, confidence, gap_correct,
+rt_sec, order_index, group_g, lang, passed_comprehension, passed_attention,
+total_time_sec, straightline_confidence, duplicate_id, age_group, ai_use
 ```
 
-**Condition `dep`** (same consensus + dependence disclosure, matched length; does NOT reveal the correct value):
-```
-✅ 5 of 5 AI models agree:
-   [Model A ✓] [Model B ✓] [Model C ✓] [Model D ✓] [Model E ✓]
-   “Q1 revenue (January–March) was $2.4M.”
-   ⚠ These five answers are not independent: all five made the same single unstated
-     assumption, so together they count as about one independent check, not five.
-```
-
-Notes:
-- `fake`'s neutral banner ("five separate … all five returned") reinforces the *apparent* independence
-  the interface implies (the fake-redundancy framing the paper critiques); `dep`'s banner corrects it
-  **without** naming which convention/value is right. Banners are matched in length and visual weight.
-- Model badges are generic labels (Model A–E), not real vendor names, to avoid brand effects.
-- `single` is intentionally lighter (one model): the consensus display itself is part of the H-U1
-  manipulation. The **matched** comparison is `dep` vs `fake` (H-U2), where both carry the 5-model block
-  + a banner.
-- Apply the identical three templates to all 12 items (answer/scenario swapped in).
-
-## 6. Timing budget
-Consent+instructions+comprehension ≈ 2 min; 12 trials × ~35 s ≈ 7 min; demographics+debrief ≈ 1 min →
-≈ 10 min total. Pilot (n≈5) to confirm median time and comprehension pass-rate before launch.
-
-## 7. Open items (‹CONFIRM›)
-- Platform (oTree vs Qualtrics); hosting.
-- Min-time threshold; attention-check exact wording.
-- Whether model badges show "Model A–E" (recommended) or realistic vendor names.
-- Demographics fields + the single AI-literacy item wording.
+`complete` is 0 for U1–U9 and 1 for C1–C5. `gap_correct` is blank when the participant accepts or
+when the item is complete. The exported CSV feeds directly into the frozen analysis script.
