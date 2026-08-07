@@ -7,9 +7,9 @@ services:
     runtime: python
     plan: free                       # free web service (sleeps after ~15 min idle)
     rootDir: paper/studies/human-reliance/otree
-    # resetdb creates the DB tables. NOTE: it runs on EVERY deploy and WIPES data, so once you
-    # start collecting, do NOT push/redeploy until you have exported your data.
-    buildCommand: pip install -r requirements.txt && otree resetdb --noinput
+    # Database tables were initialized during the one-time reset deploy on 2026-08-07.
+    # Never run resetdb automatically: it would wipe pilot/production responses.
+    buildCommand: pip install -r requirements.txt
     startCommand: otree prodserver $PORT
     envVars:
       - key: OTREE_PRODUCTION
