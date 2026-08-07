@@ -33,7 +33,7 @@ Usage:
   python preregistered_analysis.py --data real.csv # frozen analysis on real data
 
 Real-data CSV schema (one row per completed trial; oTree custom export):
-  participant_id, label, item_id, condition{single|fake|dep}, complete{0,1}, accept{0,1},
+  session_code, participant_id, label, item_id, condition{single|fake|dep}, complete{0,1}, accept{0,1},
   confidence{1..5}, gap_correct{0,1 or blank}, rt_sec, order_index, group_g, lang,
   passed_comprehension, passed_attention, total_time_sec, straightline_confidence, duplicate_id,
   age_group, ai_use

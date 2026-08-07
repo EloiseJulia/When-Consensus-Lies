@@ -269,7 +269,7 @@ page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, 
 
 # ----------------------------------------------------------------- export (matches analysis schema)
 def custom_export(players):
-    yield ['participant_id', 'label', 'item_id', 'condition', 'complete', 'accept', 'confidence',
+    yield ['session_code', 'participant_id', 'label', 'item_id', 'condition', 'complete', 'accept', 'confidence',
            'gap_correct', 'rt_sec', 'order_index', 'group_g', 'lang', 'passed_comprehension',
            'passed_attention', 'total_time_sec', 'straightline_confidence', 'duplicate_id',
            'age_group', 'ai_use']
@@ -301,7 +301,7 @@ def custom_export(players):
             complete = 1 if t.get('complete') else 0
             gc = p.field_maybe_none('gap_correct')
             rt = p.field_maybe_none('rt_ms')
-            yield [part.code, label, item_id, t.get('cond', ''), complete,
+            yield [p.session.code, part.code, label, item_id, t.get('cond', ''), complete,
                    p.field_maybe_none('accept'), p.field_maybe_none('confidence'),
                    '' if gc is None else gc,
                    '' if rt is None else round(rt / 1000.0, 1),
