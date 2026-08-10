@@ -41,9 +41,9 @@ all ages are eligible subject to the approved consent/guardian-consent procedure
 8. Age bracket (including **Under 18**) and AI-use frequency.
 9. Debrief: the agreement displays were researcher-curated illustrations, not live model outputs.
 
-The target completion time is about **11 minutes**. Functional exclusion flags are failed attention,
-total task time below **120 seconds**, and duplicate ID. `straightline_confidence` (all confidence
-ratings equal) is exported for a robustness split, not exclusion.
+The target completion time is about **11 minutes**. Participants are excluded only for a failed
+attention check or a duplicate ID. Fast completion and uniform confidence ratings are retained;
+`total_time_sec` and `straightline_confidence` are descriptive fields only.
 
 ## 4. Trial screen and measures
 
@@ -58,13 +58,14 @@ Is this answer ready to use, or is important information missing?
   ( ) Ready to use as-is                  -> accept = 1
   ( ) Important information is missing    -> accept = 0
 If missing: choose the most important clarification (four randomized options)
-How confident are you that this answer is correct?  1 ★ ... 5 ★
+How confident are you that the displayed AI answer itself is correct and ready to use?  1 ★ ... 5 ★
 ```
 
 `accept` is the behavioral decision. On U1–U9, FLAG is appropriate and the selected decisive
 clarification produces deterministic `gap_correct`; C1–C5 are fully specified, so ACCEPT is
-appropriate and their generic clarification options are not scored. Confidence is a required
-**1–5-star** rating, not a 0–100 slider. Response time is recorded in seconds in export.
+appropriate and their generic clarification options are not scored. Confidence refers specifically
+to the **displayed AI answer**, not to the participant's decision or chosen clarification. It is a
+required **1–5-star** rating, not a 0–100 slider. Response time is recorded in seconds in export.
 
 ## 5. Display conditions
 

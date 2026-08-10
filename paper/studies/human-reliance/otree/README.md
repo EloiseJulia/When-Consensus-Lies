@@ -48,10 +48,11 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
   `Copilot`, `DeepSeek`). `single` shows one chip; `fake` and `dep` show five agreeing chips.
   `dep` adds a neutral shared-prompt mechanism disclosure—not a correctness verdict.
 - **Measures:** `accept` (use as-is / flag), conditional `gap_choice`, deterministic `gap_correct`,
-  required **1–5-star** `confidence`, and `rt_ms` (exported as `rt_sec`).
+  required **1–5-star** `confidence` in the displayed AI answer itself, and `rt_ms` (exported as
+  `rt_sec`).
 - **Quality fields:** comprehension is recorded but its correct option is pre-selected and it is not
-  an exclusion. Attention appears after round 8. Analysis excludes failed attention, task time
-  below 120 seconds, and duplicate IDs; confidence straightlining is a robustness split.
+  an exclusion. Attention appears after round 8. Analysis excludes only failed attention and duplicate
+  IDs; fast completion and confidence straightlining are retained.
 - **Demographics:** age bracket including “Under 18” and AI-use frequency.
 
 ## Export
@@ -59,7 +60,7 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
 `custom_export` emits:
 
 ```text
-participant_id,label,item_id,condition,complete,accept,confidence,gap_correct,rt_sec,
+session_code,participant_id,label,item_id,condition,complete,accept,confidence,gap_correct,rt_sec,
 order_index,group_g,lang,passed_comprehension,passed_attention,total_time_sec,
 straightline_confidence,duplicate_id,age_group,ai_use
 ```

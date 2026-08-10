@@ -88,7 +88,8 @@ On each trial participants choose:
 - **Important information is missing** (`accept=0`), then, if flagging, the most important
   clarification from four randomized options.
 
-They then provide a required **1–5-star confidence** rating. On underspecified trials only, the
+They then provide a required **1–5-star confidence** rating in the displayed AI answer itself
+(not in their own decision or selected clarification). On underspecified trials only, the
 single decisive clarification is scored deterministically as `gap_correct`; complete trials have
 generic options and no gap score. Response time, language, age bracket (including Under 18), and
 AI-use frequency are retained.
@@ -98,12 +99,11 @@ AI-use frequency are retained.
 The implemented, functional participant-level exclusions are:
 
 1. failed instructed-response attention check;
-2. total recorded trial time below 120 seconds;
-3. duplicate ID.
+2. duplicate ID.
 
-Comprehension is not excluded because its correct response is pre-selected. Uniform confidence
-ratings are retained and supplied as `straightline_confidence` for a robustness split rather than an
-exclusion.
+Comprehension is not excluded because its correct response is pre-selected. Fast completion and
+uniform confidence ratings are retained; `total_time_sec` and `straightline_confidence` are descriptive
+fields rather than exclusion rules.
 
 ## 7. Sample, calibration, and pilot gate
 

@@ -15,13 +15,14 @@ Adapt to the Chang'an University IRB/ethics form. `‹…›` = fill in. Minimal
   → consent → instructions → a non-scored worked example → comprehension check → **14 short trials** (each:
   a workplace scenario + task + an AI answer shown as single-model / "5/5 agree" / dependence-mechanism
   disclosure; participant chooses use-as-is vs flag-missing-info, optionally picks a clarifying question,
-  and gives a 1–5 star confidence) → 1 attention check → brief demographics → **debrief**. 9 items are
+  and gives a 1–5 star rating of confidence in the displayed AI answer itself) → 1 attention check →
+  brief demographics → **debrief**. 9 items are
   underspecified (missing a convention) and 5 are well-specified.
 - **Participants:** ‹recruit ~65–90, ~55–80 analyzable›; **all ages eligible** (we want age variation).
   **Minors (<18) require guardian consent** — describe the guardian-consent/assent procedure, **or restrict
   to 18+**. Recruited via a team/local channel (university pool / WeChat / a survey platform); **not**
   Prolific (which prohibits <18).
-- **Recruitment/compensation:** ≈ ‹local-equivalent of $2› for ~11 min.
+- **Recruitment/compensation:** Team-recruited volunteers; no payment.
 - **Risks:** Minimal — brief, non-sensitive workplace judgments; no distressing content. **Deception
   (mild):** the AI "answers" and the "5/5 agreement" are **curated illustrations**, not live model outputs;
   participants may assume they are real. **Justification:** the research question (response to *apparent*
@@ -29,7 +30,7 @@ Adapt to the Chang'an University IRB/ethics form. `‹…›` = fill in. Minimal
   non-deceptive alternative. **Mitigation:** the consent states some details are withheld until the end; a
   **full debrief** discloses the curation and purpose.
 - **Benefits:** No direct benefit; advances understanding of trust in multi-model AI interfaces.
-- **Privacy/data:** No direct identifiers; only an anonymous platform/label ID (payment + duplicate
+- **Privacy/data:** No direct identifiers; only an anonymous platform/label ID (duplicate
   detection). Stored de-identified on ‹secure store›; retained ‹N years›; aggregate/anonymized results may
   be shared publicly (e.g., OSF) with the paper.
 - **Voluntariness:** Fully voluntary; withdraw anytime by closing the window; ‹data-withdrawal procedure —

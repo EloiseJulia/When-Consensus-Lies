@@ -13,7 +13,8 @@ minutes).
 **What will I do?** After a brief instruction screen, a worked example, and a quick comprehension check,
 you will see **14 short scenarios**. Each shows a task and an AI-assistant answer; you decide whether the
 answer can be used as-is or whether important information is missing, sometimes pick a follow-up question,
-and give a 1–5 star confidence rating.
+and give a 1–5 star rating of confidence that the displayed AI answer itself is correct and ready
+to use (not confidence in your own choice).
 
 **Withheld information.** So the study works, **some details about its exact purpose are not described
 here; they will be fully explained at the end.** Nothing you do carries any risk beyond ordinary computer
@@ -22,13 +23,11 @@ use.
 **Risks & benefits.** Risks are minimal — brief, non-sensitive tasks. There is no direct benefit to you;
 your responses help research on how people use AI tools.
 
-**Compensation.** You will receive ‹amount› on completion, per the recruiting platform's terms.
-
 **Who can take part.** People of **any age** may take part. **If you are under 18, a parent or guardian
 must give permission** (‹guardian-consent procedure — CONFIRM›).
 
 **Confidentiality.** We do **not** collect your name or contact details. We record only an anonymous
-participant ID (for payment and to prevent duplicate participation) and your task responses. Data are
+participant ID (to prevent duplicate participation) and your task responses. Data are
 stored de-identified and reported only in aggregate; anonymized data may be shared publicly with the
 research (e.g., on OSF).
 

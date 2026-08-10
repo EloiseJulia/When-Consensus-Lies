@@ -38,7 +38,9 @@ detail unspecified — each model filled it on its own; the disclosure does **no
 - **H-U2a (D):** P(accept-as-is | dep)  < P(accept-as-is | fake)
 
 **Secondary (pre-registered, not in the confirmatory family):**
-- **H-U1b / H-U2b (confidence):** the same fake>single / dep<fake pattern on the 1–5 star confidence rating.
+- **H-U1b / H-U2b (confidence):** the same fake>single / dep<fake pattern on the 1–5 star rating
+  of confidence that the **displayed AI answer itself is correct and ready to use** (not confidence
+  in the participant's decision or selected clarification).
 - **Discrimination (H-Disc):** displayed consensus degrades the ability to tell a well-specified answer
   from an underspecified one — i.e., **fake shrinks** the accept gap [accept(complete) − accept(underspec)]
   vs single (condition × completeness interaction < 0), and **dep restores** it.
@@ -67,7 +69,7 @@ Exploratory: first-exposure (first-trial) read; gap-identification accuracy; age
   平台如见数), not Prolific.
 - **Target ≈ 65 analyzable; recruit with a buffer for exclusions.** If effects may be small, **recruit ≈ 90**
   (see §10).
-- Payment ≈ ‹CONFIRM› local-equivalent for ~11 min. Fixed-N stopping rule; no optional stopping / peeking.
+- Team-recruited volunteers; no payment. Fixed-N stopping rule; no optional stopping / peeking.
 
 ## 5. Materials
 
@@ -107,7 +109,8 @@ trial 8) → brief demographics (**age bracket**, incl. "Under 18"; + one AI-lit
 (discloses the curated displays and the deliberate underspecification).
 
 Per trial: **Accept-as-is vs Flag-missing-info**; if Flag → pick the most important clarifying question
-(4 options; on underspecified items exactly one is the GOLD); then a **1–5 star confidence** rating.
+(4 options; on underspecified items exactly one is the GOLD); then a **1–5 star rating of confidence
+in the displayed AI answer itself**.
 
 ## 7. Measures
 
@@ -180,7 +183,7 @@ analysis.)
 ## 13. Ethics
 
 - IRB / exemption: ‹CONFIRM: Chang'an University route›. Do not launch before determination.
-- **Consent:** a recorded affirmative-consent control before any stimulus; PI name, IRB #, compensation,
+- **Consent:** a recorded affirmative-consent control before any stimulus; PI name, IRB #,
   voluntary withdrawal, and a decline path stated (see `ethics/consent.md`). **All ages**; minors need
   guardian consent (‹CONFIRM›).
 - **Deception (mild):** the multi-model "agreement" displays are curated and the items intentionally
