@@ -2,7 +2,7 @@
 """All UI strings, bilingual. UI[lang] is passed to templates as `T`. Keep keys in sync across langs.
 MODELS = the model names shown on the answer cards (single = 1 name, multi = all 5)."""
 
-MODELS = ["ChatGPT", "Gemini", "Claude", "Copilot", "DeepSeek"]
+MODELS = ["ChatGPT", "Gemini", "Claude", "MAI", "DeepSeek"]
 
 UI = {
     "en": {

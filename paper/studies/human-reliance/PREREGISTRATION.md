@@ -86,7 +86,7 @@ by one model family and **audited for construct validity by a different family**
 
 **5.2 Display conditions (the only manipulation).** Scenario/task/answer text is identical across conditions;
 only the evidence framing differs, shown in a **consistent card** with **real model-name chips** (ChatGPT,
-Gemini, Claude, Copilot, DeepSeek; single = 1 chip, fake/dep = 5 chips). The "agreement" displays are
+Gemini, Claude, MAI, DeepSeek; single = 1 chip, fake/dep = 5 chips). The "agreement" displays are
 **curated illustrations**, disclosed at debrief.
 - **single:** one AI model's answer.
 - **fake:** 5 AI models were asked and all 5 agree (+ a length-matched neutral note).

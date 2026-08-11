@@ -45,7 +45,7 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
   so FLAG is appropriate and one randomized option is scored as GOLD. C1–C5 set `complete=True`:
   the convention is stated, so ACCEPT is appropriate; they show generic options and no gap score.
 - **Display cards:** all use the same card style and real-name chips (`ChatGPT`, `Gemini`, `Claude`,
-  `Copilot`, `DeepSeek`). `single` shows one chip; `fake` and `dep` show five agreeing chips.
+  `MAI`, `DeepSeek`). `single` shows one chip; `fake` and `dep` show five agreeing chips.
   `dep` adds a neutral shared-prompt mechanism disclosure—not a correctness verdict.
 - **Single-page trial:** `Trial` contains `accept` (use as-is / flag), required **1–5-star**
   `confidence` in the displayed AI answer itself, and `rt_ms`. The clarification section is hidden

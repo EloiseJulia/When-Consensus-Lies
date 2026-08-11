@@ -79,7 +79,7 @@ before continuing; the revised value is the value retained in the final export.
 ## 5. Display conditions
 
 The answer text is identical across the three conditions. Model chips use real names:
-**ChatGPT, Gemini, Claude, Copilot, DeepSeek**.
+**ChatGPT, Gemini, Claude, MAI, DeepSeek**.
 
 | Condition | Card content |
 |---|---|

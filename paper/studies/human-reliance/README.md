@@ -67,8 +67,8 @@ card; only their source framing differs.
 
 | Condition | Display |
 |---|---|
-| `single` | One chip carrying one real model name: ChatGPT, Gemini, Claude, Copilot, or DeepSeek. |
-| `fake` | Five real-name chips—ChatGPT, Gemini, Claude, Copilot, DeepSeek—all show the same answer, with a neutral note that five different models were asked. |
+| `single` | One chip carrying one real model name: ChatGPT, Gemini, Claude, MAI, or DeepSeek. |
+| `fake` | Five real-name chips—ChatGPT, Gemini, Claude, MAI, DeepSeek—all show the same answer, with a neutral note that five different models were asked. |
 | `dep` | The same five-chip agreement display, plus a neutral mechanism disclosure: all five received the **same prompt**, which omitted one needed detail, and each filled that gap on its own. |
 
 The `dep` text is not a verdict and does not identify the omitted convention or correct answer. The

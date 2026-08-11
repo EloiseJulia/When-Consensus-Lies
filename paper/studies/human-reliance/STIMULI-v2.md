@@ -70,7 +70,7 @@ but `gap_correct` is intentionally blank for complete items.
 - The visible answer is unchanged across conditions. Only the source framing changes: one model
   (`single`), five apparently agreeing models (`fake`), or the same five-model display plus a neutral
   explanation that the common prompt omitted a needed detail (`dep`).
-- The five-model displays use the real-name chips **ChatGPT, Gemini, Claude, Copilot, DeepSeek**.
+- The five-model displays use the real-name chips **ChatGPT, Gemini, Claude, MAI, DeepSeek**.
 
 See `SURVEY-implementation.md` for the interface and `otree/reliance/stimuli.py` for the exact
 bilingual wording and scoring keys.
