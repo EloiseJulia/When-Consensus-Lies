@@ -89,9 +89,10 @@ Each trial uses one page. Participants choose:
 - **Important information is missing** (`accept=0`).
 
 They then provide a required **1–5-star confidence** rating in the displayed AI answer itself
-(not in their own decision or selected clarification). The clarification section is initially hidden
-and appears when they choose Flag; it sits below the Back and Confirm buttons. Confirming with Flag
-requires a clarification choice, including the fixed **Other** option. A real previous-page control can
+(not in their own decision or selected clarification). The clarification section is initially hidden.
+The first click on Confirm commits the decision and confidence client-side, locks them, and reveals
+the clarification section below the Back and Confirm buttons. A second click submits the item;
+Flag requires a clarification choice, including the fixed **Other** option. A real previous-page control can
 return to the instructions or an earlier trial; earlier
 responses may be edited and the revised values are retained. On underspecified
 trials only, the single decisive clarification is scored deterministically as `gap_correct`; complete trials have

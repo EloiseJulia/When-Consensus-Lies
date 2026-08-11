@@ -25,7 +25,7 @@
   {{ endif }}
 </div>
 
-<div style="margin-top:16px;">
+<div id="decision-area" style="margin-top:16px;">
   <p style="font-weight:600;margin-bottom:6px;">{{ T.q1 }}</p>
   <label style="display:block;margin:6px 0;padding:9px 10px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
     <input type="radio" name="accept" value="1" {{ if saved_accept == 1 }}checked{{ endif }}> {{ T.a_accept }}
@@ -46,7 +46,7 @@
 
 <input type="hidden" name="rt_ms" id="rt_ms" value="0">
 <button type="button" onclick="back_button()" class="btn btn-secondary" style="margin-top:16px;">{{ T.back }}</button>
-<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.confirm_decision }}</button>
+<button id="submit-button" type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.confirm_decision }}</button>
 
 <div id="gapbox" style="display:none;margin:12px 0 6px 8px;padding:10px;background:#fafafa;border-radius:6px;">
   <p style="font-weight:600;">{{ T.gap_q }}</p>
@@ -66,6 +66,9 @@
     if (selected && selected.value === '0' && gapbox.style.display === 'none') {
       event.preventDefault();
       gapbox.style.display = 'block';
+      document.getElementById('decision-area').style.pointerEvents = 'none';
+      document.getElementById('stars').style.pointerEvents = 'none';
+      document.getElementById('submit-button').textContent = '{{ T.submit_clarification }}';
       gapbox.scrollIntoView({behavior: 'smooth', block: 'center'});
       return;
     }
@@ -78,7 +81,9 @@
   });
   document.querySelectorAll('input[name="accept"]').forEach(function (r) {
     r.addEventListener('change', function () {
-      gapbox.style.display = (this.value === '0') ? 'block' : 'none';
+      if (this.value === '1' && gapbox.style.display !== 'none') {
+        gapbox.style.display = 'none';
+      }
     });
   });
   (function () {
