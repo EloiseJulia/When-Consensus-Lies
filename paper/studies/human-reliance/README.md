@@ -30,7 +30,7 @@ The confirmatory outcomes are the two behavioral `accept` contrasts **on undersp
 | **H-U1a** | `accept(fake) > accept(single)` |
 | **H-U2a** | `accept(dep) < accept(fake)` |
 
-Here, `accept=1` means “ready to use as-is.” On an underspecified item, the appropriate response is
+Here, `accept=1` means “the answer has enough information and can be used.” On an underspecified item, the appropriate response is
 to flag the missing convention. The two directional, one-sided tests use GEE logistic models with
 participant clustering, item fixed effects, and Mancl–DeRouen bias-reduced covariance; Holm corrects
 these two tests at family-wise α=.05.
@@ -85,7 +85,7 @@ pre-selected and is recorded, but is not used as an exclusion.
 
 Each trial uses one page. Participants choose:
 
-- **Ready to use as-is** (`accept=1`), or
+- **The answer has enough information and can be used** (`accept=1`), or
 - **Important information is missing** (`accept=0`).
 
 They then provide a required **1–5-star confidence** rating in the displayed AI answer itself

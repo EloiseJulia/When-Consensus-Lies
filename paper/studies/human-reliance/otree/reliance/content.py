@@ -41,7 +41,7 @@ UI = {
         "banner_fake": "ℹ️ Five different AI models were each asked, and all five gave this answer.",
         "banner_dep": "ℹ️ All five models were sent the <b>same prompt</b>, and that prompt did not specify one needed detail — each model filled that gap on its own.",
         "q1": "Is this answer ready to use, or is important information missing?",
-        "a_accept": "✅ Ready to use as-is",
+        "a_accept": "✅ The answer has enough information and can be used",
         "a_flag": "⚠️ Important information is missing — I'd clarify first",
         "gap_q": "You said something's missing. What is the <b>most important</b> thing to clarify?",
         "other_option": "Other",

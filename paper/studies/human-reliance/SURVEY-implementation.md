@@ -58,7 +58,7 @@ Every trial uses one consistent card:
 [ AI answer card ]   condition-specific source framing + identical answer text
 ----------------------------------------------------------------
 Is this answer ready to use, or is important information missing?
-  ( ) Ready to use as-is                  -> accept = 1
+  ( ) The answer has enough information and can be used -> accept = 1
   ( ) Important information is missing    -> accept = 0
 How confident are you that the displayed AI answer itself is correct and ready to use?  1 ★ ... 5 ★
 [ Confirm decision ]
