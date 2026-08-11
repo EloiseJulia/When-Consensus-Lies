@@ -18,10 +18,11 @@ The set has **14 items**:
 
 The complete controls prevent an “always flag” strategy (and therefore an accept baseline at floor)
 and enable the pre-registered discrimination check. For underspecified items, the answer text has
-been stripped of wording that would itself disclose the missing convention. If a participant flags an
-underspecified item, four randomized clarification options appear: one decisive **GOLD** option and
-three non-decisive distractors. Complete items use four generic options and have no scored GOLD
-question.
+been stripped of wording that would itself disclose the missing convention. The accept/flag decision
+and confidence are committed **before** clarification choices appear. If a participant flags an
+underspecified item, the second page contains four randomized substantive options—one decisive
+**GOLD** option and three non-decisive distractors—plus a fixed **Other** option. Complete items use
+four generic options plus Other and have no scored GOLD question.
 
 **Provenance (Law 6).** The predecessor set was drafted by an Anthropic-family model and independently
 reviewed by a GPT-family model. The review-driven redesign removed defective/mathematical-trap

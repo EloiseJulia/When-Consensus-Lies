@@ -107,6 +107,31 @@ def _cur_options(player):
     return [dict(i=k, text=canonical[t['perm'][k]]) for k in range(4)]
 
 
+def _trial_summary(player, round_number):
+    """Read-only summary of a submitted decision; never exposes editable fields."""
+    if round_number < 1:
+        return None
+    p = player if round_number == player.round_number else player.in_round(round_number)
+    accept = p.field_maybe_none('accept')
+    confidence = p.field_maybe_none('confidence')
+    if accept is None or confidence is None:
+        return None
+    lang = _lang(player)
+    T = _T(player)
+    t = player.participant.vars['trials'][round_number - 1]
+    it = stimuli.ITEMS[t['item']]
+    source = T['review_single'] if t['cond'] == 'single' else T['review_multi']
+    return dict(
+        number=round_number,
+        scenario=it['scenario'][lang],
+        task=it['task'][lang],
+        answer=it['answer'][lang],
+        source=source,
+        decision=T['a_accept'] if accept == 1 else T['a_flag'],
+        confidence=confidence,
+    )
+
+
 # ----------------------------------------------------------------- pages
 class Language(Page):
     """First page: choose English or Simplified Chinese (language-neutral)."""
@@ -177,7 +202,7 @@ class Comprehension(_Round1):
 
 class Trial(Page):
     form_model = 'player'
-    form_fields = ['accept', 'gap_choice', 'confidence', 'rt_ms']
+    form_fields = ['accept', 'confidence', 'rt_ms']
 
     @staticmethod
     def vars_for_template(player):
@@ -187,23 +212,51 @@ class Trial(Page):
                     is_multi=t['cond'] in ('fake', 'dep'), options=_cur_options(player),
                     models=content.MODELS,
                     single_model=content.MODELS[t['item'] % len(content.MODELS)],
-                    progress=T['trial_progress'].format(n=player.round_number, total=C.NUM_ROUNDS))
+                    progress=T['trial_progress'].format(n=player.round_number, total=C.NUM_ROUNDS),
+                    previous=_trial_summary(player, player.round_number - 1))
 
     @staticmethod
     def error_message(player, values):
         T = _T(player)
         if values.get('accept') is None:
             return T['err_need_choice']
-        if values['accept'] == 0 and values.get('gap_choice') is None:
-            return T['err_need_gap']
         if values.get('confidence') is None:
             return T['err_need_conf']
 
     @staticmethod
     def before_next_page(player, timeout_happened):
+        if player.accept == 1:
+            player.gap_correct = None
+
+
+class Clarification(Page):
+    """Second-stage question, shown only after accept/flag + confidence are committed."""
+    form_model = 'player'
+    form_fields = ['gap_choice']
+
+    @staticmethod
+    def is_displayed(player):
+        return player.accept == 0
+
+    @staticmethod
+    def vars_for_template(player):
+        T = _T(player)
+        return dict(
+            _base(player),
+            options=_cur_options(player),
+            decision=_trial_summary(player, player.round_number),
+            progress=T['clarify_progress'].format(n=player.round_number, total=C.NUM_ROUNDS),
+        )
+
+    @staticmethod
+    def error_message(player, values):
+        if values.get('gap_choice') is None:
+            return _T(player)['err_need_gap']
+
+    @staticmethod
+    def before_next_page(player, timeout_happened):
         t = _cur(player)
-        if (player.accept == 0 and t['gold_pos'] is not None
-                and player.field_maybe_none('gap_choice') is not None):
+        if t['gold_pos'] is not None:
             player.gap_correct = 1 if player.gap_choice == t['gold_pos'] else 0
         else:
             player.gap_correct = None
@@ -263,14 +316,14 @@ class Debrief(_LastRound):
         player.participant.vars['t_end'] = time.time()
 
 
-page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, Trial,
+page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, Trial, Clarification,
                  AttentionCheck, Demographics, Debrief]
 
 
 # ----------------------------------------------------------------- export (matches analysis schema)
 def custom_export(players):
     yield ['session_code', 'participant_id', 'label', 'item_id', 'condition', 'complete', 'accept', 'confidence',
-           'gap_correct', 'rt_sec', 'order_index', 'group_g', 'lang', 'passed_comprehension',
+           'gap_choice', 'gap_correct', 'rt_sec', 'order_index', 'group_g', 'lang', 'passed_comprehension',
            'passed_attention', 'total_time_sec', 'straightline_confidence', 'duplicate_id',
            'age_group', 'ai_use']
     from collections import defaultdict
@@ -299,10 +352,12 @@ def custom_export(players):
             t = trials[idx] if idx < len(trials) else {}
             item_id = stimuli.ITEMS[t['item']]['id'] if t else ''
             complete = 1 if t.get('complete') else 0
+            gap_choice = p.field_maybe_none('gap_choice')
             gc = p.field_maybe_none('gap_correct')
             rt = p.field_maybe_none('rt_ms')
             yield [p.session.code, part.code, label, item_id, t.get('cond', ''), complete,
                    p.field_maybe_none('accept'), p.field_maybe_none('confidence'),
+                   '' if gap_choice is None else gap_choice,
                    '' if gc is None else gc,
                    '' if rt is None else round(rt / 1000.0, 1),
                    idx, part.vars.get('g', ''), part.vars.get('lang', ''),

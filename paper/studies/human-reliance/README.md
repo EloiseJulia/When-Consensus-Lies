@@ -48,7 +48,8 @@ whether the dependence disclosure restores it.
 - **3 display conditions:** `single`, `fake`, `dep`.
 - Every participant sees every item once. A balanced Latin square assigns
   `condition(g, i) = CONDITIONS[(i + g) % 3]`, with arrival-round-robin `g ∈ {0,1,2}`.
-- Participant trial order and each trial’s four clarification-option order are randomized.
+- Participant trial order and each trial’s four substantive clarification-option order are randomized;
+  a fixed fifth **Other** option is appended.
 - One stable participant link serves both **English and 简体中文**; language is selected on the first
   in-page screen.
 
@@ -82,15 +83,17 @@ Instructions announce that some trials show one AI and some show five, and that 
 to use. The worked example does not state an answer key. The comprehension check’s correct option is
 pre-selected and is recorded, but is not used as an exclusion.
 
-On each trial participants choose:
+Each trial is deliberately split into two stages. In Stage 1 participants choose:
 
 - **Ready to use as-is** (`accept=1`), or
-- **Important information is missing** (`accept=0`), then, if flagging, the most important
-  clarification from four randomized options.
+- **Important information is missing** (`accept=0`).
 
 They then provide a required **1–5-star confidence** rating in the displayed AI answer itself
-(not in their own decision or selected clarification). On underspecified trials only, the
-single decisive clarification is scored deterministically as `gap_correct`; complete trials have
+(not in their own decision or selected clarification) and commit both responses. Only after that,
+participants who flagged the answer see Stage 2: four randomized clarification choices plus **Other**.
+This prevents participants from inspecting the clarification choices before deciding whether information
+is missing. A previous-page control is read-only and cannot change submitted answers. On underspecified
+trials only, the single decisive clarification is scored deterministically as `gap_correct`; complete trials have
 generic options and no gap score. Response time, language, age bracket (including Under 18), and
 AI-use frequency are retained.
 
@@ -142,7 +145,7 @@ trial-level custom export. Deploy a persistent web service and Postgres database
 One CSV row is produced per trial:
 
 ```text
-participant_id,label,item_id,condition,complete,accept,confidence,gap_correct,rt_sec,
+session_code,participant_id,label,item_id,condition,complete,accept,confidence,gap_choice,gap_correct,rt_sec,
 order_index,group_g,lang,passed_comprehension,passed_attention,total_time_sec,
 straightline_confidence,duplicate_id,age_group,ai_use
 ```

@@ -1,0 +1,39 @@
+{{ block title }}{{ progress }}{{ endblock }}
+{{ block content }}
+{{ wrap_open }}
+
+<button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleDecision()">
+  {{ T.readonly_back }}
+</button>
+<div id="decision-review" style="display:none;margin:10px 0;padding:12px;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;">
+  <p style="font-weight:600;">{{ T.review_title }}</p>
+  <p><b>{{ T.lbl_scenario }}:</b> {{ decision.scenario }}</p>
+  <p><b>{{ T.lbl_task }}:</b> {{ decision.task }}</p>
+  <p><b>{{ T.review_source }}:</b> {{ decision.source }}</p>
+  <p><b>AI:</b> "{{ decision.answer }}"</p>
+  <p><b>{{ T.review_decision }}:</b> {{ decision.decision }}</p>
+  <p><b>{{ T.review_confidence }}:</b> {{ decision.confidence }} / 5</p>
+</div>
+
+<div style="margin-top:16px;padding:12px;background:#fafafa;border-radius:6px;">
+  <p style="font-weight:600;">{{ T.gap_q }}</p>
+  {{ for o in options }}
+  <label style="display:block;margin:7px 0;">
+    <input type="radio" name="gap_choice" value="{{ o.i }}"> {{ o.text }}
+  </label>
+  {{ endfor }}
+  <label style="display:block;margin:7px 0;">
+    <input type="radio" name="gap_choice" value="4"> {{ T.other_option }}
+  </label>
+</div>
+
+<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.next }}</button>
+
+<script>
+  function toggleDecision() {
+    var box = document.getElementById('decision-review');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  }
+</script>
+{{ wrap_close }}
+{{ endblock }}

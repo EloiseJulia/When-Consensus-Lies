@@ -26,7 +26,8 @@ all ages are eligible subject to the approved consent/guardian-consent procedure
   ```
   This balanced Latin square assigns every participant every item once and balances each item across
   the three conditions. With 14 items, individual condition counts differ by at most one.
-- Trial order is shuffled per participant. The four clarification options are shuffled per trial.
+- Trial order is shuffled per participant. Four substantive clarification options are shuffled per
+  trial; a fixed fifth **Other** option is appended.
   `order_index` and `group_g` are exported.
 
 ## 3. Flow, timing, and quality gates (~11 min)
@@ -36,7 +37,8 @@ all ages are eligible subject to the approved consent/guardian-consent procedure
 3. Instructions: some tasks show one AI and some show five; some answers are fine to use.
 4. Non-scored worked example. It illustrates the task but **does not state an answer key**.
 5. Comprehension check. Its correct option is pre-selected; it is recorded but **not an exclusion**.
-6. Fourteen trials.
+6. Fourteen two-stage trials. Stage 1 commits accept/flag + confidence. Stage 2 appears only after
+   Flag and asks for the clarification; its options are hidden before the Stage-1 submission.
 7. An instructed-response attention screen after round 8 (“choose Disagree”).
 8. Age bracket (including **Under 18**) and AI-use frequency.
 9. Debrief: the agreement displays were researcher-curated illustrations, not live model outputs.
@@ -57,8 +59,11 @@ Every trial uses one consistent card:
 Is this answer ready to use, or is important information missing?
   ( ) Ready to use as-is                  -> accept = 1
   ( ) Important information is missing    -> accept = 0
-If missing: choose the most important clarification (four randomized options)
 How confident are you that the displayed AI answer itself is correct and ready to use?  1 ★ ... 5 ★
+[ Confirm decision ]
+
+IF missing, a new page then asks for the most important clarification
+  (four randomized substantive options + Other)
 ```
 
 `accept` is the behavioral decision. On U1–U9, FLAG is appropriate and the selected decisive
@@ -66,6 +71,7 @@ clarification produces deterministic `gap_correct`; C1–C5 are fully specified,
 appropriate and their generic clarification options are not scored. Confidence refers specifically
 to the **displayed AI answer**, not to the participant's decision or chosen clarification. It is a
 required **1–5-star** rating, not a 0–100 slider. Response time is recorded in seconds in export.
+The explicit previous-page control opens a **read-only review**; it never reopens editable fields.
 
 ## 5. Display conditions
 
@@ -87,7 +93,7 @@ curated illustrations and are disclosed in the debrief.
 `custom_export` produces one row per trial:
 
 ```text
-participant_id, label, item_id, condition, complete, accept, confidence, gap_correct,
+session_code, participant_id, label, item_id, condition, complete, accept, confidence, gap_choice, gap_correct,
 rt_sec, order_index, group_g, lang, passed_comprehension, passed_attention,
 total_time_sec, straightline_confidence, duplicate_id, age_group, ai_use
 ```

@@ -52,8 +52,9 @@ Exploratory: first-exposure (first-trial) read; gap-identification accuracy; age
 - Online, **within-subjects**, single ~11-minute session, bilingual (English / 简体中文, chosen on the
   first page), delivered as one participant link.
 - **3 display conditions × 14 items**, balanced **Latin square**: `condition(group g, item i) =
-  CONDITIONS[(i + g) mod 3]`, `g` assigned round-robin; trial order and the 4 clarifying-option positions
-  randomized per participant. (With 14 items over 3 conditions the per-participant condition counts are
+  CONDITIONS[(i + g) mod 3]`, `g` assigned round-robin; trial order and the four substantive
+  clarifying-option positions randomized per participant (a fixed fifth **Other** option is added).
+  (With 14 items over 3 conditions the per-participant condition counts are
   4–5 each; across the 3 groups every item appears in all three conditions.)
 - **Completeness factor:** 9 items are **underspecified** (a decisive convention is unstated → appropriate
   response = flag); 5 items are **complete** (the convention is stated → appropriate response = accept).
@@ -108,9 +109,11 @@ option pre-selected; ≤2 attempts) → **14 trials** → one instructed-respons
 trial 8) → brief demographics (**age bracket**, incl. "Under 18"; + one AI-literacy item) → **debrief**
 (discloses the curated displays and the deliberate underspecification).
 
-Per trial: **Accept-as-is vs Flag-missing-info**; if Flag → pick the most important clarifying question
-(4 options; on underspecified items exactly one is the GOLD); then a **1–5 star rating of confidence
-in the displayed AI answer itself**.
+Per trial, the participant first chooses **Accept-as-is vs Flag-missing-info** and gives a **1–5 star
+rating of confidence in the displayed AI answer itself**. This decision is then committed. Only if
+Flag was chosen does a second page reveal the clarification choices: four substantive options
+(exactly one GOLD on underspecified items) plus **Other**. Participants may view the prior page in a
+read-only panel but cannot revise the submitted decision or confidence.
 
 ## 7. Measures
 
@@ -118,7 +121,8 @@ in the displayed AI answer itself**.
 - **Secondary:** confidence (1–5 stars); **discrimination** = accept(complete) − accept(underspecified) by
   condition; objective **gap-identification** (underspecified & flagged trials only; deterministic scoring
   against the item key — no LLM judge); first-exposure accept.
-- Recorded per trial: `participant_id, label, item_id, condition, complete, accept, confidence, gap_correct,
+- Recorded per trial: `session_code, participant_id, label, item_id, condition, complete, accept, confidence,
+  gap_choice (4 = Other), gap_correct,
   rt_sec, order_index, group_g, lang` + participant-level exclusion fields.
 
 ## 8. Exclusion criteria (pre-specified, applied before analysis)

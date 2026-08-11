@@ -1,6 +1,20 @@
 {{ block title }}{{ progress }}{{ endblock }}
 {{ block content }}
 {{ wrap_open }}
+{{ if previous }}
+<button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleReview('previous-review')">
+  {{ T.readonly_previous }}
+</button>
+<div id="previous-review" style="display:none;margin:10px 0;padding:12px;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;">
+  <p style="font-weight:600;">{{ T.review_title }}</p>
+  <p><b>{{ T.lbl_scenario }}:</b> {{ previous.scenario }}</p>
+  <p><b>{{ T.lbl_task }}:</b> {{ previous.task }}</p>
+  <p><b>{{ T.review_source }}:</b> {{ previous.source }}</p>
+  <p><b>AI:</b> "{{ previous.answer }}"</p>
+  <p><b>{{ T.review_decision }}:</b> {{ previous.decision }}</p>
+  <p><b>{{ T.review_confidence }}:</b> {{ previous.confidence }} / 5</p>
+</div>
+{{ endif }}
 <div style="background:#eef2f7;border-left:4px solid #3B6EA5;padding:10px 12px;border-radius:6px;margin-bottom:12px;">
   <div><span style="color:#3B6EA5;font-weight:600;">{{ T.lbl_scenario }}</span> — {{ item.scenario }}</div>
   <div style="margin-top:4px;"><span style="color:#3B6EA5;font-weight:600;">{{ T.lbl_task }}</span> — {{ item.task }}</div>
@@ -35,13 +49,6 @@
   </label>
 </div>
 
-<div id="gapbox" style="display:none;margin:6px 0 6px 8px;padding:10px;background:#fafafa;border-radius:6px;">
-  <p style="font-weight:600;">{{ T.gap_q }}</p>
-  {{ for o in options }}
-  <label style="display:block;margin:4px 0;"><input type="radio" name="gap_choice" value="{{ o.i }}"> {{ o.text }}</label>
-  {{ endfor }}
-</div>
-
 <div style="margin-top:16px;">
   <p style="font-weight:600;margin-bottom:2px;">{{ T.conf_q }}</p>
   <div style="font-size:.85em;color:#777;margin-bottom:4px;">{{ T.conf_star_hint }}</div>
@@ -52,17 +59,16 @@
 </div>
 
 <input type="hidden" name="rt_ms" id="rt_ms" value="0">
-<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.next }}</button>
+<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.confirm_decision }}</button>
 
 <script>
+  function toggleReview(id) {
+    var box = document.getElementById(id);
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  }
   var _t0 = Date.now();
   document.querySelector('form').addEventListener('submit', function () {
     document.getElementById('rt_ms').value = Date.now() - _t0;
-  });
-  document.querySelectorAll('input[name="accept"]').forEach(function (r) {
-    r.addEventListener('change', function () {
-      document.getElementById('gapbox').style.display = (this.value === '0') ? 'block' : 'none';
-    });
   });
   (function () {
     var stars = document.querySelectorAll('#stars span'), inp = document.getElementById('confidence');

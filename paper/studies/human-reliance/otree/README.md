@@ -39,17 +39,19 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
 - **Language:** one participant link serves both languages. `Language` stores `en` or `zh` in
   `participant.vars`; later templates use its bilingual UI dictionary.
 - **Latin square:** `condition(g, i) = CONDITIONS[(i + g) % 3]`, where
-  `g = (id_in_subsession - 1) % 3`. Each participant sees all 14 items once; trial order and the
-  four clarification options are randomized.
+  `g = (id_in_subsession - 1) % 3`. Each participant sees all 14 items once; trial order and four
+  substantive clarification options are randomized, with a fixed fifth **Other** option appended.
 - **Completeness:** U1–U9 set `complete=False`: their answer silently assumes an omitted convention,
   so FLAG is appropriate and one randomized option is scored as GOLD. C1–C5 set `complete=True`:
   the convention is stated, so ACCEPT is appropriate; they show generic options and no gap score.
 - **Display cards:** all use the same card style and real-name chips (`ChatGPT`, `Gemini`, `Claude`,
   `Copilot`, `DeepSeek`). `single` shows one chip; `fake` and `dep` show five agreeing chips.
   `dep` adds a neutral shared-prompt mechanism disclosure—not a correctness verdict.
-- **Measures:** `accept` (use as-is / flag), conditional `gap_choice`, deterministic `gap_correct`,
-  required **1–5-star** `confidence` in the displayed AI answer itself, and `rt_ms` (exported as
-  `rt_sec`).
+- **Two-stage trial:** `Trial` commits `accept` (use as-is / flag), required **1–5-star**
+  `confidence` in the displayed AI answer itself, and `rt_ms`. Only when `accept=0`,
+  `Clarification` reveals `gap_choice` (four randomized options + Other) and computes deterministic
+  `gap_correct`. Read-only review panels allow participants to inspect the previous page/trial without
+  reopening editable fields.
 - **Quality fields:** comprehension is recorded but its correct option is pre-selected and it is not
   an exclusion. Attention appears after round 8. Analysis excludes only failed attention and duplicate
   IDs; fast completion and confidence straightlining are retained.
@@ -60,7 +62,7 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
 `custom_export` emits:
 
 ```text
-session_code,participant_id,label,item_id,condition,complete,accept,confidence,gap_correct,rt_sec,
+session_code,participant_id,label,item_id,condition,complete,accept,confidence,gap_choice,gap_correct,rt_sec,
 order_index,group_g,lang,passed_comprehension,passed_attention,total_time_sec,
 straightline_confidence,duplicate_id,age_group,ai_use
 ```

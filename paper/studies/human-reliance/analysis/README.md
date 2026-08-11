@@ -43,7 +43,7 @@ primary keeps power high; confidence + discrimination corroborate.
 
 ## Real-data CSV schema (one row per trial; oTree custom export)
 `session_code, participant_id, label, item_id, condition{single|fake|dep}, complete{0,1}, accept{0,1},
-confidence{1..5}, gap_correct{0,1 or blank}, rt_sec, order_index, group_g, lang,
+confidence{1..5}, gap_choice{0..4 or blank; 4=Other}, gap_correct{0,1 or blank}, rt_sec, order_index, group_g, lang,
 passed_comprehension, passed_attention, total_time_sec, straightline_confidence, duplicate_id,
 age_group, ai_use`
 
