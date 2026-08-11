@@ -1,20 +1,6 @@
 {{ block title }}{{ progress }}{{ endblock }}
 {{ block content }}
 {{ wrap_open }}
-{{ if previous }}
-<button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleReview('previous-review')">
-  {{ T.readonly_previous }}
-</button>
-<div id="previous-review" style="display:none;margin:10px 0;padding:12px;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;">
-  <p style="font-weight:600;">{{ T.review_title }}</p>
-  <p><b>{{ T.lbl_scenario }}:</b> {{ previous.scenario }}</p>
-  <p><b>{{ T.lbl_task }}:</b> {{ previous.task }}</p>
-  <p><b>{{ T.review_source }}:</b> {{ previous.source }}</p>
-  <p><b>AI:</b> "{{ previous.answer }}"</p>
-  <p><b>{{ T.review_decision }}:</b> {{ previous.decision }}</p>
-  <p><b>{{ T.review_confidence }}:</b> {{ previous.confidence }} / 5</p>
-</div>
-{{ endif }}
 <div style="background:#eef2f7;border-left:4px solid #3B6EA5;padding:10px 12px;border-radius:6px;margin-bottom:12px;">
   <div><span style="color:#3B6EA5;font-weight:600;">{{ T.lbl_scenario }}</span> — {{ item.scenario }}</div>
   <div style="margin-top:4px;"><span style="color:#3B6EA5;font-weight:600;">{{ T.lbl_task }}</span> — {{ item.task }}</div>
@@ -42,10 +28,10 @@
 <div style="margin-top:16px;">
   <p style="font-weight:600;margin-bottom:6px;">{{ T.q1 }}</p>
   <label style="display:block;margin:6px 0;padding:9px 10px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
-    <input type="radio" name="accept" value="1"> {{ T.a_accept }}
+    <input type="radio" name="accept" value="1" {{ if saved_accept == 1 }}checked{{ endif }}> {{ T.a_accept }}
   </label>
   <label style="display:block;margin:6px 0;padding:9px 10px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
-    <input type="radio" name="accept" value="0"> {{ T.a_flag }}
+    <input type="radio" name="accept" value="0" {{ if saved_accept == 0 }}checked{{ endif }}> {{ T.a_flag }}
   </label>
 </div>
 
@@ -55,17 +41,14 @@
   <div id="stars" style="font-size:2em;color:#f5a623;cursor:pointer;user-select:none;line-height:1;">
     <span data-v="1">&#9734;</span><span data-v="2">&#9734;</span><span data-v="3">&#9734;</span><span data-v="4">&#9734;</span><span data-v="5">&#9734;</span>
   </div>
-  <input type="hidden" name="confidence" id="confidence" value="">
+  <input type="hidden" name="confidence" id="confidence" value="{{ saved_confidence }}">
 </div>
 
 <input type="hidden" name="rt_ms" id="rt_ms" value="0">
 <button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.confirm_decision }}</button>
+<button type="button" onclick="back_button()" class="btn btn-secondary" style="margin-top:16px;">{{ T.back }}</button>
 
 <script>
-  function toggleReview(id) {
-    var box = document.getElementById(id);
-    box.style.display = box.style.display === 'none' ? 'block' : 'none';
-  }
   var _t0 = Date.now();
   document.querySelector('form').addEventListener('submit', function () {
     document.getElementById('rt_ms').value = Date.now() - _t0;
@@ -78,6 +61,7 @@
       s.addEventListener('mouseover', function () { paint(parseInt(this.getAttribute('data-v'))); });
     });
     document.getElementById('stars').addEventListener('mouseleave', function () { paint(inp.value ? parseInt(inp.value) : 0); });
+    if (inp.value) { paint(parseInt(inp.value)); }
   })();
 </script>
 {{ wrap_close }}

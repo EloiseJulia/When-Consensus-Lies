@@ -107,31 +107,6 @@ def _cur_options(player):
     return [dict(i=k, text=canonical[t['perm'][k]]) for k in range(4)]
 
 
-def _trial_summary(player, round_number):
-    """Read-only summary of a submitted decision; never exposes editable fields."""
-    if round_number < 1:
-        return None
-    p = player if round_number == player.round_number else player.in_round(round_number)
-    accept = p.field_maybe_none('accept')
-    confidence = p.field_maybe_none('confidence')
-    if accept is None or confidence is None:
-        return None
-    lang = _lang(player)
-    T = _T(player)
-    t = player.participant.vars['trials'][round_number - 1]
-    it = stimuli.ITEMS[t['item']]
-    source = T['review_single'] if t['cond'] == 'single' else T['review_multi']
-    return dict(
-        number=round_number,
-        scenario=it['scenario'][lang],
-        task=it['task'][lang],
-        answer=it['answer'][lang],
-        source=source,
-        decision=T['a_accept'] if accept == 1 else T['a_flag'],
-        confidence=confidence,
-    )
-
-
 # ----------------------------------------------------------------- pages
 class Language(Page):
     """First page: choose English or Simplified Chinese (language-neutral)."""
@@ -154,6 +129,8 @@ class Language(Page):
 
 
 class _Round1(Page):
+    allow_back_button = True
+
     @staticmethod
     def is_displayed(player):
         return player.round_number == 1
@@ -201,6 +178,7 @@ class Comprehension(_Round1):
 
 
 class Trial(Page):
+    allow_back_button = True
     form_model = 'player'
     form_fields = ['accept', 'confidence', 'rt_ms']
 
@@ -213,7 +191,8 @@ class Trial(Page):
                     models=content.MODELS,
                     single_model=content.MODELS[t['item'] % len(content.MODELS)],
                     progress=T['trial_progress'].format(n=player.round_number, total=C.NUM_ROUNDS),
-                    previous=_trial_summary(player, player.round_number - 1))
+                    saved_accept=player.field_maybe_none('accept'),
+                    saved_confidence=player.field_maybe_none('confidence') or '')
 
     @staticmethod
     def error_message(player, values):
@@ -226,11 +205,13 @@ class Trial(Page):
     @staticmethod
     def before_next_page(player, timeout_happened):
         if player.accept == 1:
+            player.gap_choice = None
             player.gap_correct = None
 
 
 class Clarification(Page):
     """Second-stage question, shown only after accept/flag + confidence are committed."""
+    allow_back_button = True
     form_model = 'player'
     form_fields = ['gap_choice']
 
@@ -244,8 +225,8 @@ class Clarification(Page):
         return dict(
             _base(player),
             options=_cur_options(player),
-            decision=_trial_summary(player, player.round_number),
             progress=T['clarify_progress'].format(n=player.round_number, total=C.NUM_ROUNDS),
+            saved_gap=player.field_maybe_none('gap_choice'),
         )
 
     @staticmethod
@@ -263,6 +244,7 @@ class Clarification(Page):
 
 
 class AttentionCheck(Page):
+    allow_back_button = True
     form_model = 'player'
     form_fields = ['attn']
 
@@ -285,6 +267,8 @@ class AttentionCheck(Page):
 
 
 class _LastRound(Page):
+    allow_back_button = True
+
     @staticmethod
     def is_displayed(player):
         return player.round_number == C.NUM_ROUNDS

@@ -92,7 +92,8 @@ They then provide a required **1–5-star confidence** rating in the displayed A
 (not in their own decision or selected clarification) and commit both responses. Only after that,
 participants who flagged the answer see Stage 2: four randomized clarification choices plus **Other**.
 This prevents participants from inspecting the clarification choices before deciding whether information
-is missing. A previous-page control is read-only and cannot change submitted answers. On underspecified
+is missing. A real previous-page control can return to the instructions or an earlier trial; earlier
+responses may be edited and the revised values are retained. On underspecified
 trials only, the single decisive clarification is scored deterministically as `gap_correct`; complete trials have
 generic options and no gap score. Response time, language, age bracket (including Under 18), and
 AI-use frequency are retained.

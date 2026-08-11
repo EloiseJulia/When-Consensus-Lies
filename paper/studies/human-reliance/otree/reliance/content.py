@@ -7,6 +7,7 @@ MODELS = ["ChatGPT", "Gemini", "Claude", "Copilot", "DeepSeek"]
 UI = {
     "en": {
         "next": "Continue",
+        "back": "Back to previous page",
         "consent_title": "Making sense of AI assistants' answers",
         "consent_p1": "You are invited to a short (about 10 minute) study about how people read answers from AI assistants. You will look at 14 short work situations and, for each, make one quick decision and one rating.",
         "consent_p2": "Some details about the study's exact purpose are held back so your answers stay natural; they will be fully explained at the end. There are no risks beyond ordinary computer use. Participation is voluntary and anonymous; you can stop anytime by closing the window.",
@@ -90,6 +91,7 @@ UI = {
     },
     "zh": {
         "next": "继续",
+        "back": "返回上一页",
         "consent_title": "看懂 AI 助手的回答",
         "consent_p1": "诚邀您参加一项约 10 分钟的短研究，关于人们如何阅读 AI 助手的回答。您会看 14 个短小的工作场景，每个做一个快速判断和一个评分。",
         "consent_p2": "为了让回答更自然，研究的确切目的有一部分暂时不告知，会在结束时完整说明。除普通上网外无任何风险。参与自愿、匿名，可随时关闭窗口退出。",

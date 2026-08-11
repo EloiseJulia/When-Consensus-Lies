@@ -50,8 +50,9 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
 - **Two-stage trial:** `Trial` commits `accept` (use as-is / flag), required **1–5-star**
   `confidence` in the displayed AI answer itself, and `rt_ms`. Only when `accept=0`,
   `Clarification` reveals `gap_choice` (four randomized options + Other) and computes deterministic
-  `gap_correct`. Read-only review panels allow participants to inspect the previous page/trial without
-  reopening editable fields.
+  `gap_correct`. A real localized **Back to previous page / 返回上一页** control is enabled on
+  participant pages, so participants can return to the instructions or an earlier trial and edit
+  responses; the last submitted values are exported.
 - **Quality fields:** comprehension is recorded but its correct option is pre-selected and it is not
   an exclusion. Attention appears after round 8. Analysis excludes only failed attention and duplicate
   IDs; fast completion and confidence straightlining are retained.

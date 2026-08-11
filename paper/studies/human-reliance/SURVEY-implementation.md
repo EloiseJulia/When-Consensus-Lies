@@ -71,7 +71,9 @@ clarification produces deterministic `gap_correct`; C1–C5 are fully specified,
 appropriate and their generic clarification options are not scored. Confidence refers specifically
 to the **displayed AI answer**, not to the participant's decision or chosen clarification. It is a
 required **1–5-star** rating, not a 0–100 slider. Response time is recorded in seconds in export.
-The explicit previous-page control opens a **read-only review**; it never reopens editable fields.
+The **返回上一页 / Back to previous page** control uses oTree's real page navigation. It can return
+to the instructions or an earlier submitted trial, and the participant may edit that earlier response
+before continuing; the revised value is the value retained in the final export.
 
 ## 5. Display conditions
 

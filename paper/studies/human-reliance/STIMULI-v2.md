@@ -24,6 +24,10 @@ underspecified item, the second page contains four randomized substantive option
 **GOLD** option and three non-decisive distractors—plus a fixed **Other** option. Complete items use
 four generic options plus Other and have no scored GOLD question.
 
+**C5 is intentionally a complete control, not an ambiguity item:** it explicitly asks for the median
+and supplies the middle value. Its correct behavior is therefore direct acceptance; the ambiguity
+contrast is tested by U7.
+
 **Provenance (Law 6).** The predecessor set was drafted by an Anthropic-family model and independently
 reviewed by a GPT-family model. The review-driven redesign removed defective/mathematical-trap
 materials, tightened distractors, then added the five fully specified controls after review identified
