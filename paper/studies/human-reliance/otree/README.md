@@ -47,10 +47,10 @@ For a production-like preview, set `OTREE_PRODUCTION=1`, run `otree resetdb --no
 - **Display cards:** all use the same card style and real-name chips (`ChatGPT`, `Gemini`, `Claude`,
   `Copilot`, `DeepSeek`). `single` shows one chip; `fake` and `dep` show five agreeing chips.
   `dep` adds a neutral shared-prompt mechanism disclosure—not a correctness verdict.
-- **Two-stage trial:** `Trial` commits `accept` (use as-is / flag), required **1–5-star**
-  `confidence` in the displayed AI answer itself, and `rt_ms`. Only when `accept=0`,
-  `Clarification` reveals `gap_choice` (four randomized options + Other) and computes deterministic
-  `gap_correct`. A real localized **Back to previous page / 返回上一页** control is enabled on
+- **Single-page trial:** `Trial` contains `accept` (use as-is / flag), required **1–5-star**
+  `confidence` in the displayed AI answer itself, and `rt_ms`. The clarification section is hidden
+  until `accept=0`, then reveals `gap_choice` (four randomized options + Other) and computes
+  deterministic `gap_correct`. A real localized **Back to previous page / 返回上一页** control is enabled on
   participant pages, so participants can return to the instructions or an earlier trial and edit
   responses; the last submitted values are exported.
 - **Quality fields:** comprehension is recorded but its correct option is pre-selected and it is not

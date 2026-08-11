@@ -83,16 +83,16 @@ Instructions announce that some trials show one AI and some show five, and that 
 to use. The worked example does not state an answer key. The comprehension check’s correct option is
 pre-selected and is recorded, but is not used as an exclusion.
 
-Each trial is deliberately split into two stages. In Stage 1 participants choose:
+Each trial uses one page. Participants choose:
 
 - **Ready to use as-is** (`accept=1`), or
 - **Important information is missing** (`accept=0`).
 
 They then provide a required **1–5-star confidence** rating in the displayed AI answer itself
-(not in their own decision or selected clarification) and commit both responses. Only after that,
-participants who flagged the answer see Stage 2: four randomized clarification choices plus **Other**.
-This prevents participants from inspecting the clarification choices before deciding whether information
-is missing. A real previous-page control can return to the instructions or an earlier trial; earlier
+(not in their own decision or selected clarification). The clarification section is initially hidden
+and appears when they choose Flag; it sits below the Back and Confirm buttons. Confirming with Flag
+requires a clarification choice, including the fixed **Other** option. A real previous-page control can
+return to the instructions or an earlier trial; earlier
 responses may be edited and the revised values are retained. On underspecified
 trials only, the single decisive clarification is scored deterministically as `gap_correct`; complete trials have
 generic options and no gap score. Response time, language, age bracket (including Under 18), and

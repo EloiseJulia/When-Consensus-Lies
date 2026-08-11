@@ -45,13 +45,41 @@
 </div>
 
 <input type="hidden" name="rt_ms" id="rt_ms" value="0">
-<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.confirm_decision }}</button>
 <button type="button" onclick="back_button()" class="btn btn-secondary" style="margin-top:16px;">{{ T.back }}</button>
+<button type="submit" class="btn btn-primary" style="margin-top:16px;">{{ T.confirm_decision }}</button>
+
+<div id="gapbox" style="display:none;margin:12px 0 6px 8px;padding:10px;background:#fafafa;border-radius:6px;">
+  <p style="font-weight:600;">{{ T.gap_q }}</p>
+  {{ for o in options }}
+  <label style="display:block;margin:4px 0;"><input type="radio" name="gap_choice" value="{{ o.i }}"> {{ o.text }}</label>
+  {{ endfor }}
+  <label style="display:block;margin:4px 0;"><input type="radio" name="gap_choice" value="4"> {{ T.other_option }}</label>
+</div>
 
 <script>
   var _t0 = Date.now();
-  document.querySelector('form').addEventListener('submit', function () {
+  var form = document.querySelector('form');
+  var gapbox = document.getElementById('gapbox');
+  form.addEventListener('submit', function (event) {
+    var selected = document.querySelector('input[name="accept"]:checked');
+    var gap = document.querySelector('input[name="gap_choice"]:checked');
+    if (selected && selected.value === '0' && gapbox.style.display === 'none') {
+      event.preventDefault();
+      gapbox.style.display = 'block';
+      gapbox.scrollIntoView({behavior: 'smooth', block: 'center'});
+      return;
+    }
+    if (selected && selected.value === '0' && !gap) {
+      event.preventDefault();
+      alert('{{ T.err_need_gap }}');
+      return;
+    }
     document.getElementById('rt_ms').value = Date.now() - _t0;
+  });
+  document.querySelectorAll('input[name="accept"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      gapbox.style.display = (this.value === '0') ? 'block' : 'none';
+    });
   });
   (function () {
     var stars = document.querySelectorAll('#stars span'), inp = document.getElementById('confidence');

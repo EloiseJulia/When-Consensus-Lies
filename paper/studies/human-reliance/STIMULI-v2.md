@@ -18,9 +18,8 @@ The set has **14 items**:
 
 The complete controls prevent an “always flag” strategy (and therefore an accept baseline at floor)
 and enable the pre-registered discrimination check. For underspecified items, the answer text has
-been stripped of wording that would itself disclose the missing convention. The accept/flag decision
-and confidence are committed **before** clarification choices appear. If a participant flags an
-underspecified item, the second page contains four randomized substantive options—one decisive
+been stripped of wording that would itself disclose the missing convention. The clarification section is initially hidden and appears after the participant selects Flag. If a
+participant flags an underspecified item, it contains four randomized substantive options—one decisive
 **GOLD** option and three non-decisive distractors—plus a fixed **Other** option. Complete items use
 four generic options plus Other and have no scored GOLD question.
 

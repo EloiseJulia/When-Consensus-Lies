@@ -180,7 +180,7 @@ class Comprehension(_Round1):
 class Trial(Page):
     allow_back_button = True
     form_model = 'player'
-    form_fields = ['accept', 'confidence', 'rt_ms']
+    form_fields = ['accept', 'confidence', 'gap_choice', 'rt_ms']
 
     @staticmethod
     def vars_for_template(player):
@@ -199,12 +199,17 @@ class Trial(Page):
         T = _T(player)
         if values.get('accept') is None:
             return T['err_need_choice']
+        if values['accept'] == 0 and values.get('gap_choice') is None:
+            return T['err_need_gap']
         if values.get('confidence') is None:
             return T['err_need_conf']
 
     @staticmethod
     def before_next_page(player, timeout_happened):
-        if player.accept == 1:
+        t = _cur(player)
+        if player.accept == 0 and t['gold_pos'] is not None:
+            player.gap_correct = 1 if player.gap_choice == t['gold_pos'] else 0
+        else:
             player.gap_choice = None
             player.gap_correct = None
 
@@ -300,7 +305,7 @@ class Debrief(_LastRound):
         player.participant.vars['t_end'] = time.time()
 
 
-page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, Trial, Clarification,
+page_sequence = [Language, Consent, Instructions, WorkedExample, Comprehension, Trial,
                  AttentionCheck, Demographics, Debrief]
 
 

@@ -37,8 +37,8 @@ all ages are eligible subject to the approved consent/guardian-consent procedure
 3. Instructions: some tasks show one AI and some show five; some answers are fine to use.
 4. Non-scored worked example. It illustrates the task but **does not state an answer key**.
 5. Comprehension check. Its correct option is pre-selected; it is recorded but **not an exclusion**.
-6. Fourteen two-stage trials. Stage 1 commits accept/flag + confidence. Stage 2 appears only after
-   Flag and asks for the clarification; its options are hidden before the Stage-1 submission.
+6. Fourteen single-page trials. The clarification section is initially hidden and appears only after
+   Flag; it is placed below the Back and Confirm buttons and must be completed before submission.
 7. An instructed-response attention screen after round 8 (“choose Disagree”).
 8. Age bracket (including **Under 18**) and AI-use frequency.
 9. Debrief: the agreement displays were researcher-curated illustrations, not live model outputs.

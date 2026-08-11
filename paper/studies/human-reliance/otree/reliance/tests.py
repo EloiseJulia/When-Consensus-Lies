@@ -14,9 +14,8 @@ class PlayerBot(Bot):
             yield WorkedExample
             yield Comprehension, dict(comp=C.COMP_CORRECT)
         accept = random.choice([0, 1])
-        yield Trial, dict(accept=accept, confidence=random.randint(1, 5), rt_ms=10000)
-        if accept == 0:
-            yield Clarification, dict(gap_choice=random.randint(0, 4))
+        yield Trial, dict(accept=accept, gap_choice=(random.randint(0, 4) if accept == 0 else None),
+                          confidence=random.randint(1, 5), rt_ms=10000)
         if self.round_number == C.ATTENTION_ROUND:
             yield AttentionCheck, dict(attn=0)
         if self.round_number == C.NUM_ROUNDS:

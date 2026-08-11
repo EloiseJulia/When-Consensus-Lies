@@ -111,8 +111,8 @@ trial 8) → brief demographics (**age bracket**, incl. "Under 18"; + one AI-lit
 
 Per trial, the participant first chooses **Accept-as-is vs Flag-missing-info** and gives a **1–5 star
 rating of confidence in the displayed AI answer itself**. This decision is then committed. Only if
-Flag was chosen does a second page reveal the clarification choices: four substantive options
-(exactly one GOLD on underspecified items) plus **Other**. The real **Back to previous page /
+Flag was chosen does the hidden clarification section reveal four substantive options
+(exactly one GOLD on underspecified items) plus **Other**, below the navigation buttons. The real **Back to previous page /
 返回上一页** control can return to the instructions or an earlier trial; participants may edit a
 prior response, and the last submitted values are retained.
 
