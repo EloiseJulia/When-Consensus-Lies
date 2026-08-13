@@ -146,18 +146,18 @@ The appeal rests on an inference that is rarely stated but easy to reconstruct: 
 \emph{different} models concur, their agreement must reflect independent perspectives, and independent
 perspectives must make the verdict more trustworthy. That warrant borrows from an old and
 specific idea. From the Condorcet Jury Theorem to the wisdom of crowds, aggregation improves reliability
-\emph{only when} the judgments being combined are competent and carry \emph{sufficiently independent}
+only when the judgments being combined are competent and carry \emph{sufficiently independent}
 errors~\cite{condorcet,ladha1992,surowiecki2004}. Cognitive diversity, not sheer group size, is
 what lets a crowd outperform its ablest member~\cite{hongpage2004}, and social influence that erodes that
 independence produces confident convergence on error rather than accuracy~\cite{lorenz2011}. A same-prompt interface imports this warrant,
 but it also imports its precondition, and it is far from obvious that sending one prompt to five models
-produces five \emph{independent} interpretations of the task. We show that the middle links of the chain can
+produces five \emph{independent} interpretations of the task. We show that the middle link of that chain can
 break: \emph{different models do not guarantee independent interpretations or evidence}. In short,
 \textbf{model diversity is not necessarily evidence diversity}: when evidence
 independence is unknown, especially when inputs may lack a decisive disambiguating condition, consensus alone
 is not sufficient evidence of correctness. Same-prompt pluralism can multiply answers without multiplying evidence.
 
-We identify \emph{when} it does, and when it does not, for a class of underspecified tasks. Consider a
+We identify when it does, and when it does not, for a class of underspecified tasks. Consider a
 function asked for the quarter that contains a given month. Every model may adopt the familiar calendar
 convention (January--March is Q1), while a fiscal-year start lost at an upstream handoff makes a different
 answer correct. Every agent returns the same quarter, the pipeline ships a mis-bucketed value into a
@@ -177,9 +177,9 @@ previews the setup and result). We call the wrong-consensus failure
 claim), and the structural condition that produces it \emph{fake redundancy}: apparent
 redundancy that, under the shared information boundary we test, is not sufficient as independent corroboration
 because all agents inherit the same lossy representation of the task. An agent's default is often a \emph{locally reasonable} inference from the
-underspecified prompt, not model irrationality; the harm is the \emph{silent}, correlated convergence of
+underspecified prompt, not model irrationality; the harm is the silent, correlated convergence of
 many agents on one such reading \emph{without} flagging that the task admits others.
-Our goal is to \emph{characterize} and \emph{detect} this failure \emph{mode}---and to isolate the mechanism
+Our goal is to characterize and detect this failure mode---and to isolate the mechanism
 (\emph{where} the decisive disambiguator lies) that produces it---rather than to estimate its real-world
 prevalence: our items are deliberately constructed and screened by an empirical default check
 (\S\ref{sec:benchmark}), and we claim no generality beyond the tested items and models.
@@ -191,9 +191,9 @@ they can form an \emph{interpretive monoculture}~\cite{kleinberg2021monoculture}
 artifact of a shared prior rather than corroborating evidence.
 
 We present two linked studies. \emph{Study~1} documents the failure (\S\ref{sec:results}): where and why
-nominally diverse agents silently converge on the same wrong reading---and why adding agents, mixing vendors,
+nominally diverse agents converge on the same wrong reading---and why adding agents, mixing vendors,
 or letting them debate does not rescue them. That raises a sharper question: if the failure is hard to
-\emph{prevent}, can we at least \emph{see it coming}? \emph{Study~2} answers it (\S\ref{sec:study2}) with a
+prevent, can we at least see it coming? \emph{Study~2} answers it (\S\ref{sec:study2}) with a
 black-box, cross-vendor detector that flags the danger at inference time, without ever seeing the correct
 answer. Neither study aims to rediscover that frontier-model errors are
 correlated~\cite{kim2025correlated} or to decompose model uncertainty in general~\cite{hou2024decomposing}:
@@ -1222,7 +1222,7 @@ involve iteration and human participation, which we do not test, so claims about
 high-stakes domains are \emph{implications} rather than tested deployments. Construct validity rests on the
 reversed-benchmark design and the default check; two items had incomplete foil sets and are handled by the
 pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, the
-scope of the estimate is a failure \emph{mode} rather than its prevalence; the pre-registered
+scope of the estimate is a failure mode rather than its prevalence; the pre-registered
 unfiltered-sample replication does not attenuate relative to the screened rate (Construct validity, H-A14),
 so screening does not account for the effect. The abstention-silence claim rests on a rule-based (non-LLM)
 detector whose human validation is future work, as is generalization beyond the three tested domains and the
@@ -1236,14 +1236,14 @@ pre-registered test of input/evidence-diversifying interventions (retrieval-dive
 conditions) would extend the two \emph{exploratory} computational conditions we ran post hoc: cross-vendor
 \emph{synthesis} (one extra model merges all answers) and a generic \emph{role-diversified} evidence workflow
 (\S\ref{sec:phaseB}), both of which left convergent delusion unchanged. Third, the proposed
-dependence-aware multi-model interface is a concept that remains to be \emph{built and evaluated}.
+dependence-aware multi-model interface is a concept that remains to be built and evaluated.
 \paragraph{Ethics.} The study involves \emph{no human subjects}: all data are model-generated responses to
 synthetic benchmark tasks, and the ``simulated users'' are scripted, not people. The benchmark contains no
 personal, sensitive, or copyrighted material; each item is a machine-constructed underspecified task with an
 executable gold evaluator, so no human annotation labor was required. All model calls were served by an
 institution-hosted inference proxy under its provider terms; we therefore do not infer environmental impact from
 marginal billing (the run cost \$0 on the proxy, which is not a proxy for resource use). Instead we report the
-run \emph{scale}: the confirmatory run comprised 5{,}832 aggregation jobs (16{,}461 agent executions) over 54
+run scale: the confirmatory run comprised 5{,}832 aggregation jobs (16{,}461 agent executions) over 54
 items and three seeds, plus the smaller exploratory Phase~B pass ($\approx$1.5k additional calls). Additional
 Study~2 detection and intervention runs and the A13/A14 confirmatory robustness runs were also conducted, all
 at \$0 through the same institution-hosted proxy as detailed in the artifact logs; no model
