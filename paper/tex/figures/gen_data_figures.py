@@ -5,7 +5,7 @@ No titles inside figures (captions go in LaTeX). Colorblind-safe (Okabe-Ito).
 """
 import json, re, collections, os
 import numpy as np
-from paper_plot_style import plt, CB, save_fig
+from paper_plot_style import plt, CB, apply_axes_style, save_fig, style_legend
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -90,25 +90,29 @@ def fig_auroc():
         lo = [v - ci[k][0] for v, k in zip(vals, keys)]
         hi = [ci[k][1] - v for v, k in zip(vals, keys)]
         return np.array([lo, hi])
-    err_kw = dict(ecolor=CB["ink"], elinewidth=0.9, capsize=2.4, capthick=0.9)
+    err_kw = dict(ecolor=CB["ink"], elinewidth=0.9, capsize=2.6, capthick=0.9)
     x = np.arange(len(labels)); w = 0.38
-    fig, ax = plt.subplots(figsize=(6.4, 3.4))
-    b1 = ax.bar(x - w/2, lpp, w, color=CB["orange"], label=r"LPP  $H_{\mathrm{ctx}}$ (ours)",
-                yerr=yerr(lpp, lpp_ci), error_kw=err_kw)
-    b2 = ax.bar(x + w/2, se,  w, color=CB["blue"],   label=r"semantic entropy  $H_{\mathrm{seed}}$",
-                yerr=yerr(se, se_ci), error_kw=err_kw)
-    ax.axhline(d["requirements_probing_pooled"], color=CB["green"], lw=1.2, ls="--",
+    fig, ax = plt.subplots(figsize=(6.35, 3.25))
+    apply_axes_style(ax, grid_axis="y")
+    b1 = ax.bar(x - w/2, lpp, w, color=CB["blue"], label=r"LPP  $H_{\mathrm{ctx}}$ (ours)",
+                edgecolor=CB["paper"], linewidth=0.75,
+                yerr=yerr(lpp, lpp_ci), error_kw=err_kw, zorder=3)
+    b2 = ax.bar(x + w/2, se,  w, color=CB["gray"], label=r"semantic entropy  $H_{\mathrm{seed}}$",
+                edgecolor=CB["paper"], linewidth=0.75,
+                yerr=yerr(se, se_ci), error_kw=err_kw, zorder=3)
+    ax.axhline(d["requirements_probing_pooled"], color=CB["green"], lw=1.15, ls="--",
                label=f"requirements-probing (pooled {d['requirements_probing_pooled']:.3f})")
-    ax.axhline(d["chance"], color=CB["gray"], lw=1.0, ls=":", label="chance")
+    ax.axhline(d["chance"], color=CB["muted"], lw=0.9, ls=":", label="chance")
     for b, hi in ((b1[-1], lpp_ci["pooled"][1]), (b2[-1], se_ci["pooled"][1])):  # pooled value labels, above CI cap
         ax.text(b.get_x()+b.get_width()/2, hi+0.015, f"{b.get_height():.3f}",
-                ha="center", va="bottom", fontsize=8, weight="bold")
+                ha="center", va="bottom", fontsize=8, weight="bold", color=CB["ink"])
     ax.set_ylabel("AUROC (executable gold-ambiguity)")
     ax.set_xticks(x); ax.set_xticklabels(labels, rotation=0)
     ax.set_ylim(0.4, 1.0)
     # bold the pooled tick label
     ax.get_xticklabels()[-1].set_fontweight("bold")
-    ax.legend(loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.20))
+    style_legend(ax.legend(loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.20),
+                           borderpad=0.35, columnspacing=1.0, handletextpad=0.45))
     save_fig(fig, "fig_auroc_v2")
     plt.close(fig)
 
@@ -147,24 +151,27 @@ def fig_silent_abstention():
     # Frozen confirmatory values: abstention/clarification rate per regime; H1 CD.
     labels = ["H1\nabstention", "H2\nabstention", "H1 convergent\ndelusion"]
     vals   = [0.00031, 0.00323, 0.532]   # 0.031% , 0.323% , 53.2%
-    cols   = [CB["sky"], CB["sky"], CB["orange"]]
+    cols   = [CB["sky"], CB["sky"], CB["danger"]]
     x = np.arange(len(labels))
-    fig, ax = plt.subplots(figsize=(5.0, 3.4))
+    fig, ax = plt.subplots(figsize=(5.0, 3.25))
+    apply_axes_style(ax, grid_axis="y")
     ax.set_yscale("log")
-    bars = ax.bar(x, vals, width=0.62, color=cols, edgecolor="white", zorder=3)
+    bars = ax.bar(x, vals, width=0.58, color=cols, edgecolor=CB["paper"],
+                  linewidth=0.8, zorder=3)
     ax.set_ylim(1e-4, 1.2)
     for b, v in zip(bars, vals):
         lab = f"{v*100:.3f}%" if v < 0.01 else f"{v*100:.1f}%"
         ax.text(b.get_x() + b.get_width() / 2, v * 1.4, lab,
-                ha="center", va="bottom", fontsize=8)
+                ha="center", va="bottom", fontsize=8, color=CB["ink"])
     # gap between near-zero abstention and the convergent-delusion rate (~3 orders of magnitude)
     ax.annotate("", xy=(2, 0.42), xytext=(2, 0.0016),
                 arrowprops=dict(arrowstyle="<->", color=CB["ink"], lw=0.9))
-    ax.text(1.62, 0.03, r"$\approx\!10^{3}\times$ gap" + "\n(silent)", fontsize=7.5,
+    ax.text(1.58, 0.03, r"$\approx\!10^{3}\times$ gap" + "\n(silent)", fontsize=7.5,
             color=CB["ink"], ha="right", va="center")
     ax.set_ylabel("rate (log scale)")
     ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=8.5)
-    ax.grid(True, axis="y", which="both", alpha=0.18, ls="--")
+    ax.grid(True, axis="y", which="major", color=CB["grid"], linewidth=0.55, linestyle="-")
+    ax.grid(True, axis="y", which="minor", color=CB["grid"], linewidth=0.35, linestyle="-", alpha=0.55)
     save_fig(fig, "fig_silent_abstention_v2")
     plt.close(fig)
     print(f"   abstention H1={vals[0]*100:.3f}% H2={vals[1]*100:.3f}% vs CD {vals[2]*100:.1f}% (log)")

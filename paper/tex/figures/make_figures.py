@@ -40,6 +40,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
+from paper_plot_style import CB, STYLE_RCPARAMS, apply_axes_style, style_legend
 
 # ── Repo root resolution ──────────────────────────────────────────────────────
 # This script lives at <repo>/paper/tex/figures/make_figures.py
@@ -81,13 +82,13 @@ LEGEND_SIZE = 8.5
 FIG_W_SINGLE = 3.3       # inches (ACM single-column ~84 mm)
 FIG_W_DOUBLE = 6.8       # inches (ACM double-column ~172 mm)
 
-# Colorblind-friendly palette (Wong 2011 + IBM Design)
-C_H1 = "#E69F00"   # amber  — H1_external (the dangerous regime)
-C_H2 = "#56B4E9"   # sky    — H2_derivable (safe baseline)
-C_SINGLE = "#999999"
-C_SC = "#0072B2"
-C_HOMO = "#D55E00"
-C_HETERO = "#009E73"
+# Colorblind-safe cohesive palette from paper_plot_style.py
+C_H1 = CB["danger"]      # H1_external (the dangerous regime)
+C_H2 = CB["blue"]        # H2_derivable (safe baseline)
+C_SINGLE = CB["gray"]
+C_SC = CB["deep_blue"]
+C_HOMO = CB["orange"]
+C_HETERO = CB["green"]
 
 METHOD_COLOR = {
     "single":           C_SINGLE,
@@ -112,7 +113,7 @@ MODEL_CLASS_LABEL = {
 MODEL_CLASS_COLOR = {
     "homogeneous":   C_HOMO,
     "heterogeneous": C_HETERO,
-    "reasoning":     "#CC79A7",
+    "reasoning":     CB["pink"],
     "weak":          C_SINGLE,
 }
 
@@ -130,29 +131,21 @@ REGIME_COLOR = {"H1_external": C_H1, "H2_derivable": C_H2}
 def _apply_cscw_style() -> None:
     """Set global matplotlib rcParams for CSCW style."""
     plt.rcParams.update({
+        **STYLE_RCPARAMS,
         "font.size":         FONT_SIZE,
         "axes.titlesize":    FONT_SIZE,
         "axes.labelsize":    LABEL_SIZE,
         "xtick.labelsize":   TICK_SIZE,
         "ytick.labelsize":   TICK_SIZE,
         "legend.fontsize":   LEGEND_SIZE,
-        "lines.linewidth":   1.4,
-        "lines.markersize":  5,
-        "axes.spines.top":   False,
-        "axes.spines.right": False,
-        "figure.dpi":        150,
-        "savefig.dpi":       300,
-        "savefig.bbox":      "tight",
-        "savefig.pad_inches": 0.02,
-        "font.family":       "sans-serif",
-        "axes.grid":         True,
-        "grid.alpha":        0.3,
-        "grid.linestyle":    "--",
+        "lines.linewidth":   1.55,
+        "lines.markersize":  5.2,
+        "savefig.pad_inches": 0.04,
     })
 
 
 def _save(fig: plt.Figure, path: Path) -> None:
-    fig.savefig(path, format="pdf", bbox_inches="tight", pad_inches=0.02)
+    fig.savefig(path, format="pdf", bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
     print(f"  Saved: {path.name}")
 
@@ -272,7 +265,8 @@ def make_phase_diagram(df: pd.DataFrame) -> dict:
 
     data = data.sort_values(["regime", "ambiguity_k"]).reset_index(drop=True)
 
-    fig, ax = plt.subplots(figsize=(FIG_W_SINGLE + 0.4, 2.4))
+    fig, ax = plt.subplots(figsize=(FIG_W_SINGLE + 0.4, 2.35))
+    apply_axes_style(ax, grid_axis="y")
 
     for regime in ["H1_external", "H2_derivable"]:
         sub = data[data["regime"] == regime]
@@ -283,15 +277,20 @@ def make_phase_diagram(df: pd.DataFrame) -> dict:
         ks = sub["ambiguity_k"].values
         cds = sub["cd_primary"].values
         ses = sub["cd_primary_se"].values
-        ax.plot(ks, cds, "o-", color=color, label=label, zorder=3)
-        ax.fill_between(ks, cds - ses, cds + ses, alpha=0.18, color=color, zorder=2)
+        marker = "o" if regime == "H1_external" else "D"
+        ax.plot(
+            ks, cds, marker=marker, linestyle="-", color=color, label=label,
+            markerfacecolor="white", markeredgecolor=color, markeredgewidth=1.2,
+            linewidth=1.8, zorder=3,
+        )
+        ax.fill_between(ks, cds - ses, cds + ses, alpha=0.13, color=color, zorder=2)
 
     ax.set_xlabel("Ambiguity level $k$", fontsize=LABEL_SIZE)
     ax.set_ylabel("Convergent delusion (CD)", fontsize=LABEL_SIZE)
     ax.set_xticks(sorted(data["ambiguity_k"].unique()))
     ax.set_ylim(bottom=-0.02)
-    ax.axhline(0, color="black", linewidth=0.6, linestyle=":", alpha=0.5)
-    ax.legend(loc="upper left", frameon=False)
+    ax.axhline(0, color=CB["muted"], linewidth=0.7, linestyle=":", alpha=0.8)
+    style_legend(ax.legend(loc="upper left", borderpad=0.35, handlelength=1.8))
     _save(fig, _FIGURES_DIR / "fig_phase_diagram.pdf")
 
     return data.to_dict(orient="records")
@@ -398,7 +397,7 @@ def make_fake_redundancy(df: pd.DataFrame, regime_summary: dict) -> dict:
     n_nom_vals = [regime_n_agents.get(r, float("nan")) for r in regimes_plot]
 
     # Two-panel figure: left = n_eff, right = ICC
-    fig, axes = plt.subplots(1, 2, figsize=(FIG_W_DOUBLE * 0.55, 2.5))
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_W_DOUBLE * 0.55, 2.45))
 
     colors = [REGIME_COLOR[r] for r in regimes_plot]
     xlabels = [REGIME_LABEL[r] for r in regimes_plot]
@@ -406,33 +405,37 @@ def make_fake_redundancy(df: pd.DataFrame, regime_summary: dict) -> dict:
 
     # Panel A: n_eff
     ax_neff = axes[0]
+    apply_axes_style(ax_neff, grid_axis="y")
     bars_neff = ax_neff.bar(x, n_eff_vals, color=colors, alpha=0.88,
-                             edgecolor="white", width=0.5)
+                             edgecolor=CB["paper"], linewidth=0.8, width=0.5)
     # Dashed line at the NOMINAL ensemble size (mean across regimes or mode)
     nominal_mean = np.nanmean([v for v in n_nom_vals if not math.isnan(v)])
-    ax_neff.axhline(nominal_mean, color="black", linewidth=1.0,
+    ax_neff.axhline(nominal_mean, color=CB["ink"], linewidth=1.0,
                     linestyle="--", label=f"Nominal $n$≈{nominal_mean:.1f}", zorder=4)
     ax_neff.set_xticks(x)
     ax_neff.set_xticklabels(xlabels, fontsize=TICK_SIZE)
     ax_neff.set_ylabel("Effective ensemble size ($n_{{eff}}$)", fontsize=LABEL_SIZE)
     ax_neff.set_ylim(bottom=0)
-    ax_neff.legend(frameon=False, fontsize=7.5)
+    style_legend(ax_neff.legend(fontsize=7.5, loc="lower right", borderpad=0.3))
     for bar, val in zip(bars_neff, n_eff_vals):
         if not math.isnan(val):
             ax_neff.text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 0.03,
                 f"{val:.2f}",
-                ha="center", va="bottom", fontsize=7.5,
+                ha="center", va="bottom", fontsize=7.5, color=CB["ink"],
             )
-    ax_neff.set_title("(a) Effective ensemble size", fontsize=FONT_SIZE, pad=4)
+    ax_neff.text(0.02, 0.98, "(a)", transform=ax_neff.transAxes,
+             ha="left", va="top", fontsize=FONT_SIZE, fontweight="bold",
+             color=CB["ink"])
 
     # Panel B: ICC
     ax_icc = axes[1]
+    apply_axes_style(ax_icc, grid_axis="y")
     bars_icc = ax_icc.bar(x, icc_vals, color=colors, alpha=0.88,
-                           edgecolor="white", width=0.5)
-    ax_icc.axhline(0, color="black", linewidth=0.6, linestyle=":", alpha=0.5)
-    ax_icc.axhline(1, color="black", linewidth=0.5, linestyle="--", alpha=0.4)
+                       edgecolor=CB["paper"], linewidth=0.8, width=0.5)
+    ax_icc.axhline(0, color=CB["muted"], linewidth=0.7, linestyle=":", alpha=0.8)
+    ax_icc.axhline(1, color=CB["muted"], linewidth=0.6, linestyle="--", alpha=0.7)
     ax_icc.set_xticks(x)
     ax_icc.set_xticklabels(xlabels, fontsize=TICK_SIZE)
     ax_icc.set_ylabel("ICC (wrong-indicator)", fontsize=LABEL_SIZE)
@@ -443,9 +446,11 @@ def make_fake_redundancy(df: pd.DataFrame, regime_summary: dict) -> dict:
                 bar.get_x() + bar.get_width() / 2,
                 max(bar.get_height(), 0) + 0.03,
                 f"{val:.3f}",
-                ha="center", va="bottom", fontsize=7.5,
+                ha="center", va="bottom", fontsize=7.5, color=CB["ink"],
             )
-    ax_icc.set_title("(b) Inter-agent ICC", fontsize=FONT_SIZE, pad=4)
+    ax_icc.text(0.02, 0.98, "(b)", transform=ax_icc.transAxes,
+                ha="left", va="top", fontsize=FONT_SIZE, fontweight="bold",
+                color=CB["ink"])
 
     fig.tight_layout(pad=0.8)
     _save(fig, _FIGURES_DIR / "fig_fake_redundancy.pdf")
