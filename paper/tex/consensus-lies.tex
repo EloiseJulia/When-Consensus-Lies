@@ -1189,6 +1189,19 @@ and agents. For CSCW, the trust a system earns from aggregation is \emph{conting
 disambiguation, and it lapses when the interface cannot vouch for that condition. The design problem is then
 not to recruit more agents but to expose the contingency, which motivates the interface moves below.
 
+\subsection{Who is exposed: unaware under-specification}
+The mechanism is not about careless users; it is about a blind spot a user cannot see. As vibe coding lowers
+the floor for building software, more of the people specifying a task are non-experts who describe an outcome
+by intent rather than by contract, and who may omit a decisive engineering or domain convention without
+realizing that a decision hinges on it---precisely the underspecified regime we construct. Such users may be
+especially prone to the failure we study, and their natural safeguards can point at the wrong axis: consulting
+several models, or even delegating a review agent, multiplies readers of the \emph{same incomplete prompt}
+rather than the evidence behind it. Because the shared input is unchanged, our results lead us to expect
+little benefit from these moves (F2--F3; the debate and cross-vendor nulls in \S\ref{sec:phaseB}), though we
+did not test that exact workflow. The risk may compound in complex settings, where a user is least likely to
+know which convention they left unstated. We offer this as motivation for the interface moves in
+\S\ref{sec:implications}, not as an estimate of how often it occurs in the wild (\S\ref{sec:limitations}).
+
 %% =====================================================================
 \section{Design Implications for Multi-Model Interfaces}
 \label{sec:implications}
