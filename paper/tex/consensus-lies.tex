@@ -187,7 +187,11 @@ claim), and the structural condition that produces it \emph{fake redundancy}: ap
 redundancy that, under the shared information boundary we test, is not sufficient as independent corroboration
 because all agents inherit the same lossy representation of the task. An agent's default is often a \emph{locally reasonable} inference from the
 underspecified prompt, not model irrationality; the harm is the silent, correlated convergence of
-many agents on one such reading \emph{without} flagging that the task admits others.
+many agents on one such reading \emph{without} flagging that the task admits others. Mere
+under-specification (``garbage in'') would predict \emph{independent scatter}---different guesses whose
+visible disagreement is itself the signal a redundant interface is supposed to surface, prompting the user to
+supply the missing detail; what we observe instead is \emph{correlated} convergence, which erases that signal
+and turns a detectable gap into an invisible one.
 Our goal is to characterize and detect this failure mode---and to isolate the mechanism
 (\emph{where} the decisive disambiguator lies) that produces it---rather than to estimate its real-world
 prevalence: our items are deliberately constructed and screened by an empirical default check
@@ -482,7 +486,9 @@ non-Anthropic models.
 
 \emph{Default-check disclosure and construct-validity caveat.} Item selection is \emph{partly conditioned on
 the default behavior} we then measure: inclusion required that unaware capable models produce the intended
-foil. This is a construct-validity limitation of the sampling frame, and the effect is nevertheless neither a
+foil. The screen \emph{defines the population we study}---tasks a user under-specifies without realizing a
+decisive detail is missing---rather than sampling the general task stream: well-specified prompts are out of
+scope by construction, so screening scopes the regime rather than cherry-picking within it. This is a construct-validity limitation of the sampling frame, and the effect is nevertheless neither a
 difficulty artifact nor a screening artifact (threats and controls in Table~\ref{tab:threats}). Within the
 \emph{same} base H1 task, retaining the disambiguating clause ($k{=}0$, fully specified) yields convergent
 delusion $\cd\!\approx\!0$ while deleting it ($k{\ge}1$) drives $\cd$ high (R1a, \S\ref{sec:results},
