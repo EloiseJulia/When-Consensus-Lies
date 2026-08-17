@@ -51,7 +51,8 @@ or vote); collaborative and decision-support systems increasingly aggregate AI j
 The reassurance rests on a tacit inference: more models mean more perspectives, and more perspectives mean
 independent corroboration. We show that the middle link can break. When several models share one incomplete
 prompt, they can share one reading of it, so \emph{model diversity is not necessarily evidence diversity} and
-the agreement can fail \emph{silently}.
+the agreement can fail \emph{silently}: the user reads unanimity as corroboration and acts on a confidence
+the answers cannot support.
 In a pre-registered study on a reconstructed, executable-gold benchmark of \emph{underspecified} tasks, we
 vary a single factor: whether the decisive condition is present in the prompt---as a task-aware user would
 write it---or silently absent, the everyday case in which a user under-specifies a task without realizing a
@@ -203,7 +204,7 @@ nominally diverse agents converge on the same wrong reading---and why adding age
 or letting them debate does not rescue them. That raises a sharper question: if the failure is hard to
 prevent, can we at least see it coming? \emph{Study~2} answers it (\S\ref{sec:study2}) with a
 black-box, cross-vendor detector that flags the danger at inference time, without ever seeing the correct
-answer. Neither study aims to rediscover that frontier-model errors are
+answer---turning the diagnosis into a signal an interface can act on rather than a post-hoc finding. Neither study aims to rediscover that frontier-model errors are
 correlated~\cite{kim2025correlated} or to decompose model uncertainty in general~\cite{hou2024decomposing}:
 Study~1 isolates one boundary---whether the decisive disambiguator lies inside or outside the retained
 prompt, which in our data does not depend on model capability---and Study~2 builds a danger-quadrant
@@ -244,7 +245,10 @@ are load-bearing rather than incidental.
 %% =====================================================================
 \section{Consensus, Grounding, and AI-Mediated Collective Judgment}
 \label{sec:related}
-We organize related work around the assumptions our study tests, rather than around technologies.
+We organize related work around the assumptions our study tests, rather than around technologies. Our framing
+recasts multi-model agreement as a question of \emph{grounding} and \emph{evidential independence}---how
+collaborative pipelines preserve or discard the context a decision depends on---rather than one of model
+accuracy, placing it in the CSCW tradition of aggregated collective judgment.
 
 \subsection{Same-prompt multi-model comparison interfaces}
 \label{sec:interfaces}
