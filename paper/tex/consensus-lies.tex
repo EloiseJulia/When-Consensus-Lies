@@ -495,9 +495,14 @@ ambiguous items that elicit the foil could still add inflation to the observed \
 pre-registered secondary robustness extension bounds that directly with a fully unfiltered sample
 (no default screen): across 24 unfiltered $k{=}1$ items, pooled unconditioned convergent delusion is
 $\cd=0.685$ with 95\% CI $[0.521,0.839]$, and 79.2\% of unfiltered items still exhibit convergent delusion.
-The point-estimate delta relative to the screened confirmatory rate is $+0.155$ and the screened rate
-(0.53) lies within the unfiltered CI, so the result does \emph{not} attenuate, rather than being
-significantly higher, supporting H-A14 (no attenuation). Provenance
+The point-estimate delta relative to the pooled screened confirmatory rate is $+0.155$ and that pooled rate
+(0.53) lies within the unfiltered CI, so the effect does \emph{not} attenuate under unfiltering (pre-registered
+H-A14). A matched same-$k$ contrast is more conservative, and we report it for transparency: at $k{=}1$ the
+screened confirmatory rate is $\cd=0.89$ (95\% CI $[0.81,0.96]$, $n{=}19$ items) against $0.685$ unfiltered,
+so the screen does modestly \emph{amplify} the observed $k{=}1$ rate ($\approx\!+0.2$) rather than leaving it
+unchanged. We therefore read the unfiltered $0.685$ (79.2\% of items) as the screening-free lower bound: the
+convergent-delusion phenomenon survives unfiltering rather than being manufactured by the screen, even though
+the screen amplifies its magnitude. Provenance
 separation (the constructor family is outside the tested pool, so the screen is not run by an evaluated
 agent) and the R2 cross-family construction control (\S\ref{sec:results}), where a second constructor
 family builds the traps, close the same gap from a second direction.
@@ -1162,7 +1167,7 @@ Objection & Control & Evidence \\
 Just shared item difficulty & within-item $k{=}0$ vs $k{\ge}1$ on the same base task & $\Delta\cd=0.82$ \\
 H1 vs H2 are different item families & H2\_derivable boundary: clause inside $\Rightarrow$ no convergence & $\cd=0.00$ \\
 Shared prior with \emph{our} constructor & R2 built by a different vendor (Anthropic) & non-constructor $\cd=0.72$ \\
-Screening inflates the rate & unfiltered replication (Amdt~14) & no attenuation ($0.685$) \\
+Screening inflates the rate & unfiltered replication (Amdt~14) & robust unfiltered ($0.685$) \\
 Difficulty, not interpretation & dependence estimators $+$ within-item control & $\neff{=}1.10$; ICC $0.89$ \\
 \bottomrule
 \end{tabular}
@@ -1255,7 +1260,7 @@ reversed-benchmark design and the default check; two items had incomplete foil s
 pre-registered drop-\iperp{} sensitivity. Because inclusion was partly conditioned on that default check, the
 scope of the estimate is a failure mode rather than its prevalence; the pre-registered
 unfiltered-sample replication does not attenuate relative to the screened rate (Construct validity, H-A14),
-so screening does not account for the effect. The abstention-silence claim rests on a rule-based (non-LLM)
+so screening does not account for the effect, though at matched $k$ it modestly amplifies the rate. The abstention-silence claim rests on a rule-based (non-LLM)
 detector whose human validation is future work, as is generalization beyond the three tested domains and the
 roster.
 \paragraph{Future work.} Three directions follow from this study. First, a \emph{human-subjects study} (a
