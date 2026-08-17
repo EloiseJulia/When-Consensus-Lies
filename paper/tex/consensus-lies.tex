@@ -45,20 +45,24 @@
 
 \begin{abstract}
 ``$4/4$ models agree'' reads as reassurance. Same-prompt interfaces such as ChatHub~\cite{chathub2026} send
-one prompt to several language models (GPT, Claude, Gemini, \dots) and present the agreement as added
-confidence, and collaborative and decision-support systems increasingly aggregate AI judgments the same way.
+one prompt to several language models (GPT, Claude, Gemini, \dots) and return their answers together, inviting
+the user to read the apparent agreement as added confidence (some go further and compute an explicit consensus
+or vote); collaborative and decision-support systems increasingly aggregate AI judgments the same way.
 The reassurance rests on a tacit inference: more models mean more perspectives, and more perspectives mean
 independent corroboration. We show that the middle link can break. When several models share one incomplete
 prompt, they can share one reading of it, so \emph{model diversity is not necessarily evidence diversity} and
 the agreement can fail \emph{silently}.
 In a pre-registered study on a reconstructed, executable-gold benchmark of \emph{underspecified} tasks, we
-vary a single factor: whether the decisive disambiguating clause lies \emph{outside} or \emph{inside} the
-retained prompt. We measure the \emph{correlation} of errors, not just accuracy. When the clause is
-outside, independent agents across capability tiers and three model families (OpenAI, Anthropic, Google)
+vary a single factor: whether the decisive condition is present in the prompt---as a task-aware user would
+write it---or silently absent, the everyday case in which a user under-specifies a task without realizing a
+decisive detail is missing. We ask not whether the prompt is \emph{ambiguous} but whether independent agents
+converge on the \emph{same wrong} reading of it, measuring the \emph{correlation} of errors, not just
+accuracy. When the condition is
+absent, independent agents across capability tiers and three model families (OpenAI, Anthropic, Google)
 converge on the \emph{same wrong} interpretation (convergent-delusion rate $\approx\!0.53$ on our
 constructed, default-screened items), almost never
 signaling anything is missing (abstention $\approx\!0.03\%$); a nominal $k$-agent ensemble then supplies
-close to one \emph{effective} independent judgment ($\neff\!=\!1.10$). When it is inside, no tier converges
+close to one \emph{effective} independent judgment ($\neff\!=\!1.10$). When it is present, no tier converges
 on a shared wrong reading ($=\!0.00$), not even weaker, non-frontier models, and a benchmark built by a
 \emph{different} model family argues against a shared-prior-with-the-constructor artifact. We name this
 failure \emph{fake redundancy}: under a shared information boundary, nominally diverse agents form an
@@ -130,7 +134,8 @@ $\approx\!0.03\%$).}
 \section{Introduction}
 \label{sec:intro}
 Unsure about a decision, you consult not one AI but several---GPT, Claude, Gemini, and more---and they all
-agree. The interface makes the point for you: ``$4/4$ models agree.'' It is hard not to read that unanimity
+agree. Nothing on the screen says so outright, but the answers stacked side by side make the point for
+you---``$4/4$ models agree''---and it is hard not to read that apparent unanimity
 as reassurance; surely four \emph{independent} systems would not all make the \emph{same} mistake.
 \emph{Same-prompt multi-model interfaces} turn this into an everyday interaction: the user types one prompt,
 the tool broadcasts it to several language models (GPT, Claude, Gemini, and others) and returns the answers
@@ -164,14 +169,17 @@ answer correct. Every agent returns the same quarter, the pipeline ships a mis-b
 downstream budget or scheduling decision, and the ``all models agree'' display never flags that a
 fiscal-year start was ever in question. We study such \emph{underspecified} inputs: tasks from which a decisive
 disambiguating clause has been omitted, so more than one interpretation is consistent with what remains. This
-is an everyday condition when context is lost across a handoff between people, tools, and agents. We find a sharp, pre-registered, two-regime phenomenon governed not by
-how capable the models are but by \emph{where the missing information lives}. When the disambiguator lies
-\emph{outside} the retained prompt, independent agents converge on the \emph{same wrong} interpretation.
+is an everyday condition: context is lost across a handoff between people, tools, and agents, and---especially
+when a non-expert specifies a task by intent rather than by contract---a decisive boundary condition can
+simply go unstated, with neither the user nor the interface aware that a decision hinges on it. We find a sharp, pre-registered, two-regime phenomenon governed not by
+how capable the models are but by \emph{where the missing information lives}. When the decisive condition is
+absent from the prompt---the case in which a user under-specifies without realizing it---independent agents converge on the \emph{same wrong} interpretation.
 Weak models are not the culprit: frontier
 reasoners are trapped about as reliably as small ones. Nor is it any single vendor---models from OpenAI,
 Anthropic, and Google fall into the \emph{same} trap, and they do so in such lockstep that a nominal
 $k$-agent ensemble supplies the evidence of roughly one independent judgment ($\neff\!=\!1.10$). And the
-failure is \emph{silent}: the agents almost never flag that anything is missing. Move the disambiguator \emph{inside} the prompt, and the failure vanishes (Figure~\ref{fig:overview}
+failure is \emph{silent}: the agents almost never flag that anything is missing. Supply that condition---write
+the prompt as a task-aware user would---and the failure vanishes (Figure~\ref{fig:overview}
 previews the setup and result). We call the wrong-consensus failure
 \emph{convergent delusion} (a descriptive label for a shared, confident, wrong reading, not a psychological
 claim), and the structural condition that produces it \emph{fake redundancy}: apparent
@@ -369,7 +377,7 @@ are \emph{correlated} across providers as an observed property; Estornell and Li
 show that underspecification \emph{degrades} accuracy; and work on algorithmic
 monoculture~\cite{kleinberg2021monoculture} analyzes \emph{system-level} correlated outcomes across many
 decision-makers. We instead isolate a controlled, pre-registered, capability-insensitive, executable-gold
-axis---the location of the disambiguator---that switches the failure on and off while holding the base task,
+axis---whether the decisive condition is present in or silently absent from the prompt---that switches the failure on and off while holding the base task,
 the agents, and the executable verifier fixed, and we frame it as an \emph{interface-centered} question, when
 displayed multi-model agreement warrants trust, measured by convergent delusion rather than by general error
 correlation or accuracy. The detector we build (Study~2) differs in turn from clarification-based uncertainty
@@ -381,8 +389,9 @@ the CSCW question of when aggregated multi-model agreement can be trusted.
 \section{Research Questions and Hypotheses}
 \label{sec:rqs}
 We pre-registered the following (\S\ref{sec:study}; deviations in Appendix~\ref{app:deviations}).
-\textbf{RQ1 (regime):} does convergent delusion depend on the \emph{location} of the disambiguator?
-We predict high wrong-consensus when it is external (\textbf{H1\_external}) and near-zero when it is
+\textbf{RQ1 (regime):} does convergent delusion depend on whether the decisive condition is silently absent
+from the prompt or present in it? We predict high wrong-consensus when it is absent, i.e.\ external
+(\textbf{H1\_external}), and near-zero when it is
 in-prompt (\textbf{H2\_derivable}). \textbf{RQ2 (redundancy):} does adding agents add independent evidence?
 We test aggregation vs.\ a single agent (\textbf{H1a}) and quantify effective ensemble size.
 \textbf{RQ3 (capability/family):} is the failure explained by weak models or a single vendor? We compare
