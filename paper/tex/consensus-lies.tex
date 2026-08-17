@@ -857,7 +857,12 @@ Study~1 diagnoses the failure: under a shared information boundary, nominally di
 converge on the same wrong reading. This poses a concrete design problem for any collaborative or
 decision-support system that aggregates AI judgments: if displayed agreement should not be read as
 independent corroboration, the system needs a \emph{runtime signal} that its shared input may be missing
-decisive context---before it surfaces a consensus. Study~2 tests whether a system can provide that signal:
+decisive context---before it surfaces a consensus. Crucially, this burden cannot rest on the user. Whoever
+under-specifies a task is, almost by definition, least able to notice the omission---had they known which
+premise was missing, they would have written it in. LPP moves that detection off the user: rather than asking
+a non-expert to catch what they could not have known to specify, it flags at inference time that the answer
+hinges on an unstated premise, so the system can raise the question rather than let confident agreement settle
+it. Study~2 tests whether a system can provide that signal:
 can it detect, at inference time and without ground truth, that a prompt harbors a decision-relevant latent
 premise on which the model is confidently guessing? We contribute a black-box,
 cross-vendor detector for the latent-premise ambiguity behind the failure. Its target is a blind spot that the semantic-entropy line
