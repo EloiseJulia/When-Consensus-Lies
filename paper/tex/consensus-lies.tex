@@ -44,37 +44,36 @@
 }
 
 \begin{abstract}
-``$4/4$ models agree'' reads as reassurance. Same-prompt interfaces such as ChatHub~\cite{chathub2026} send
-one prompt to several language models (GPT, Claude, Gemini, \dots) and return their answers together; some
-compute an explicit consensus or vote, and collaborative and decision-support systems aggregate AI judgments
-the same way. The reassurance rests on a tacit inference: more models mean more perspectives, and more perspectives mean
+``$4/4$ models agree'' reads as reassurance. Multi-model AI systems increasingly let users consult several
+language models at once and read their agreement as a trust signal: same-prompt interfaces such as
+ChatHub~\cite{chathub2026} send one prompt to several models (GPT, Claude, Gemini, \dots) and return their
+answers together, and consensus, voting, and AI decision-support tools aggregate model judgments the same way.
+The reassurance rests on a tacit inference: more models mean more perspectives, and more perspectives mean
 independent corroboration. We show that the middle link can break. When several models share one incomplete
-prompt, they can share one reading of it, so \emph{model diversity is not necessarily evidence diversity} and
-the agreement can fail \emph{silently}: the user reads unanimity as corroboration and acts on a confidence
-the answers cannot support.
-In a pre-registered study on a reconstructed, executable-gold benchmark of \emph{underspecified} tasks, we
-vary a single factor: whether the decisive condition is present in the prompt or silently absent, the
-everyday case in which a user omits a decisive
-detail without realizing it. We ask not whether the prompt is \emph{ambiguous} but whether independent agents
-converge on the \emph{same wrong} reading of it, measuring the \emph{correlation} of errors, not just
-accuracy. When the condition is
-absent, independent agents across capability tiers and three model families (OpenAI, Anthropic, Google)
-converge on the \emph{same wrong} interpretation (convergent-delusion rate $\approx\!0.53$ on our
-constructed, default-screened items) and almost never signal anything is missing, so a nominal $k$-agent
-ensemble supplies close to one \emph{effective} independent judgment ($\neff\!=\!1.10$). When it is present,
-no tier converges on a shared wrong reading ($=\!0.00$), and a benchmark built by a
-\emph{different} model family argues against a shared-prior-with-the-constructor artifact. We name this
-failure \emph{fake redundancy}: under a shared information boundary, nominally diverse agents form an
-\emph{interpretive monoculture}. Because the failure is confidently \emph{stable}, same-prompt variation and
-state-of-the-art semantic entropy are near-blind to it by construction. We instead contribute a black-box,
-cross-vendor detector that keys on \emph{latent-premise sensitivity} (whether an answer depends on an unstated
-premise), reaching AUROC $0.895$ at inference time without ground truth, though it over-clarifies some
-unambiguous prompts. As a clarification gate with a simulated user that supplies the missing convention, it
-nearly eliminates convergent delusion, but localizes the premise only weakly and cannot supply the fix
-itself. Because people read agreement as confidence
-and rarely register whether their sources are correlated, systems aggregating AI judgments should surface
-\emph{evidential dependence}
-(whether answers rest on the same, possibly incomplete, input) rather than an agent count.
+prompt, they can share one reading of it, so \emph{model diversity is not necessarily evidence diversity}, and
+the failure is silent: users read unanimity as corroboration and act on a confidence the answers cannot
+support.
+To study this failure, we reconstruct an executable-gold benchmark of \emph{underspecified} tasks and run a
+pre-registered study that varies a single factor: whether a decisive condition is present in the prompt or
+silently absent, the everyday case in which a user omits a decisive detail without realizing it. Rather than
+asking whether a prompt is \emph{ambiguous}, we measure whether independent agents converge on the \emph{same
+wrong} reading: the correlation of errors, not just accuracy. When the condition is absent, agents across
+capability tiers and three model families (OpenAI, Anthropic, Google) converge on the same wrong
+interpretation (convergent-delusion rate $\approx\!0.53$ on our constructed, default-screened items) and
+almost never signal that anything is missing, so a nominal $k$-agent ensemble supplies close to one
+\emph{effective} independent judgment ($\neff\!=\!1.10$). The failure is structural rather than a weak-model
+artifact: stronger tiers reproduce it, a benchmark built by a \emph{different} model family reproduces it
+(arguing against a shared prior with the constructor), and convergence disappears when the condition is
+present ($=\!0.00$). We name this failure \emph{fake redundancy}: under a shared information boundary,
+nominally diverse agents form an interpretive monoculture.
+Because the failure is confidently \emph{stable}, same-prompt variation and state-of-the-art semantic entropy
+are near-blind to it by construction. We instead contribute a black-box, cross-vendor detector that keys on
+\emph{latent-premise sensitivity} (whether an answer depends on an unstated premise), reaching AUROC $0.895$
+at inference time without ground truth; used as a clarification gate with a simulated user that supplies the
+missing convention, it nearly eliminates convergent delusion. Because people read agreement as confidence and
+rarely register whether their sources are correlated, systems aggregating AI judgments should surface
+\emph{evidential dependence} (whether answers rest on the same, possibly incomplete, input) rather than a
+count of agreeing agents.
 \end{abstract}
 
 \begin{CCSXML}
