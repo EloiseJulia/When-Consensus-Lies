@@ -45,16 +45,25 @@ import pandas as pd
 from scipy.stats import norm
 
 CONDITIONS = ["single", "fake", "dep"]
+N_ITEMS_REQUIRED = 14  # within-subjects design: 9 underspecified + 5 complete
 N_ITEMS = 14
 N_UNDERSPEC = 9        # item indices 0..8 underspecified, 9..13 complete (matches stimuli.py)
 
 # ----------------------------------------------------------------- exclusions
 def apply_exclusions(df: pd.DataFrame) -> pd.DataFrame:
-    """Pre-specified exclusions: **attention-check failure and duplicate id only**. There is NO
-    minimum-time exclusion (fast responders are kept). The comprehension check is pre-selected and is
-    NOT an exclusion; confidence-straightlining is NOT an exclusion (excluding on a DV biases effects).
-    total_time_sec and straightline_confidence are recorded for description only. Blanks -> kept."""
+    """Pre-specified exclusions: completion of all ``N_ITEMS_REQUIRED`` trials, attention-check
+    failure, and duplicate id. There is NO minimum-time exclusion (fast responders are kept). The
+    comprehension check is pre-selected and is NOT an exclusion; confidence-straightlining is NOT an
+    exclusion (excluding on a DV biases effects). total_time_sec and straightline_confidence are
+    recorded for description only. Missing or blank accept rows are dropped defensively."""
     keep = df.copy()
+    if "accept" in keep and "participant_id" in keep:
+        answered = keep["accept"].notna() & keep["accept"].astype(str).str.strip().ne("")
+        answered_count = answered.groupby(keep["participant_id"]).transform("sum")
+        keep = keep[answered_count == N_ITEMS_REQUIRED]
+    if "accept" in keep:
+        answered = keep["accept"].notna() & keep["accept"].astype(str).str.strip().ne("")
+        keep = keep[answered]
     def num(c):
         return pd.to_numeric(keep[c], errors="coerce")
     if "passed_attention" in keep:
@@ -135,6 +144,8 @@ def analyze_discrimination(df: pd.DataFrame) -> dict:
 
 def secondary(df: pd.DataFrame):
     d = _design(df)
+    d["accept"] = pd.to_numeric(d["accept"], errors="coerce")
+    d = d[d["accept"].notna()]
     acc = d[d["complete"] == 0].groupby("condition", observed=True)["accept"].mean().round(3).to_dict()
     disc = (d[d["complete"] == 1].groupby("condition", observed=True)["accept"].mean()
             - d[d["complete"] == 0].groupby("condition", observed=True)["accept"].mean()).round(3).to_dict()
