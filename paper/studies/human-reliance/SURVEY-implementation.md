@@ -44,8 +44,9 @@ all ages are eligible subject to the approved consent/guardian-consent procedure
 8. Age bracket (including **Under 18**) and AI-use frequency.
 9. Debrief: the agreement displays were researcher-curated illustrations, not live model outputs.
 
-The target completion time is about **11 minutes**. Participants are excluded only for a failed
-attention check or a duplicate ID. Fast completion and uniform confidence ratings are retained;
+The target completion time is about **11 minutes**. Participants are excluded only for not completing all
+14 trials or for a failed attention check; repeat participation is permitted and is not an exclusion. Fast
+completion and uniform confidence ratings are retained;
 `total_time_sec` and `straightline_confidence` are descriptive fields only.
 
 ## 4. Trial screen and measures

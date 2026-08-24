@@ -36,8 +36,9 @@ participant clustering, item fixed effects, and Mancl–DeRouen bias-reduced cov
 these two tests at family-wise α=.05.
 
 Pre-registered secondary analyses (not in the Holm family) are the corresponding 1–5-star
-confidence contrasts, the condition × completeness discrimination interaction on `accept`, a
-first-exposure between-subjects read, and objective gap identification. The interaction asks whether
+confidence contrasts and the condition × completeness discrimination interaction on `accept`. A
+first-exposure read and objective gap identification are **exploratory** (`PREREGISTRATION.md` §7
+explains why gap identification is not secondary). The interaction asks whether
 the fake-consensus display shrinks the accept gap between complete and underspecified items, and
 whether the dependence disclosure restores it.
 
@@ -101,11 +102,14 @@ AI-use frequency are retained.
 
 ## 6. Data quality and exclusions
 
-The implemented, functional participant-level exclusions are:
+The pre-specified participant-level exclusions are exactly two:
 
-1. failed instructed-response attention check;
-2. duplicate ID.
+1. did not complete all 14 trials (an oTree room pre-creates a participant slot per seat, so unclaimed
+   seats and partway dropouts both appear in the export);
+2. failed the instructed-response attention check.
 
+There is deliberately **no duplicate-participation exclusion**: recruitment uses a single open anonymous
+link, one person may submit more than once, and repeats cannot be detected (`duplicate_id` is always 0).
 Comprehension is not excluded because its correct response is pre-selected. Fast completion and
 uniform confidence ratings are retained; `total_time_sec` and `straightline_confidence` are descriptive
 fields rather than exclusion rules.
@@ -126,13 +130,17 @@ smaller effects are plausible.
 | Conservative/smaller effect | 90 | ~.76 |
 
 At N=65, simulated null calibration was approximately .047 per test and .07 FWER, indicating mildly
-liberal small-sample GEE behavior. A permutation sensitivity analysis is pre-registered and
-calibration is re-checked at pilot.
+liberal small-sample GEE behavior. A permutation sensitivity analysis is pre-registered and is reported
+alongside the GEE result for both confirmatory contrasts.
 
-Before launch, run and discard a mandatory **n≈20 go/no-go pilot**. Proceed only if single-condition
-underspecified acceptance is ~.35–.75; fake minus single acceptance is at least +5 percentage points
-in the predicted direction; gap-identification accuracy is below .90 (otherwise harden distractors);
-and fewer than 40% of participants correctly guess the hypothesis.
+A design-validation pilot was run before freeze (session `9loic7o5`, 5 completers, 4 after the attention
+check) on an **earlier version of the instrument**; its data are excluded and its results are recorded as
+diagnostics in `PREREGISTRATION.md` §11.1. Because that pilot was far below the intended n≈20 and predates
+the current items and copy, the go/no-go function was moved **inside** the confirmatory collection: at the
+first **20 analyzable completers** a single interim check verifies that single-condition underspecified
+acceptance sits in ~.35–.75 and that assignment and response distributions are sound. **No condition
+contrast is computed or examined at that interim**, so the fixed-N stopping rule is preserved and no alpha
+adjustment is needed. Those 20 participants count toward the final N. See `PREREGISTRATION.md` §11.2.
 
 ## 8. Implementation and deployment
 

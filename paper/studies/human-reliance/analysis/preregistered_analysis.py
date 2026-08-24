@@ -8,12 +8,16 @@ DESIGN: within-subjects, 3 display conditions (single/fake/dep) x 14 items (9 un
 well-specified/`complete`), balanced Latin square. Underspecified items are missing a decisive
 convention (appropriate response = flag); complete items state it (appropriate response = accept).
 The 5 complete items break the "always-flag" set so the accept baseline is not at floor, AND enable a
-discrimination check (secondary). A pilot go/no-go confirms the baseline before launch.
+discrimination check (secondary). An interim instrument check at the first 20 analyzable completers
+verifies the baseline; it examines no condition contrast, so the fixed-N stopping rule is preserved
+(see PREREGISTRATION.md 11.2).
 
-PRIMARY DVs & hypotheses (on UNDERSPECIFIED items; Holm across the family of 4; one-sided; FW alpha=0.05):
+PRIMARY DV & hypotheses (on UNDERSPECIFIED items; Holm across the family of 2; one-sided; FW alpha=0.05):
   H-U1a (accept):     P(accept | fake)  > P(accept | single)      -- over-reliance from consensus
-  H-U1b (confidence): confidence(fake)  > confidence(single)
   H-U2a (accept):     P(accept | dep)   < P(accept | fake)        -- dependence disclosure corrects it
+
+SECONDARY confidence hypotheses (on UNDERSPECIFIED items; not in the Holm family):
+  H-U1b (confidence): confidence(fake)  > confidence(single)
   H-U2b (confidence): confidence(dep)   < confidence(fake)
 
 Confirmatory models (both cluster-robust, same engine as the power simulation):
@@ -51,8 +55,10 @@ N_UNDERSPEC = 9        # item indices 0..8 underspecified, 9..13 complete (match
 
 # ----------------------------------------------------------------- exclusions
 def apply_exclusions(df: pd.DataFrame) -> pd.DataFrame:
-    """Pre-specified exclusions: completion of all ``N_ITEMS_REQUIRED`` trials, attention-check
-    failure, and duplicate id. There is NO minimum-time exclusion (fast responders are kept). The
+    """The two pre-specified exclusions are completion of all ``N_ITEMS_REQUIRED`` trials and
+    attention-check failure. There is deliberately NO duplicate-participation exclusion because
+    recruitment uses an open anonymous link and repeats cannot be detected (``duplicate_id`` is always
+    0 and carries no information). There is NO minimum-time exclusion (fast responders are kept). The
     comprehension check is pre-selected and is NOT an exclusion; confidence-straightlining is NOT an
     exclusion (excluding on a DV biases effects). total_time_sec and straightline_confidence are
     recorded for description only. Missing or blank accept rows are dropped defensively."""
@@ -68,8 +74,6 @@ def apply_exclusions(df: pd.DataFrame) -> pd.DataFrame:
         return pd.to_numeric(keep[c], errors="coerce")
     if "passed_attention" in keep:
         keep = keep[num("passed_attention") != 0]
-    if "duplicate_id" in keep:
-        keep = keep[num("duplicate_id") != 1]
     return keep
 
 def _design(df: pd.DataFrame) -> pd.DataFrame:

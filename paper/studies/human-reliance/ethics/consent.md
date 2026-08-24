@@ -26,8 +26,8 @@ your responses help research on how people use AI tools.
 **Who can take part.** People of **any age** may take part. **If you are under 18, a parent or guardian
 must give permission** (‹guardian-consent procedure — CONFIRM›).
 
-**Confidentiality.** We do **not** collect your name or contact details. We record only an anonymous
-participant ID (to prevent duplicate participation) and your task responses. Data are
+**Confidentiality.** We do **not** collect your name, contact details, IP address, or location. We record
+only an automatically generated anonymous participant code and your task responses. Data are
 stored de-identified and reported only in aggregate; anonymized data may be shared publicly with the
 research (e.g., on OSF).
 

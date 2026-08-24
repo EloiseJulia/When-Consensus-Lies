@@ -30,10 +30,14 @@ Adapt to the Chang'an University IRB/ethics form. `‹…›` = fill in. Minimal
   non-deceptive alternative. **Mitigation:** the consent states some details are withheld until the end; a
   **full debrief** discloses the curation and purpose.
 - **Benefits:** No direct benefit; advances understanding of trust in multi-model AI interfaces.
-- **Privacy/data:** No direct identifiers; only an anonymous platform/label ID (duplicate
-  detection). Stored de-identified on ‹secure store›; retained ‹N years›; aggregate/anonymized results may
-  be shared publicly (e.g., OSF) with the paper.
-- **Voluntariness:** Fully voluntary; withdraw anytime by closing the window; ‹data-withdrawal procedure —
-  CONFIRM whether offered›.
+- **Privacy/data:** No direct identifiers; no IP address and no location are recorded. Only an
+  automatically generated anonymous oTree participant code is stored, alongside task responses. Stored
+  de-identified and retained per the approved protocol; aggregate/anonymized results may be shared
+  publicly (e.g., OSF) with the paper. Because recruitment uses a single open anonymous link, repeat
+  participation is neither restricted nor detectable.
+- **Voluntariness:** Fully voluntary; withdraw anytime by closing the window.
 - **Pre-registration:** Hypotheses, design, primary DVs, exclusions, and analysis frozen on OSF/AsPredicted
-  before data collection (`PREREGISTRATION.md`, `analysis/`), after a mandatory go/no-go pilot.
+  before confirmatory data collection (`PREREGISTRATION.md`, `analysis/`). A pre-freeze design-validation
+  pilot was run on an earlier version of the instrument and its data are excluded; the go/no-go function is
+  carried out as an interim instrument check at the first 20 completers, which examines no condition
+  contrast (`PREREGISTRATION.md` §11).

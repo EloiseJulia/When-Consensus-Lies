@@ -12,8 +12,13 @@ python power_analysis.py 150                      # archived power + calibration
 Requires `numpy pandas scipy statsmodels`.
 
 ## What it does (frozen)
-- Exclusions (`apply_exclusions`): comprehension, attention, duplicate, min total-time. **Confidence
-  straightlining is NOT an exclusion** (excluding on a DV biases effects) — kept as a robustness split.
+- Exclusions (`apply_exclusions`), exactly two: **did not complete all 14 trials** (an oTree room
+  pre-creates a slot per seat, so unclaimed seats and partway dropouts appear in the export as blank
+  rows) and **attention-check failure**. There is deliberately **no duplicate-participation exclusion**
+  (open anonymous link; repeats are permitted and undetectable, `duplicate_id` is always 0), **no
+  comprehension exclusion** (its correct option is pre-selected) and **no minimum-time exclusion**.
+  **Confidence straightlining is NOT an exclusion** (excluding on a DV biases effects) — kept as a
+  robustness split.
 - **PRIMARY confirmatory family = the two behavioral `accept` contrasts on UNDERSPECIFIED items**
   (GEE logistic, exchangeable, participant-clustered, item fixed effects, Mancl–DeRouen bias-reduced
   covariance):
@@ -24,9 +29,12 @@ Requires `numpy pandas scipy statsmodels`.
   - confidence contrasts H-U1b/H-U2b (GEE Gaussian, same structure) — corroborating;
   - **discrimination**: condition × completeness interaction on accept (over all 14 items) — over-reliance
     predicts fake shrinks the completeness slope [accept(complete) − accept(underspecified)], dep restores
-    it. Ceiling-robust but lower-powered, hence secondary;
+    it. Ceiling-robust but lower-powered, hence secondary.
+- **EXPLORATORY (descriptive only, no claim rests on these):**
   - first-exposure between-subjects read (each participant's first trial only);
-  - objective gap-identification by condition (underspecified, flagged trials only; conditional → biased).
+  - objective gap-identification by condition (underspecified, flagged trials only; conditional → biased,
+    and the option set pits one substantive GOLD against three formatting distractors, so it largely
+    indexes *whether* the participant flagged for a substantive reason — see `PREREGISTRATION.md` §7).
 
 ## Why this structure (from the 3-model ROI review)
 The 5 **complete** items break the "always-flag" set so the accept baseline is not at floor (the reviewers'
@@ -36,7 +44,8 @@ primary keeps power high; confidence + discrimination corroborate.
 ## Validation (self-test + archived grid, `power_analysis.py`, 150 sims/cell)
 - Self-test: rejects both primary contrasts under the pre-registered effect; ~none under the null.
 - **Calibration (null, N=65):** per-test type-I ≈ 0.047 / 0.047; FWER ≈ 0.07 (GEE is mildly liberal in
-  small samples — pre-register a permutation sensitivity test and re-confirm calibration at the pilot).
+  small samples — a permutation sensitivity test is pre-registered and reported alongside the GEE result
+  for both confirmatory contrasts).
 - **Power (pre-registered effect):** N=50 → both 0.93; **N=65 → both 0.95**; N=80 → 0.99.
 - **Power (conservative/smaller effect):** N=65 → both 0.49; **N=90 → both 0.76.** → if effects may be
   small, recruit ≈ 90.
