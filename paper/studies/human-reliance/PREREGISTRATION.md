@@ -257,8 +257,18 @@ at the interim would constitute optional stopping and is explicitly prohibited.
 These 20 participants are **not discarded**: they are part of the confirmatory dataset and count toward N.
 
 ## 12. Deviations log
-(Empty at freeze. Any post-freeze change is appended with date + reason; it does not alter the confirmatory
-analysis.)
+
+Empty at freeze. Any post-freeze change is appended here with date and reason; none alters the
+confirmatory analysis, which remains exactly as specified in §9.
+
+- **2026-08-25 — interim inspection of the confirmatory contrasts at n = 1.** At the owner's explicit
+  direction, the accept and confidence contrasts were computed and viewed on the first analyzable
+  participant, which §11.2 had reserved until the end of data collection. Recruitment had not yet begun,
+  and the dataset held one volunteer, so each condition cell contained three binary trials from a single
+  person and the observed differences are not interpretable. **Nothing was changed as a result:** the
+  items, the interface, the target N, the fixed-N stopping rule, the exclusions, and the frozen analysis
+  script are all unaltered. This entry exists so that the §11.2 statement is not left inaccurate; readers
+  may discount the interim-blindness protection accordingly.
 
 ## 13. Ethics
 
