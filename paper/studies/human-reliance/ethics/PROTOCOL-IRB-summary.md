@@ -1,12 +1,14 @@
-# IRB / ethics protocol summary (DRAFT) — human-reliance study
+# Ethics protocol summary — human-reliance study
 
-Adapt to the Chang'an University IRB/ethics form. `‹…›` = fill in. Minimal-risk, with **authorized
-(mild) deception + full debrief**; likely exempt/expedited **except** for the minors question (§age).
+Companion notes for the **HKUST(GZ) Human Research Ethics Protocol** (HAREC). Minimal-risk, with
+**authorized (mild) deception + full debrief**. The detailed field-by-field filling guide lives outside
+this repository; this file is the short internal summary.
 
 - **Title:** Do people over-rely on unanimous multi-model AI "consensus," and does surfacing its
   mechanism reduce it?
-- **PI / contact:** ‹PI name›, ‹dept›, Chang'an University, ‹email›. **Do not launch before IRB
-  determination and the pilot (see PREREGISTRATION §11).**
+- **PI / contact:** Weikai Yang, The Hong Kong University of Science and Technology (Guangzhou),
+  weikaiyang@hkust-gz.edu.cn. **Do not begin confirmatory data collection before the HAREC determination
+  is issued and the approved consent text is live in the application.**
 - **Purpose:** Test whether a "5 of 5 AI models agree" display raises acceptance/confidence in an answer
   to an underspecified task vs a single-model answer (H-U1), and whether disclosing that the five models
   share the same prompt (so their agreement is not five independent checks) reduces it (H-U2). Companion
@@ -18,10 +20,12 @@ Adapt to the Chang'an University IRB/ethics form. `‹…›` = fill in. Minimal
   and gives a 1–5 star rating of confidence in the displayed AI answer itself) → 1 attention check →
   brief demographics → **debrief**. 9 items are
   underspecified (missing a convention) and 5 are well-specified.
-- **Participants:** ‹recruit ~65–90, ~55–80 analyzable›; **all ages eligible** (we want age variation).
-  **Minors (<18) require guardian consent** — describe the guardian-consent/assent procedure, **or restrict
-  to 18+**. Recruited via a team/local channel (university pool / WeChat / a survey platform); **not**
-  Prolific (which prohibits <18).
+- **Participants:** Recruit up to 200 seats to obtain roughly 65–90 analyzable participants.
+  **Adults aged 18 or above only**; no guardian-consent procedure is used. The age restriction is
+  implemented through the recruitment channel (the link circulates only within adult networks), the
+  consent page asks participants to confirm they are 18 or above, and any response indicating an age
+  below 18 is deleted without being analysed. Recruited via a team/local channel (university networks /
+  WeChat); **not** Prolific.
 - **Recruitment/compensation:** Team-recruited volunteers; no payment.
 - **Risks:** Minimal — brief, non-sensitive workplace judgments; no distressing content. **Deception
   (mild):** the AI "answers" and the "5/5 agreement" are **curated illustrations**, not live model outputs;

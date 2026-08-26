@@ -1,4 +1,4 @@
-# Debrief (DRAFT) — shown after the final trial
+# Debrief — shown after the final trial
 
 **Thank you — here is what this study was really about.**
 
@@ -19,11 +19,14 @@ but if the models were all given the same prompt and share the same blind spot, 
 (2) whether **explaining that the models shared one prompt** helps people respond more appropriately.
 Different people saw the same tasks with different displays, which lets us compare fairly.
 
-**Your data & rights.** Your responses are stored under your anonymous ID only — no name or contact
-details. ‹If a data-withdrawal option is offered, describe it here — CONFIRM.›
+**Your data & rights.** Your responses are stored under an automatically generated anonymous code only —
+no name, contact details, network address or location are recorded. Because nothing identifying is stored,
+responses cannot be withdrawn once they have been submitted.
 
-**Questions or concerns?** Contact ‹PI name›, ‹email›. For questions about your rights as a participant,
-contact ‹IRB office / email›, protocol ‹#›.
+**Questions or concerns?** Contact Weikai Yang (weikaiyang@hkust-gz.edu.cn), The Hong Kong University of
+Science and Technology (Guangzhou). For questions about your rights as a research participant, contact the
+HKUST(GZ) Human and Artefacts Research Ethics Committee (HAREC), protocol no. [to be assigned upon
+approval].
 
 Thank you for helping us understand how people work with AI assistants.
 

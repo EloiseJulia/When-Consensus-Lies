@@ -69,6 +69,9 @@ Exploratory: first-exposure (first-trial) read; gap-identification accuracy; age
 - **All ages eligible** (no 18+ gate): we deliberately want age variation. Minors (<18) participate under
   the guardian-consent procedure of the approved protocol (§13). Because Prolific prohibits <18, all-ages
   recruitment implies a **team/local channel** (university pool / WeChat / 平台如见数), not Prolific.
+  > **Superseded on 2026-08-26, before any confirmatory data were collected.** The ethics review
+  > restricts participation to **adults aged 18 or above**, and no guardian-consent procedure is used.
+  > The original text is retained above for the record; see the deviations log (§12).
 - **Target ≈ 65 analyzable; recruit with a buffer for exclusions.** If effects may be small, **recruit ≈ 90**
   (see §10). Pre-freeze observation: roughly half of the people who open the link complete all 14 trials,
   so reaching 65 analyzable participants requires on the order of 130 link opens.
@@ -269,6 +272,19 @@ confirmatory analysis, which remains exactly as specified in §9.
   items, the interface, the target N, the fixed-N stopping rule, the exclusions, and the frozen analysis
   script are all unaltered. This entry exists so that the §11.2 statement is not left inaccurate; readers
   may discount the interim-blindness protection accordingly.
+
+- **2026-08-26 — participation restricted to adults, and the consent page expanded, at the requirement of
+  the ethics review.** The protocol submitted to the HKUST(GZ) Human and Artefacts Research Ethics
+  Committee restricts participation to people **aged 18 or above**, superseding the "all ages eligible"
+  criterion in §4, and no guardian-consent procedure is used. The age restriction is implemented through
+  the recruitment channel; the consent page now asks participants to confirm that they are 18 or above;
+  and any response indicating an age below 18 is deleted without being analysed. In the same change the
+  online consent page was expanded from two paragraphs to the sections the committee requires
+  (project description, study description, risks, benefits, compensation, voluntary participation,
+  privacy and data confidentiality, absence of obligation, consent, and contact details).
+  **No item, display condition, assignment rule, outcome measure, exclusion rule, target N, or line of
+  the analysis script was changed**, and **no confirmatory data had been collected** at the time of the
+  change.
 
 ## 13. Ethics
 
